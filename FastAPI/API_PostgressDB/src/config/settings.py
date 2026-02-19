@@ -32,6 +32,9 @@ class Settings(BaseSettings):
             )
         )
 
+    # Logging settings
+    log_level: str = "INFO"
+
     # Blob storage settings
     blob_storage_connection_string: str = ""
 
