@@ -1,17 +1,24 @@
 # Agent Instructions for FastAPI Clean Architecture Template
 
-This document provides guidance for AI agents (like Claude Code) working with this FastAPI Clean Architecture codebase.
+This document provides guidance for AI agents working with this FastAPI Clean Architecture codebase.
 
 ## Architecture Overview
 
-This project follows Clean Architecture principles with four distinct layers:
+This project follows Clean Architecture with four distinct layers:
 
-### Layer Dependencies (Inside → Outside)
 ```
 Domain (Core) → Application → Infrastructure → API
 ```
 
 **Critical Rule**: Inner layers NEVER depend on outer layers. Dependencies point inward.
+
+| Layer | Location | Contains | Depends On |
+|-------|----------|----------|------------|
+| Domain | `src/domain/` | Entities, Repository ABC (ending with `Base`) | Nothing |
+| Application | `src/application/` | Use case ABC/implementations, DTOs, Entity converters, External service ABC (ending with `Base`) | Domain only |
+| Infrastructure | `src/infrastructure/` | DB models, Repository implementations | Domain, Application |
+| API | `src/api/` | Routes, Request/Response schemas, API converters | Application (Base classes) |
+| DI Container | `src/container.py` | DI module with `injector.Module` and `Binder.bind()` | All layers |
 
 ## Key Architectural Patterns
 
@@ -20,105 +27,65 @@ Domain (Core) → Application → Infrastructure → API
 All abstract base classes (interfaces) MUST end with `Base`:
 
 ```python
-# Domain Layer - Interface
+# Domain Layer - Interface (has docstrings)
 class GreetingRepositoryBase(ABC):
     @abstractmethod
     async def create(self, greeting: Greeting) -> Greeting:
+        """Persist a new greeting entity.
+
+        Args:
+            greeting: The greeting entity to persist.
+
+        Returns:
+            The persisted Greeting entity with generated id and timestamps.
+        """
         pass
 
-# Infrastructure Layer - Implementation
-class GreetingRepository(GreetingRepositoryBase):
-    async def create(self, greeting: Greeting) -> Greeting:
-        # Implementation here
-        pass
-```
-
-### 2. ConnectionFactory Pattern with Dependency Injection
-
-The `ConnectionFactory` is injected into repositories to manage database sessions. It provides:
-- Async context manager for session lifecycle
-- Automatic commit/rollback
-- Connection pooling
-
-**Key Principle**: Repositories manage their own sessions using the injected `connection_factory`.
-
-**ConnectionFactoryBase** ([connection_factory_base.py](src/infrastructure/database/connection_factory_base.py)):
-```python
-class ConnectionFactoryBase(ABC):
-    @classmethod
-    @abstractmethod
-    async def get_session(cls) -> AsyncGenerator[AsyncSession, None]:
-        pass
-```
-
-**Repository Usage Example**:
-```python
+# Infrastructure Layer - Implementation (NO docstrings on overriding methods)
 class GreetingRepository(GreetingRepositoryBase):
     def __init__(self, connection_factory: ConnectionFactoryBase):
         self._connection_factory = connection_factory
 
     async def create(self, greeting: Greeting) -> Greeting:
         async with self._connection_factory.get_session() as session:
-            # Use session for DB operations
-            # Session automatically commits and closes
+            # Implementation here
             pass
 ```
 
+### 2. ConnectionFactory Pattern
+
+The `ConnectionFactory` is injected into repositories to manage database sessions:
+- Async context manager for session lifecycle
+- Automatic commit/rollback
+- Connection pooling
+
 **Critical Rules**:
-- Repositories receive `ConnectionFactoryBase` via dependency injection
+- Repositories receive `ConnectionFactoryBase` via constructor injection
 - Each repository method creates its own session using `async with self._connection_factory.get_session()`
 - Never manually create sessions or pass sessions to repository constructors
 
 ### 3. Dependency Injection with fastapi-injector
 
-This application uses `fastapi-injector` which integrates the `injector` library with FastAPI middleware for automatic dependency injection.
+Uses `fastapi-injector` which integrates the `injector` library with FastAPI middleware.
 
 **AppModule Setup** ([container.py](src/container.py)):
 ```python
-from injector import Module, Binder, Injector, singleton
-
 class AppModule(Module):
-    """Dependency Injection Module using injector.Module."""
-
     def configure(self, binder: Binder) -> None:
-        # Bind ConnectionFactory as singleton (shared across app)
-        binder.bind(
-            ConnectionFactoryBase,   # Interface (ABC)
-            to=ConnectionFactory,    # Implementation
-            scope=singleton,         # Singleton scope
-        )
+        binder.bind(ConnectionFactoryBase, to=ConnectionFactory, scope=singleton)
+        binder.bind(GreetingRepositoryBase, to=GreetingRepository)
+        binder.bind(GreetingUseCaseBase, to=GreetingUseCase)
 
-        # Bind Repository interfaces to implementations (request scope)
-        binder.bind(
-            GreetingRepositoryBase,  # Interface (ABC)
-            to=GreetingRepository,   # Implementation
-        )
-
-        # Bind Use Case interfaces to implementations (request scope)
-        binder.bind(
-            GreetingUseCaseBase,     # Interface (ABC)
-            to=GreetingUseCase,      # Implementation
-        )
-
-# Global injector instance
 injector = Injector([AppModule()])
 ```
 
-**Attach Injector Middleware** ([main.py](src/main.py)):
+**Attach Middleware** ([main.py](src/main.py)):
 ```python
-from fastapi_injector import attach_injector
-from src.container import injector
-
-app = FastAPI(...)
-
-# Attach injector as middleware
 attach_injector(app, injector)
 ```
 
-**Routes use Injected[Type]** ([greeting_routes.py](src/api/routes/greeting_routes.py)):
+**Route Injection** ([greeting_routes.py](src/api/routes/greeting_routes.py)):
 ```python
-from fastapi_injector import Injected
-
 @router.post("/greetings")
 async def create_greeting(
     greeting_data: GreetingCreateRequest,
@@ -130,47 +97,64 @@ async def create_greeting(
 ```
 
 **Critical Rules**:
-- Routes MUST use `Injected[BaseClass]` for dependency injection (not `Depends(...)`)
+- Routes MUST use `Injected(BaseClass)` for DI (not `Depends(...)`)
 - Routes MUST depend on Base classes (abstractions), never concrete implementations
-- Use `Binder.bind(Interface, to=Implementation)` in AppModule.configure()
-- Use `singleton` scope for shared resources (e.g., ConnectionFactory)
+- Use `singleton` scope only for shared resources (e.g., ConnectionFactory)
 - The injector automatically resolves the entire dependency chain via constructor injection
-- No manual dependency functions needed - fastapi-injector handles everything automatically
 
 ## Adding New Features
-
-### Step-by-Step Guide
 
 When adding a new feature (e.g., "User Management"), follow this order:
 
 #### 1. Domain Layer (`src/domain/`)
-Create the entity and repository interface:
 
 ```python
+# src/domain/enums/user_enum.py — define any enums the entity needs
+from enum import StrEnum
+
+class UserStatus(StrEnum):
+    """Represents the lifecycle status of a user."""
+    ACTIVE = "active"
+    SUSPENDED = "suspended"
+
 # src/domain/entities/user.py
+from dataclasses import field
+from src.domain.enums.user_enum import UserStatus
+
 @dataclass
 class User:
-    id: Optional[int]
+    id: int | None
     name: str
     email: str
+    status: UserStatus = field(default=UserStatus.ACTIVE)
 
 # src/domain/repositories/user_repository_base.py
 class UserRepositoryBase(ABC):  # Must end with Base
     @abstractmethod
     async def create(self, user: User) -> User:
+        """Persist a new user entity.
+
+        Args:
+            user: The user entity to persist.
+
+        Returns:
+            The persisted User entity with generated id.
+        """
         pass
 ```
 
 #### 2. Infrastructure Layer (`src/infrastructure/`)
-Create database model and repository implementation:
 
 ```python
-# src/infrastructure/database/models.py
+# src/infrastructure/database/models.py (add to existing models.py)
+from sqlalchemy.orm import Mapped, mapped_column
+from src.infrastructure.database.db import Base  # Base lives in db.py
+
 class UserModel(Base):
     __tablename__ = "users"
-    id = Column(Integer, primary_key=True)
-    name = Column(String, nullable=False)
-    email = Column(String, unique=True, nullable=False)
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    name: Mapped[str] = mapped_column(nullable=False)
+    email: Mapped[str] = mapped_column(unique=True, nullable=False)
 
 # src/infrastructure/repositories/user_repository.py
 class UserRepository(UserRepositoryBase):
@@ -179,13 +163,11 @@ class UserRepository(UserRepositoryBase):
 
     async def create(self, user: User) -> User:
         async with self._connection_factory.get_session() as session:
-            # Implementation using session
-            # Session automatically commits and closes
+            # Implementation — no docstring needed (base class has it)
             pass
 ```
 
 #### 3. Application Layer (`src/application/`)
-Create DTOs, converters, use case base class, and use case implementation:
 
 ```python
 # src/application/dtos/user_dto.py
@@ -214,10 +196,18 @@ class UserEntityConverter:
 class UserUseCaseBase(ABC):  # Must end with Base
     @abstractmethod
     async def create_user(self, create_user_dto: CreateUserDTO) -> UserDTO:
+        """Create a new user.
+
+        Args:
+            create_user_dto: The DTO containing the user data to create.
+
+        Returns:
+            A UserDTO representing the newly created user.
+        """
         pass
 
 # src/application/use_cases/user_use_case.py
-class UserUseCase(UserUseCaseBase):  # Extends base class
+class UserUseCase(UserUseCaseBase):
     def __init__(self, repository: UserRepositoryBase):
         self._repository = repository
 
@@ -227,36 +217,7 @@ class UserUseCase(UserUseCaseBase):  # Extends base class
         return UserEntityConverter.to_dto(created_user)
 ```
 
-#### 4. Module Bindings (`src/container.py`)
-Add bindings to the AppModule using Binder.bind():
-
-```python
-# src/container.py
-class AppModule(Module):
-    def configure(self, binder: Binder) -> None:
-        # ConnectionFactory binding (already exists)
-        binder.bind(
-            ConnectionFactoryBase,  # Interface (ABC)
-            to=ConnectionFactory,   # Implementation
-        )
-
-        # ... existing repository and use case bindings ...
-
-        # Add new repository binding
-        binder.bind(
-            UserRepositoryBase,  # Interface (ABC)
-            to=UserRepository,   # Implementation
-        )
-
-        # Add new use case binding
-        binder.bind(
-            UserUseCaseBase,     # Interface (ABC)
-            to=UserUseCase,      # Implementation
-        )
-```
-
-#### 5. API Layer (`src/api/`)
-Create API schemas, converters, and routes:
+#### 4. API Layer (`src/api/`)
 
 ```python
 # src/api/schemas/user_schema.py
@@ -280,12 +241,6 @@ class UserConverter:
         return UserResponse(id=user_dto.id, name=user_dto.name, email=user_dto.email)
 
 # src/api/routes/user_routes.py
-from fastapi import APIRouter, HTTPException, status
-from fastapi_injector import Injected
-from src.application.use_cases.user_use_case_base import UserUseCaseBase
-from src.api.schemas.user_schema import UserCreateRequest, UserResponse
-from src.api.converters.user_converter import UserConverter
-
 router = APIRouter(prefix="/api/v1", tags=["users"])
 
 @router.post("/users", response_model=UserResponse, status_code=status.HTTP_201_CREATED)
@@ -298,130 +253,181 @@ async def create_user(
     return UserConverter.to_response(created_user_dto)
 ```
 
-**Note**: No dependency functions needed! The injector automatically:
-1. Resolves `UserUseCaseBase` to `UserUseCase`
-2. Injects `UserRepositoryBase` (resolved to `UserRepository`) via constructor
-3. Injects `ConnectionFactoryBase` (resolved to `ConnectionFactory` singleton) into repository via constructor
-
-#### 6. Register Routes
-Add to [main.py](src/main.py):
+#### 5. Register Bindings and Routes
 
 ```python
-from src.api.routes.user_routes import router as user_router
+# src/container.py — add to AppModule.configure()
+binder.bind(UserRepositoryBase, to=UserRepository)
+binder.bind(UserUseCaseBase, to=UserUseCase)
 
+# src/main.py — register router
+from src.api.routes.user_routes import router as user_router
 app.include_router(user_router)
 ```
+
+**Note**: The injector automatically resolves the full dependency chain — no manual wiring needed.
 
 ## Important Conventions
 
 ### Class Naming Conventions
+
 - **ABC Classes**: Must end with `Base` (e.g., `RepositoryBase`, `UseCaseBase`)
-- **Entities**: Singular nouns (e.g., `User`, `Greeting`, `Product`)
-- **API Schemas**: Purpose suffix - `Request` for inputs, `Response` for outputs (e.g., `UserCreateRequest`, `UserResponse`)
+- **Entities**: Singular nouns (e.g., `User`, `Greeting`)
+- **Enums**: Singular noun describing the concept with `StrEnum` (e.g., `GreetingStatus`, `OrderState`)
+- **API Schemas**: `Request` for inputs, `Response` for outputs (e.g., `UserCreateRequest`, `UserResponse`)
 - **DTOs**: Frozen dataclasses with `DTO` suffix (e.g., `CreateUserDTO`, `UserDTO`, `UserListDTO`)
-- **Use Cases**: Feature + `UseCase` for implementations, Feature + `UseCaseBase` for interfaces
-  - Interface: `UserUseCaseBase` (ABC)
-  - Implementation: `UserUseCase` (extends UserUseCaseBase)
+- **Use Cases**: `UserUseCaseBase` (ABC) → `UserUseCase` (implementation)
+
+### Enum Conventions
+
+**Critical Rules** — MUST be followed for all enums:
+
+1. **Enums belong in the Domain layer** at `src/domain/enums/<feature>_enum.py` — they represent domain concepts and can be imported by any layer
+2. **Use `StrEnum`** (Python 3.11+) — values are strings, compatible with Pydantic and SQLAlchemy without extra configuration
+3. **Values are lowercase strings** matching what gets stored in the database: `ACTIVE = "active"`
+4. **SQLAlchemy models** use `Enum as SQLAlchemyEnum` from `sqlalchemy` with a named type: `Column(SQLAlchemyEnum(GreetingStatus, name="greeting_status"), nullable=False)`
+5. **Enums flow through all layers unchanged** — entity → DTO → API schema all use the same enum type directly; no conversion needed
+
+```python
+# src/domain/enums/greeting_enum.py
+from enum import StrEnum
+
+class GreetingStatus(StrEnum):
+    """Represents the lifecycle status of a greeting."""
+    ACTIVE = "active"
+    ARCHIVED = "archived"
+
+# src/infrastructure/database/models.py — define a shared type object at module level, reuse across models
+from sqlalchemy import Enum as SQLAlchemyEnum
+from sqlalchemy.orm import Mapped, mapped_column
+
+greeting_status_enum = SQLAlchemyEnum(GreetingStatus, name="greeting_status")
+status: Mapped[GreetingStatus] = mapped_column(greeting_status_enum, nullable=False, default=GreetingStatus.ACTIVE)
+
+# src/domain/entities/greeting.py — used directly on the entity
+from dataclasses import field
+status: GreetingStatus = field(default=GreetingStatus.ACTIVE)
+
+# src/application/dtos/greeting_dto.py — carried through as-is
+status: GreetingStatus
+
+# src/api/schemas/greeting_schema.py — Pydantic handles StrEnum natively
+status: GreetingStatus = Field(default=GreetingStatus.ACTIVE)
+```
 
 ### Variable and Property Naming Conventions
 
-**Critical Rules** - These MUST be followed for all variables and properties:
+**Critical Rules** — MUST be followed for all variables and properties:
 
-1. **Collections use plural names**:
-   - `List[Greeting]` → `greetings`
-   - `List[GreetingModel]` → `greeting_models`
-   - Single object → singular: `Greeting` → `greeting`
+1. **Collections use plural names**: `list[Greeting]` → `greetings`, single → `greeting`
+2. **Sets use `_set` suffix**: `set[int]` → `greeting_id_set`
+3. **Dictionaries use `_map` suffix**: `dict[int, Greeting]` → `greeting_map`
+4. **Internal properties/variables prefixed with `_`** and MUST never be accessed from outside the class: `self._repository`, `self._connection_factory`, `self._engine`
+5. **Meaningful and complete names — no shortforms or abbreviations**:
+   - Never use single-letter or abbreviated names: `g` → `greeting`, `repo` → `repository`, `conn` → `connection`
+   - Never use vague generic names: `dto` → `create_greeting_dto`, `entity` → `greeting`, `result` → `query_result`
+   - When a name is already taken, name it contextually based on its role — never append numbers: `greeting1` / `greeting2` is forbidden → use `created_greeting`, `existing_greeting`, `greeting_model` etc.
+6. **Booleans MUST read like questions**: `is_active`, `is_deleted`, `can_update`, `has_items` — never bare nouns (`success` → `is_successful`)
 
-2. **Sets use `_set` suffix**:
-   - `Set[int]` → `greeting_id_set`
+### Documentation Conventions
 
-3. **Dictionaries use `_map` suffix**:
-   - `Dict[int, Greeting]` → `greeting_map`
+**Critical Rules** — MUST be followed for all docstrings:
 
-4. **Internal properties/variables prefixed with `_`**:
-   - Properties that should never be accessed from outside the class MUST be prefixed with `_`
-   - `self._repository`, `self._connection_factory`, `self._engine`, `self._session_factory`
+1. **Only public methods get docstrings** — methods prefixed with `_` do NOT need docstrings
+2. **Implementation methods do NOT get docstrings** — only the base class abstract method needs the docstring; the overriding implementation has none
+3. **`__init__` always gets a docstring** — constructors are unique to each class, document all parameters with Args section
+4. **Class-level docstrings are always required** — one-line description of purpose
+5. **Methods not used outside the class MUST be prefixed with `_`**
+6. **Google-style docstrings** with Args, Returns, Yields, and Raises sections as applicable
 
-5. **Meaningful and complete variable names**:
-   - Never use shortforms or abbreviations unless the name would be very long
-   - `dto` alone is too vague → use `create_greeting_dto`, `greeting_dto`, `greeting_list_dto`
-   - `entity` alone is too vague → use `greeting`, `user`, `order` (the actual domain concept)
-   - `result` alone is too vague → use `query_result`, `delete_result`, `greeting_dto`
+### Code Style
 
-6. **Boolean variables/properties MUST read like questions**:
-   - `is_active`, `is_deleted`, `is_successful`, `is_sql_echo_enabled`
-   - `can_update`, `can_delete`
-   - `has_items`, `has_permission`
-   - Never use bare nouns for booleans: `success` → `is_successful`, `active` → `is_active`
+- **Maximum line length is 140 characters** — no line may exceed this limit
+- Use `ruff` for linting and formatting (configured in `pyproject.toml`)
+- After making code changes, run `ruff check src/ --fix && ruff format src/` to enforce line length and fix lint issues
+- Use modern Python type annotations: `list` not `List`, `X | None` not `Optional[X]`
 
 ### Async/Await
+
 - ALL database operations are async
 - Use `async def` and `await` for DB operations
-- AsyncSession from ConnectionFactory
-- AsyncGenerator for dependencies
 
 ### Error Handling
+
 ```python
-# In routes
-if result is None:
+if greeting_dto is None:
     raise HTTPException(
         status_code=status.HTTP_404_NOT_FOUND,
         detail="Resource not found"
     )
 ```
 
-## Database Migrations
+## External Services (Application Layer Ports)
 
-While this template uses `create_all()` for simplicity, in production:
+For external services that use cases call directly (blob storage, email, payment, etc.), the interface lives in the **application layer** — not the infrastructure layer. This keeps use cases framework-agnostic and the provider swappable with a single line change in `container.py`.
 
-1. Use Alembic for migrations
-2. Never use `create_all()` in production
-3. Version control all schema changes
-
-## Testing Strategy
-
-When writing tests:
+| File | Location | Purpose |
+|------|----------|---------|
+| `BlobStorageServiceBase` | `src/application/services/` | Interface — use cases import this |
+| `BlobStorageService` | `src/infrastructure/blob_storage/` | Azure implementation |
 
 ```python
-# Mock the repository, not the database
-@pytest.mark.asyncio
-async def test_create_user():
-    mock_repo = Mock(spec=UserRepositoryBase)
-    use_case = UserUseCase(repository=mock_repo)
+# src/application/services/blob_storage_service_base.py
+class BlobStorageServiceBase(ABC):
+    """Abstract base class — use cases depend only on this."""
 
-    result = await use_case.create_user("John", "john@example.com")
-    mock_repo.create.assert_called_once()
+    @abstractmethod
+    async def upload(self, container_name: str, blob_name: str, data: bytes, content_type: str = "application/octet-stream") -> str:
+        """Upload raw bytes, returns the blob URL."""
+
+    @abstractmethod
+    async def download(self, container_name: str, blob_name: str) -> bytes: ...
+
+    @abstractmethod
+    async def delete(self, container_name: str, blob_name: str) -> bool: ...
+
+    @abstractmethod
+    async def exists(self, container_name: str, blob_name: str) -> bool: ...
+
+# src/infrastructure/blob_storage/blob_storage_service.py
+class BlobStorageService(BlobStorageServiceBase):
+    """Azure Blob Storage implementation. Swap to S3BlobStorageService by changing container.py only."""
+
+    def __init__(self, settings: Settings) -> None:
+        self._client = BlobServiceClient.from_connection_string(settings.blob_storage_connection_string)
+
+    async def upload(self, container_name: str, blob_name: str, data: bytes, content_type: str = "application/octet-stream") -> str:
+        async with self._client.get_blob_client(container=container_name, blob=blob_name) as blob_client:
+            await blob_client.upload_blob(data, overwrite=True, content_settings=ContentSettings(content_type=content_type))
+            return blob_client.url
+
+# src/container.py — bind as singleton (shared client connection)
+binder.bind(BlobStorageServiceBase, to=BlobStorageService, scope=singleton)
 ```
 
-## Common Patterns
-
-### Handling Transactions
+**Use in a use case:**
 ```python
-# Repositories manage their own sessions
-# Transactions are automatic within each repository method
-class SomeRepository(SomeRepositoryBase):
-    def __init__(self, connection_factory: ConnectionFactoryBase):
-        self._connection_factory = connection_factory
-
-    async def operation_1(self) -> None:
-        async with self._connection_factory.get_session() as session:
-            # DB operations here
-            # Auto-commit on success, rollback on exception
-            pass
-
-    async def operation_2(self) -> None:
-        async with self._connection_factory.get_session() as session:
-            # DB operations here
-            pass
+class GreetingUseCase(GreetingUseCaseBase):
+    def __init__(self, repository: GreetingRepositoryBase, blob_storage_service: BlobStorageServiceBase) -> None:
+        self._repository = repository
+        self._blob_storage_service = blob_storage_service
 ```
 
-### Multiple Repository Operations
+**To switch providers**: Create `S3BlobStorageService(BlobStorageServiceBase)` in `src/infrastructure/blob_storage/` and change `to=BlobStorageService` → `to=S3BlobStorageService` in `container.py`. The use case is untouched.
 
-With fastapi-injector, use cases with multiple repository dependencies are automatically resolved via constructor injection:
+**Settings**: Add connection string to `src/config/settings.py` (loaded from env var automatically):
+```python
+blob_storage_connection_string: str = ""
+```
+
+---
+
+## Multiple Repository Use Cases
+
+Use cases with multiple repositories are resolved automatically via constructor injection:
 
 ```python
-# Use case with multiple repositories
-class MultiUseCase(MultiUseCaseBase):
+class OrderUseCase(OrderUseCaseBase):
     def __init__(
         self,
         user_repository: UserRepositoryBase,
@@ -429,214 +435,63 @@ class MultiUseCase(MultiUseCaseBase):
     ):
         self._user_repository = user_repository
         self._order_repository = order_repository
-
-    async def process_order(self, user_id: int, order_data: dict) -> Order:
-        # Both repositories have ConnectionFactory injected automatically
-        user = await self._user_repository.get_by_id(user_id)
-        order = await self._order_repository.create(order_data)
-        return order
-
-# In routes - automatic injection of use case with all dependencies
-@router.post("/orders")
-async def create_order(
-    order_data: OrderCreateRequest,
-    use_case: MultiUseCaseBase = Injected(MultiUseCaseBase),
-) -> OrderResponse:
-    order = await use_case.process_order(order_data.user_id, order_data)
-    return OrderResponse(**order.__dict__)
 ```
 
-### Adding New Bindings to AppModule
-```python
-# In src/container.py
-from injector import Module, Binder, singleton
+## Anti-Patterns to Avoid
 
-class AppModule(Module):
-    def configure(self, binder: Binder) -> None:
-        # Bind ConnectionFactory as singleton (required for all repositories)
-        binder.bind(
-            ConnectionFactoryBase,  # Interface (ABC)
-            to=ConnectionFactory,   # Implementation class
-            scope=singleton,        # Singleton scope
-        )
-
-        # ... existing repository and use case bindings ...
-
-        # Bind new repository using Binder.bind() (request scope by default)
-        binder.bind(
-            NewRepositoryBase,  # Interface (ABC)
-            to=NewRepository,   # Implementation class
-        )
-
-        # Bind new use case using Binder.bind() (request scope by default)
-        binder.bind(
-            NewUseCaseBase,     # Interface (ABC)
-            to=NewUseCase,      # Implementation class
-        )
-```
+- **Don't pass sessions to repository constructors** — inject `ConnectionFactoryBase` instead
+- **Don't use `Depends()`** — use `Injected(BaseClass)` with fastapi-injector
+- **Don't bypass use cases in routes** — routes should never call repositories directly
+- **Don't let Domain depend on Infrastructure** — no `from src.infrastructure...` in domain layer
+- **Don't forget `Base` suffix on ABC classes** — `UserRepositoryBase`, not `UserRepository(ABC)`
+- **Don't use concrete types in route signatures** — always use base classes: `Injected(UserUseCaseBase)`
+- **Don't create instances manually** — let the injector resolve the dependency chain
+- **Don't forget to bind in AppModule** — every new base/implementation pair needs `binder.bind()`
+- **Don't forget `attach_injector(app, injector)`** — must be called before including routers
+- **Don't use `singleton` for repositories/use cases** — only `ConnectionFactory` and external service clients (e.g. `BlobStorageService`) should be singleton
 
 ## Configuration
 
-Environment variables are managed in:
-- [config.py](src/infrastructure/database/config.py) - Database settings
-- [.env](.env.example) - Environment file (copy from .env.example)
+Environment variables are managed in [settings.py](src/config/settings.py) and loaded from `.env`.
 
 Never hardcode configuration values.
 
 ## Debugging Tips
 
-1. **Enable SQL Logging**: Set `IS_SQL_ECHO_ENABLED=true` in .env
+1. **Enable SQL Logging**: Set `IS_SQL_ECHO_ENABLED=true` in `.env`
 2. **Check Sessions**: Ensure `async with self._connection_factory.get_session()` is used in repositories
-3. **Verify DI**: Ensure `attach_injector(app, injector)` is called in main.py before adding routes
-4. **Check Bindings**: Verify all base classes are bound in AppModule.configure()
-5. **Injection Errors**: If `Injected[Type]` doesn't work, ensure:
-   - fastapi-injector middleware is attached
-   - Type is bound in AppModule
-   - Using base class, not concrete implementation
-6. **Layer Violations**: Ensure no circular imports (Domain should never import from Infrastructure)
+3. **Verify DI**: Ensure `attach_injector(app, injector)` is called in main.py
+4. **Check Bindings**: Verify all base classes are bound in `AppModule.configure()`
+5. **Layer Violations**: Domain should never import from Infrastructure
 
-## Anti-Patterns to Avoid
+## Database Migrations
 
-❌ **Don't pass sessions to repository constructors**:
+This template uses `create_all()` for simplicity. In production, use Alembic for migrations.
+
+## Testing Strategy
+
 ```python
-# Wrong - repositories should not receive sessions
-class UserRepository(UserRepositoryBase):
-    def __init__(self, session: AsyncSession):
-        self.session = session
-
-# Correct - repositories receive ConnectionFactoryBase
-class UserRepository(UserRepositoryBase):
-    def __init__(self, connection_factory: ConnectionFactoryBase):
-        self._connection_factory = connection_factory
+# Mock the repository, not the database
+@pytest.mark.asyncio
+async def test_create_user():
+    mock_repo = Mock(spec=UserRepositoryBase)
+    use_case = UserUseCase(repository=mock_repo)
+    result = await use_case.create_user(CreateUserDTO(name="John", email="john@example.com"))
+    mock_repo.create.assert_called_once()
 ```
 
-❌ **Don't use Depends() with manual dependency functions**:
-```python
-# Wrong - using old FastAPI Depends pattern
-from fastapi import Depends
+## File References
 
-@router.post("/users")
-async def create_user(
-    use_case: UserUseCaseBase = Depends(get_user_use_case),  # Wrong!
-):
-    pass
-
-# Correct - use Injected[Type] with fastapi-injector
-from fastapi_injector import Injected
-
-@router.post("/users")
-async def create_user(
-    use_case: Injected[UserUseCaseBase],  # Correct!
-) -> UserResponseSchema:
-    pass
-```
-
-❌ **Don't bypass use cases in routes**:
-```python
-# Wrong
-@router.post("/users")
-async def create_user(repo: UserRepository = Depends(get_repo)):
-    return await repo.create(...)  # Skip use case
-```
-
-❌ **Don't let Domain depend on Infrastructure**:
-```python
-# Wrong - in domain layer
-from src.infrastructure.database.models import UserModel  # ❌
-```
-
-❌ **Don't forget Base suffix on ABC classes**:
-```python
-# Wrong
-class UserRepository(ABC):  # Should be UserRepositoryBase
-class UserUseCase(ABC):  # Should be UserUseCaseBase
-```
-
-❌ **Don't use concrete types in route signatures**:
-```python
-# Wrong - using concrete implementation
-@router.post("/users")
-async def create_user(use_case: Injected[UserUseCase]):  # Concrete type!
-    pass
-
-# Correct - using base class
-@router.post("/users")
-async def create_user(use_case: Injected[UserUseCaseBase]):  # Base class!
-    pass
-```
-
-❌ **Don't create instances manually**:
-```python
-# Wrong - manual instantiation
-async def get_user_use_case():
-    connection_factory = ConnectionFactory()
-    repo = UserRepository(connection_factory)  # Direct instantiation
-    yield UserUseCase(repo)
-
-# Correct - use Injected[Type] with fastapi-injector
-# No dependency function needed!
-@router.post("/users")
-async def create_user(
-    use_case: Injected[UserUseCaseBase],  # Automatic injection!
-) -> UserResponseSchema:
-    pass
-```
-
-❌ **Don't forget to add bindings to AppModule**:
-```python
-# Wrong - forgetting to add to AppModule
-# You create UserUseCase but don't bind it
-
-# Correct - always add bindings with Binder.bind()
-class AppModule(Module):
-    def configure(self, binder: Binder) -> None:
-        binder.bind(UserRepositoryBase, to=UserRepository)
-        binder.bind(UserUseCaseBase, to=UserUseCase)
-```
-
-❌ **Don't forget to attach injector middleware**:
-```python
-# Wrong - creating app without attaching injector
-app = FastAPI()
-app.include_router(user_router)  # Injected[Type] won't work!
-
-# Correct - attach injector middleware
-from fastapi_injector import attach_injector
-from src.container import injector
-
-app = FastAPI()
-attach_injector(app, injector)  # Enable automatic injection
-app.include_router(user_router)
-```
-
-❌ **Don't use singleton scope for request-scoped dependencies**:
-```python
-# Wrong - repositories/use cases shouldn't be singletons
-binder.bind(UserRepositoryBase, to=UserRepository, scope=singleton)
-
-# Correct - only ConnectionFactory should be singleton
-binder.bind(ConnectionFactoryBase, to=ConnectionFactory, scope=singleton)  # ✓
-binder.bind(UserRepositoryBase, to=UserRepository)  # Request scope (default) ✓
-```
-
-✅ **Correct patterns are shown in the examples above**.
-
-## Quick Reference
-
-| Layer | Location | Contains | Depends On |
-|-------|----------|----------|------------|
-| Domain | `src/domain/` | Entities, Repository ABC (ending with Base) | Nothing |
-| Application | `src/application/` | Use case ABC/implementations, DTOs, Entity converters | Domain only |
-| Infrastructure | `src/infrastructure/` | DB models, Repository implementations | Domain, Application |
-| API | `src/api/` | Routes, Request/Response schemas, API converters | Application (Base classes) |
-| AppModule | `src/container.py` | DI module with injector.Module and Binder.bind() | All layers |
-
-## Questions?
-
-Refer to existing code in the template:
 - [Greeting entity](src/domain/entities/greeting.py)
+- [Greeting enums](src/domain/enums/greeting_enum.py)
 - [Repository Base](src/domain/repositories/greeting_repository_base.py)
 - [Repository implementation](src/infrastructure/repositories/greeting_repository.py)
+- [DB Base](src/infrastructure/database/db.py)
+- [DB models](src/infrastructure/database/models.py)
+- [Connection factory Base](src/infrastructure/database/connection_factory_base.py)
+- [Connection factory](src/infrastructure/database/connection_factory.py)
+- [Blob storage service Base](src/application/services/blob_storage_service_base.py)
+- [Blob storage service](src/infrastructure/blob_storage/blob_storage_service.py)
 - [DTOs](src/application/dtos/greeting_dto.py)
 - [Entity converter](src/application/converters/greeting_converter.py)
 - [Use case Base](src/application/use_cases/greeting_use_case_base.py)
@@ -645,4 +500,5 @@ Refer to existing code in the template:
 - [API converter](src/api/converters/greeting_converter.py)
 - [Routes](src/api/routes/greeting_routes.py)
 - [DI Container](src/container.py)
+- [Settings](src/config/settings.py)
 - [Main app](src/main.py)

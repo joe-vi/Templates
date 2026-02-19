@@ -1,9 +1,11 @@
 from injector import Binder, Injector, Module, singleton
 
+from src.application.services.blob_storage_service_base import BlobStorageServiceBase
 from src.application.use_cases.greeting_use_case import GreetingUseCase
 from src.application.use_cases.greeting_use_case_base import GreetingUseCaseBase
 from src.config.settings import Settings
 from src.domain.repositories.greeting_repository_base import GreetingRepositoryBase
+from src.infrastructure.blob_storage.blob_storage_service import BlobStorageService
 from src.infrastructure.database.connection_factory import ConnectionFactory
 from src.infrastructure.database.connection_factory_base import ConnectionFactoryBase
 from src.infrastructure.repositories.greeting_repository import GreetingRepository
@@ -18,38 +20,32 @@ class AppModule(Module):
     """
 
     def configure(self, binder: Binder) -> None:
-        """Configure dependency bindings mapping interfaces to implementations.
-
-        Args:
-            binder: The injector binder used to register interface-to-implementation mappings.
-        """
-
-        # Bind Settings as singleton
-        # Singleton scope ensures configuration is loaded once and shared
         binder.bind(
-            Settings,  # Concrete class
-            to=Settings,  # Implementation
-            scope=singleton,  # Singleton scope
+            Settings,
+            to=Settings,
+            scope=singleton,
         )
 
-        # Bind ConnectionFactory interface to implementation as singleton
-        # Singleton scope ensures one instance manages the connection pool
         binder.bind(
-            ConnectionFactoryBase,  # Interface (ABC)
-            to=ConnectionFactory,  # Implementation
-            scope=singleton,  # Singleton scope
+            ConnectionFactoryBase,
+            to=ConnectionFactory,
+            scope=singleton,
         )
 
-        # Bind Repository interfaces to implementations (request scope by default)
         binder.bind(
-            GreetingRepositoryBase,  # Interface (ABC)
-            to=GreetingRepository,  # Implementation
+            GreetingRepositoryBase,
+            to=GreetingRepository,
         )
 
-        # Bind Use Case interfaces to implementations (request scope by default)
         binder.bind(
-            GreetingUseCaseBase,  # Interface (ABC)
-            to=GreetingUseCase,  # Implementation
+            BlobStorageServiceBase,
+            to=BlobStorageService,
+            scope=singleton,
+        )
+
+        binder.bind(
+            GreetingUseCaseBase,
+            to=GreetingUseCase,
         )
 
 

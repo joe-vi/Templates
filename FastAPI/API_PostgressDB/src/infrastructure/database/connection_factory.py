@@ -7,12 +7,8 @@ from sqlalchemy.ext.asyncio import (
     async_sessionmaker,
     create_async_engine,
 )
-from sqlalchemy.orm import declarative_base
-
 from src.config.settings import Settings
 from src.infrastructure.database.connection_factory_base import ConnectionFactoryBase
-
-Base = declarative_base()
 
 
 class ConnectionFactory(ConnectionFactoryBase):
@@ -38,13 +34,6 @@ class ConnectionFactory(ConnectionFactoryBase):
 
     @asynccontextmanager
     async def get_session(self) -> AsyncIterator[AsyncSession]:
-        """Get an async database session as a context manager.
-
-        Automatically commits on success and rolls back on exception.
-
-        Yields:
-            An async SQLAlchemy session for database operations.
-        """
         async with self._session_factory() as session:
             try:
                 yield session
@@ -54,5 +43,4 @@ class ConnectionFactory(ConnectionFactoryBase):
                 raise
 
     async def close(self) -> None:
-        """Dispose of the database engine and release all connections."""
         await self._engine.dispose()

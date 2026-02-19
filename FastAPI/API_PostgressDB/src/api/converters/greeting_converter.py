@@ -22,7 +22,7 @@ class GreetingConverter:
         Returns:
             A CreateGreetingDTO populated with data from the request.
         """
-        return CreateGreetingDTO(message=request.message)
+        return CreateGreetingDTO(message=request.message, status=request.status)
 
     @staticmethod
     def to_response(greeting_dto: GreetingDTO) -> GreetingResponse:
@@ -37,6 +37,7 @@ class GreetingConverter:
         return GreetingResponse(
             id=greeting_dto.id,
             message=greeting_dto.message,
+            status=greeting_dto.status,
             created_at=greeting_dto.created_at,
         )
 

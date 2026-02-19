@@ -1,14 +1,39 @@
+from pydantic import computed_field
 from pydantic_settings import BaseSettings
+from sqlalchemy.engine import URL
 
 
 class Settings(BaseSettings):
     """Application settings loaded from environment variables."""
 
     # Database settings
-    database_url: str = "postgresql+asyncpg://postgres:postgres@localhost:5432/fastapi_db"
+    db_driver: str = "postgresql+asyncpg"
+    db_user: str = "postgres"
+    db_password: str = "postgres"
+    db_host: str = "localhost"
+    db_port: int = 5432
+    db_name: str = "fastapi_db"
     is_sql_echo_enabled: bool = False
     pool_size: int = 5
     max_overflow: int = 10
+
+    @computed_field
+    @property
+    def database_url(self) -> str:
+        """Build the SQLAlchemy database URL from individual connection components."""
+        return str(
+            URL.create(
+                drivername=self.db_driver,
+                username=self.db_user,
+                password=self.db_password,
+                host=self.db_host,
+                port=self.db_port,
+                database=self.db_name,
+            )
+        )
+
+    # Blob storage settings
+    blob_storage_connection_string: str = ""
 
     class Config:
         env_file = ".env"

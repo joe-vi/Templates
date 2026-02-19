@@ -22,6 +22,7 @@ class GreetingEntityConverter:
         return GreetingDTO(
             id=greeting.id,  # type: ignore
             message=greeting.message,
+            status=greeting.status,
             created_at=greeting.created_at,  # type: ignore
         )
 
@@ -50,4 +51,5 @@ class GreetingEntityConverter:
         return Greeting(
             id=None,
             message=create_greeting_dto.message,
+            status=create_greeting_dto.status,
         )
