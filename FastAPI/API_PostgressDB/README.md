@@ -111,7 +111,56 @@ createdb fastapi_db
 
 ## Running the Application
 
-### Development Server
+### 1. Start the Database
+
+The project includes a `docker-compose.yml` to run PostgreSQL 18:
+
+```bash
+docker compose up -d
+```
+
+To stop the database:
+
+```bash
+docker compose down
+```
+
+To stop and delete the database volume:
+
+```bash
+docker compose down -v
+```
+
+### 2. Start the Application
+
+#### Option A: VS Code (Recommended)
+
+A `.vscode/launch.json` is included for one-click debugging. Press `F5` or open the **Run and Debug** panel and select **FastAPI**.
+
+```json
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "FastAPI",
+            "type": "debugpy",
+            "request": "launch",
+            "module": "uvicorn",
+            "args": [
+                "src.main:app",
+                "--host", "0.0.0.0",
+                "--port", "8000",
+                "--reload"
+            ],
+            "envFile": "${workspaceFolder}/.env",
+            "jinja": true
+        }
+    ]
+}
+```
+
+#### Option B: Command Line
+
 ```bash
 uvicorn src.main:app --reload --host 0.0.0.0 --port 8000
 ```
