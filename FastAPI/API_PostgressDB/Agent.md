@@ -589,6 +589,8 @@ class GreetingUseCase(GreetingUseCaseBase):
 
 **To switch providers**: Create `S3BlobStorageService(BlobStorageServiceBase)` in `src/infrastructure/blob_storage/` and change `to=BlobStorageService` → `to=S3BlobStorageService` in `container.py`. The use case is untouched.
 
+**Singleton cleanup rule**: Any singleton service that holds a long-lived resource (HTTP client, connection pool, socket) that is not automatically released must implement a `close()` method on its base class and call it in the `lifespan` shutdown block in `main.py`. The `BlobStorageServiceBase.close()` / `ConnectionFactoryBase.close()` pattern is the template — follow it for every new singleton that manages external resources.
+
 **Settings**: Add connection string to `src/config/settings.py` (loaded from env var automatically):
 ```python
 blob_storage_connection_string: str = ""
@@ -684,6 +686,162 @@ Non-atomic use case methods work exactly as before — omit `begin_transaction()
 
 ---
 
+## Query Row Pattern
+
+Use this pattern when a repository query returns **more data than a single domain entity holds** — for example, a JOIN across tables, an aggregation, or a projection that includes nested/computed values.
+
+**Core idea**: The repository returns a `QueryRow` dataclass (a flat projection of the raw query result). The application converter then maps it to a DTO that the use case returns. This keeps the domain entity clean while allowing the repository to surface richer data.
+
+### When to use it
+
+- The query JOINs multiple tables and the result doesn't fit a single entity
+- The result includes aggregated values (e.g., counts, sums)
+- The result includes deeply nested or computed data that would pollute the domain entity
+
+### Where `QueryRow` classes live
+
+`QueryRow` classes live in `src/domain/repositories/`, co-located with the repository base that declares them as return types. They are not entities (no lifecycle, no identity) — they are intermediate projection types that exist solely to carry the result of a specific query. Keeping them next to the repository base makes the contract self-contained and immediately discoverable.
+
+```
+src/domain/repositories/
+├── greeting_repository_base.py      ← declares get_with_author() → GreetingWithAuthorQueryRow
+└── greeting_query_row.py            ← defines GreetingWithAuthorQueryRow
+```
+
+### Naming and structure
+
+```python
+# src/domain/repositories/greeting_query_row.py
+from dataclasses import dataclass
+from datetime import datetime
+from src.domain.enums.greeting_enum import GreetingStatus
+
+@dataclass(frozen=True)
+class GreetingWithAuthorQueryRow:
+    id: int
+    message: str
+    status: GreetingStatus
+    created_at: datetime
+    author_name: str      # joined from users table
+    reply_count: int      # aggregated from replies table
+```
+
+- Name: `{Entity}{Qualifier}QueryRow` — qualifier describes what the query adds (e.g., `WithAuthor`, `WithStats`)
+- Always `frozen=True` — it is a read-only projection, never mutated
+- Fields are flat — no nested objects; unfold joined data into scalar fields
+
+### Repository base (domain layer)
+
+```python
+# src/domain/repositories/greeting_repository_base.py
+@abstractmethod
+async def get_with_author(self, greeting_id: int) -> GreetingWithAuthorQueryRow | None:
+    """Fetch a greeting and its author details.
+
+    Args:
+        greeting_id: The unique identifier of the greeting.
+
+    Returns:
+        A GreetingWithAuthorQueryRow combining greeting and author data, or None if not found.
+    """
+    pass
+```
+
+### Repository implementation (infrastructure layer)
+
+```python
+# src/infrastructure/repositories/greeting_repository.py
+async def get_with_author(self, greeting_id: int) -> GreetingWithAuthorQueryRow | None:
+    async with self._connection_factory.get_session() as session:
+        query_result = await session.execute(
+            select(
+                GreetingModel.id,
+                GreetingModel.message,
+                GreetingModel.status,
+                GreetingModel.created_at,
+                UserModel.name.label("author_name"),
+                func.count(ReplyModel.id).label("reply_count"),
+            )
+            .join(UserModel, GreetingModel.author_id == UserModel.id)
+            .outerjoin(ReplyModel, ReplyModel.greeting_id == GreetingModel.id)
+            .where(GreetingModel.id == greeting_id)
+            .group_by(GreetingModel.id, UserModel.name)
+        )
+        row = query_result.one_or_none()
+        if row is None:
+            return None
+        return GreetingWithAuthorQueryRow(
+            id=row.id,
+            message=row.message,
+            status=row.status,
+            created_at=row.created_at,
+            author_name=row.author_name,
+            reply_count=row.reply_count,
+        )
+```
+
+### DTO and converter (application layer)
+
+Create a **dedicated DTO** for this richer result — do not reuse `GreetingDTO` if the shape differs.
+
+```python
+# src/application/dtos/greeting_dto.py
+@dataclass(frozen=True)
+class GreetingWithAuthorDTO:
+    id: int
+    message: str
+    status: GreetingStatus
+    created_at: datetime
+    author_name: str
+    reply_count: int
+
+# src/application/converters/greeting_converter.py
+class GreetingEntityConverter:
+    @staticmethod
+    def query_row_to_dto(query_row: GreetingWithAuthorQueryRow) -> GreetingWithAuthorDTO:
+        return GreetingWithAuthorDTO(
+            id=query_row.id,
+            message=query_row.message,
+            status=query_row.status,
+            created_at=query_row.created_at,
+            author_name=query_row.author_name,
+            reply_count=query_row.reply_count,
+        )
+```
+
+### Use case
+
+```python
+async def get_greeting_with_author(self, greeting_id: int) -> GreetingWithAuthorDTO | None:
+    query_row = await self._repository.get_with_author(greeting_id)
+    if query_row is None:
+        return None
+    return GreetingEntityConverter.query_row_to_dto(query_row)
+```
+
+### Full data flow
+
+```
+Repository (infrastructure)
+    ↓ returns GreetingWithAuthorQueryRow   ← flat DB projection
+Application converter
+    ↓ query_row_to_dto()
+GreetingWithAuthorDTO                      ← typed application result
+Use case
+    ↓ returns GreetingWithAuthorDTO
+API converter → GreetingWithAuthorResponse
+```
+
+### Critical rules
+
+- **Never reuse the domain entity** when the query adds data the entity doesn't model — create a `QueryRow` instead
+- **`QueryRow` is read-only** (`frozen=True`) — it is never passed back into the repository or mutated
+- **One `QueryRow` per query shape** — if two queries return different projections, create two `QueryRow` classes
+- **`QueryRow` lives in domain** — it is part of the repository contract, so it must be co-located with the repository interface
+- **Always convert to DTO before leaving the use case** — the API layer never receives a `QueryRow` directly
+
+---
+
 ## Anti-Patterns to Avoid
 
 - **Don't pass sessions to repository constructors** — inject `ConnectionFactoryBase` instead
@@ -696,6 +854,7 @@ Non-atomic use case methods work exactly as before — omit `begin_transaction()
 - **Don't forget to bind in AppModule** — every new base/implementation pair needs `binder.bind()`
 - **Don't forget `attach_injector(app, injector)`** — must be called before including routers
 - **Don't use `singleton` for repositories/use cases** — only `ConnectionFactory` and external service clients (e.g. `BlobStorageService`) should be singleton
+- **Don't forget to close singleton resources** — every singleton that holds an external connection (DB pool, HTTP client, blob storage client) must have a `close()` method on its base class and be closed in the `lifespan` shutdown block in `main.py`
 
 ## Configuration
 

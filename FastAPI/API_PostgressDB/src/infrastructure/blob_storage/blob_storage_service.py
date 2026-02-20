@@ -50,3 +50,6 @@ class BlobStorageService(BlobStorageServiceBase):
     async def exists(self, container_name: str, blob_name: str) -> bool:
         async with self._client.get_blob_client(container=container_name, blob=blob_name) as blob_client:
             return await blob_client.exists()
+
+    async def close(self) -> None:
+        await self._client.close()

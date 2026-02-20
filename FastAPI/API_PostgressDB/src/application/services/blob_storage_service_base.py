@@ -64,3 +64,7 @@ class BlobStorageServiceBase(ABC):
         Returns:
             True if the blob exists, False otherwise.
         """
+
+    @abstractmethod
+    async def close(self) -> None:
+        """Close the underlying storage client and release any held connections."""

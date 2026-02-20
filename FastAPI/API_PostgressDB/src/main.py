@@ -4,6 +4,7 @@ from fastapi import FastAPI
 from fastapi_injector import attach_injector
 
 from src.api.routes.greeting_routes import router as greeting_router
+from src.application.services.blob_storage_service_base import BlobStorageServiceBase
 from src.container import injector
 from src.infrastructure.database.connection_factory_base import ConnectionFactoryBase
 
@@ -20,9 +21,12 @@ async def lifespan(app: FastAPI):
     """
     yield
 
-    # Cleanup: Close database connections
+    # Cleanup: Close database connections and external service clients
     connection_factory = injector.get(ConnectionFactoryBase)
     await connection_factory.close()
+
+    blob_storage_service = injector.get(BlobStorageServiceBase)
+    await blob_storage_service.close()
 
 
 app = FastAPI(
