@@ -1,6 +1,9 @@
+import asyncpg
 from sqlalchemy import delete, select
+from sqlalchemy.exc import DBAPIError, IntegrityError
 
 from src.domain.entities.greeting import Greeting
+from src.domain.enums.operation_results import CreateResult, DeleteResult
 from src.domain.repositories.greeting_repository_base import GreetingRepositoryBase
 from src.infrastructure.database.connection_factory_base import ConnectionFactoryBase
 from src.infrastructure.database.models import GreetingModel
@@ -17,23 +20,26 @@ class GreetingRepository(GreetingRepositoryBase):
         """
         self._connection_factory = connection_factory
 
-    async def create(self, greeting: Greeting) -> Greeting:
-        async with self._connection_factory.get_session() as session:
-            greeting_model = GreetingModel(
-                message=greeting.message,
-                status=greeting.status,
-                created_at=greeting.created_at,
-            )
-            session.add(greeting_model)
-            await session.flush()
-            await session.refresh(greeting_model)
+    async def create(self, greeting: Greeting) -> tuple[CreateResult, int | None]:
+        try:
+            async with self._connection_factory.get_session() as session:
+                greeting_model = GreetingModel(
+                    message=greeting.message,
+                    status=greeting.status,
+                )
+                session.add(greeting_model)
+                await session.flush()
+                await session.refresh(greeting_model)
 
-            return Greeting(
-                id=greeting_model.id,
-                message=greeting_model.message,
-                status=greeting_model.status,
-                created_at=greeting_model.created_at,
-            )
+                return (CreateResult.SUCCESS, greeting_model.id)
+        except IntegrityError:
+            return (CreateResult.UNIQUE_CONSTRAINT_ERROR, None)
+        except DBAPIError as exc:
+            if isinstance(exc.__cause__, asyncpg.exceptions.DeadlockDetectedError):
+                return (CreateResult.CONCURRENCY_ERROR, None)
+            return (CreateResult.FAILURE, None)
+        except Exception:
+            return (CreateResult.FAILURE, None)
 
     async def get_by_id(self, greeting_id: int) -> Greeting | None:
         async with self._connection_factory.get_session() as session:
@@ -65,7 +71,14 @@ class GreetingRepository(GreetingRepositoryBase):
                 for greeting_model in greeting_models
             ]
 
-    async def delete(self, greeting_id: int) -> bool:
-        async with self._connection_factory.get_session() as session:
-            delete_result = await session.execute(delete(GreetingModel).where(GreetingModel.id == greeting_id))
-            return delete_result.rowcount > 0
+    async def delete(self, greeting_id: int) -> DeleteResult:
+        try:
+            async with self._connection_factory.get_session() as session:
+                delete_result = await session.execute(delete(GreetingModel).where(GreetingModel.id == greeting_id))
+                return DeleteResult.SUCCESS if delete_result.rowcount > 0 else DeleteResult.NOT_FOUND
+        except DBAPIError as exc:
+            if isinstance(exc.__cause__, asyncpg.exceptions.DeadlockDetectedError):
+                return DeleteResult.CONCURRENCY_ERROR
+            return DeleteResult.FAILURE
+        except Exception:
+            return DeleteResult.FAILURE

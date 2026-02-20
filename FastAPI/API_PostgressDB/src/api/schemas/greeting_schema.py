@@ -13,7 +13,7 @@ class GreetingCreateRequest(BaseModel):
 
 
 class GreetingResponse(BaseModel):
-    """Response model for greeting."""
+    """Response model for a full greeting entity (used by GET endpoints)."""
 
     id: int
     message: str

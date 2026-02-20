@@ -1,7 +1,6 @@
 from src.application.dtos.greeting_dto import (
     CreateGreetingDTO,
     GreetingDTO,
-    GreetingListDTO,
 )
 from src.domain.entities.greeting import Greeting
 
@@ -27,16 +26,16 @@ class GreetingEntityConverter:
         )
 
     @staticmethod
-    def to_dto_list(greetings: list[Greeting]) -> GreetingListDTO:
-        """Convert a list of domain greeting entities to a list DTO.
+    def to_dto_list(greetings: list[Greeting]) -> list[GreetingDTO]:
+        """Convert a list of domain greeting entities to a list of DTOs.
 
         Args:
             greetings: The list of domain entities to convert.
 
         Returns:
-            A GreetingListDTO containing a tuple of converted GreetingDTOs.
+            A list of GreetingDTOs.
         """
-        return GreetingListDTO(greetings=tuple(GreetingEntityConverter.to_dto(greeting) for greeting in greetings))
+        return [GreetingEntityConverter.to_dto(greeting) for greeting in greetings]
 
     @staticmethod
     def to_entity(create_greeting_dto: CreateGreetingDTO) -> Greeting:

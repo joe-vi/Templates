@@ -1,20 +1,21 @@
 from abc import ABC, abstractmethod
 
 from src.domain.entities.greeting import Greeting
+from src.domain.enums.operation_results import CreateResult, DeleteResult
 
 
 class GreetingRepositoryBase(ABC):
     """Abstract base class for greeting repository."""
 
     @abstractmethod
-    async def create(self, greeting: Greeting) -> Greeting:
+    async def create(self, greeting: Greeting) -> tuple[CreateResult, int | None]:
         """Persist a new greeting entity.
 
         Args:
             greeting: The greeting entity to persist.
 
         Returns:
-            The persisted Greeting entity with generated id and timestamps.
+            A tuple of (result, id). id is the newly created greeting id on success, None on any failure.
         """
         pass
 
@@ -40,13 +41,13 @@ class GreetingRepositoryBase(ABC):
         pass
 
     @abstractmethod
-    async def delete(self, greeting_id: int) -> bool:
+    async def delete(self, greeting_id: int) -> DeleteResult:
         """Delete a greeting entity by its unique identifier.
 
         Args:
             greeting_id: The unique identifier of the greeting to delete.
 
         Returns:
-            True if the greeting was deleted, False if it was not found.
+            A DeleteResult enum indicating the outcome of the operation.
         """
         pass

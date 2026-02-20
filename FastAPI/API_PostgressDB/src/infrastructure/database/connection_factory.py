@@ -1,5 +1,6 @@
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from contextvars import ContextVar
 
 from sqlalchemy.ext.asyncio import (
     AsyncEngine,
@@ -9,6 +10,10 @@ from sqlalchemy.ext.asyncio import (
 )
 from src.config.settings import Settings
 from src.infrastructure.database.connection_factory_base import ConnectionFactoryBase
+
+# Holds the active session for the current async context (task/coroutine).
+# Set by begin_transaction(); None when no shared transaction is in progress.
+_active_session: ContextVar[AsyncSession | None] = ContextVar("_active_session", default=None)
 
 
 class ConnectionFactory(ConnectionFactoryBase):
@@ -34,6 +39,11 @@ class ConnectionFactory(ConnectionFactoryBase):
 
     @asynccontextmanager
     async def get_session(self) -> AsyncIterator[AsyncSession]:
+        active = _active_session.get()
+        if active is not None:
+            yield active  # reuse the active transaction — commit/rollback owned by begin_transaction()
+            return
+
         async with self._session_factory() as session:
             try:
                 yield session
@@ -41,6 +51,19 @@ class ConnectionFactory(ConnectionFactoryBase):
             except Exception:
                 await session.rollback()
                 raise
+
+    @asynccontextmanager
+    async def begin_transaction(self) -> AsyncIterator[None]:
+        async with self._session_factory() as session:
+            token = _active_session.set(session)
+            try:
+                yield
+                await session.commit()
+            except Exception:
+                await session.rollback()
+                raise
+            finally:
+                _active_session.reset(token)
 
     async def close(self) -> None:
         await self._engine.dispose()

@@ -14,7 +14,7 @@ Domain (Core) → Application → Infrastructure → API
 
 | Layer | Location | Contains | Depends On |
 |-------|----------|----------|------------|
-| Domain | `src/domain/` | Entities, Repository ABC (ending with `Base`) | Nothing |
+| Domain | `src/domain/` | Entities, Repository ABC (ending with `Base`), result enums | Nothing |
 | Application | `src/application/` | Use case ABC/implementations, DTOs, Entity converters, External service ABC (ending with `Base`) | Domain only |
 | Infrastructure | `src/infrastructure/` | DB models, Repository implementations | Domain, Application |
 | API | `src/api/` | Routes, Request/Response schemas, API converters | Application (Base classes) |
@@ -24,20 +24,49 @@ Domain (Core) → Application → Infrastructure → API
 
 ### 1. Repository Pattern with ABC Base Classes
 
-All abstract base classes (interfaces) MUST end with `Base`:
+All abstract base classes (interfaces) MUST end with `Base`.
+
+**Critical Rule — one CRUD operation per method**: Every repository method MUST perform exactly one database operation. Never combine multiple reads, writes, or a mix of read and write in a single repository method. If a use case needs to read then write, it calls two separate repository methods in sequence. Orchestration belongs in the use case, not the repository.
+
+```python
+# CORRECT — one operation per method
+async def get_by_id(self, greeting_id: int) -> Greeting | None: ...             # one SELECT
+async def create(self, greeting: Greeting) -> tuple[CreateResult, int | None]: ... # one INSERT
+async def delete(self, greeting_id: int) -> DeleteResult: ...                   # one DELETE
+
+# WRONG — two operations in one method
+async def delete_if_exists(self, greeting_id: int) -> DeleteResult:
+    greeting = await self.get_by_id(greeting_id)   # SELECT
+    if greeting:
+        await self.delete(greeting_id)             # DELETE — move this orchestration to use case
+```
+
+**Mutation methods return result enums** — repositories catch all database exceptions internally and return the appropriate result enum. Use cases receive a clean result and never handle database-level exceptions.
 
 ```python
 # Domain Layer - Interface (has docstrings)
 class GreetingRepositoryBase(ABC):
     @abstractmethod
-    async def create(self, greeting: Greeting) -> Greeting:
+    async def create(self, greeting: Greeting) -> tuple[CreateResult, int | None]:
         """Persist a new greeting entity.
 
         Args:
             greeting: The greeting entity to persist.
 
         Returns:
-            The persisted Greeting entity with generated id and timestamps.
+            A tuple of (result, id). id is the newly created entity id on success, None on any failure.
+        """
+        pass
+
+    @abstractmethod
+    async def delete(self, greeting_id: int) -> DeleteResult:
+        """Delete a greeting entity by its unique identifier.
+
+        Args:
+            greeting_id: The unique identifier of the greeting to delete.
+
+        Returns:
+            A DeleteResult enum indicating the outcome of the operation.
         """
         pass
 
@@ -46,10 +75,31 @@ class GreetingRepository(GreetingRepositoryBase):
     def __init__(self, connection_factory: ConnectionFactoryBase):
         self._connection_factory = connection_factory
 
-    async def create(self, greeting: Greeting) -> Greeting:
-        async with self._connection_factory.get_session() as session:
-            # Implementation here
-            pass
+    async def create(self, greeting: Greeting) -> tuple[CreateResult, int | None]:
+        try:
+            async with self._connection_factory.get_session() as session:
+                # ... insert, flush, refresh ...
+                return (CreateResult.SUCCESS, greeting_model.id)
+        except IntegrityError:
+            return (CreateResult.UNIQUE_CONSTRAINT_ERROR, None)
+        except DBAPIError as exc:
+            if isinstance(exc.__cause__, asyncpg.exceptions.DeadlockDetectedError):
+                return (CreateResult.CONCURRENCY_ERROR, None)
+            return (CreateResult.FAILURE, None)
+        except Exception:
+            return (CreateResult.FAILURE, None)
+
+    async def delete(self, greeting_id: int) -> DeleteResult:
+        try:
+            async with self._connection_factory.get_session() as session:
+                delete_result = await session.execute(...)
+                return DeleteResult.SUCCESS if delete_result.rowcount > 0 else DeleteResult.NOT_FOUND
+        except DBAPIError as exc:
+            if isinstance(exc.__cause__, asyncpg.exceptions.DeadlockDetectedError):
+                return DeleteResult.CONCURRENCY_ERROR
+            return DeleteResult.FAILURE
+        except Exception:
+            return DeleteResult.FAILURE
 ```
 
 ### 2. ConnectionFactory Pattern
@@ -273,9 +323,10 @@ app.include_router(user_router)
 
 - **ABC Classes**: Must end with `Base` (e.g., `RepositoryBase`, `UseCaseBase`)
 - **Entities**: Singular nouns (e.g., `User`, `Greeting`)
-- **Enums**: Singular noun describing the concept with `StrEnum` (e.g., `GreetingStatus`, `OrderState`)
+- **Status Enums**: Singular noun describing the concept with `StrEnum` (e.g., `GreetingStatus`, `OrderState`)
+- **Operation Result Enums**: `<Operation>Result` — generic, one file per operation type, shared across all entities (e.g., `CreateResult`, `UpdateResult`, `DeleteResult`)
 - **API Schemas**: `Request` for inputs, `Response` for outputs (e.g., `UserCreateRequest`, `UserResponse`)
-- **DTOs**: Frozen dataclasses with `DTO` suffix (e.g., `CreateUserDTO`, `UserDTO`, `UserListDTO`)
+- **DTOs**: Frozen dataclasses with `DTO` suffix (e.g., `CreateUserDTO`, `UserDTO`) — **never create a wrapper DTO class for a collection** (e.g., `UserListDTO` is forbidden); use `list[UserDTO]` directly as the return type instead
 - **Use Cases**: `UserUseCaseBase` (ABC) → `UserUseCase` (implementation)
 
 ### Enum Conventions
@@ -347,12 +398,134 @@ status: GreetingStatus = Field(default=GreetingStatus.ACTIVE)
 - After making code changes, run `ruff check src/ --fix && ruff format src/` to enforce line length and fix lint issues
 - Use modern Python type annotations: `list` not `List`, `X | None` not `Optional[X]`
 
+### DB-Generated Values
+
+**Critical Rules** — MUST be followed for `id`, `created_at`, `updated_at`, and any other DB-generated column:
+
+1. **`id` — never set in code**: `autoincrement=True` on the model is sufficient. Do not pass `id` to the model constructor. The entity holds `id: int | None` before insert; after `session.refresh()` it is populated from the DB.
+
+2. **`created_at` — use `server_default=func.now()`**: The DB generates this on insert. Never set it in Python code (no `datetime.now()`, no `__post_init__`, no default in the entity). Do not pass it to the model constructor.
+   ```python
+   # models.py
+   from sqlalchemy import func
+   created_at: Mapped[datetime] = mapped_column(server_default=func.now(), nullable=False)
+
+   # entity — no default, no __post_init__
+   created_at: datetime | None = None
+
+   # repository create() — do NOT pass created_at
+   greeting_model = GreetingModel(message=greeting.message, status=greeting.status)
+   await session.flush()
+   await session.refresh(greeting_model)   # created_at is now populated from DB
+   ```
+
+3. **`updated_at` — use `onupdate=func.now()`**: SQLAlchemy automatically includes this column in every UPDATE statement. Never set it manually in code. It remains `None` until the first update.
+   ```python
+   # models.py
+   updated_at: Mapped[datetime | None] = mapped_column(onupdate=func.now(), nullable=True)
+
+   # entity
+   updated_at: datetime | None = None
+   ```
+
+4. **Always call `session.refresh()` after insert/update** to populate DB-generated values back onto the model before mapping to the entity.
+
 ### Async/Await
 
 - ALL database operations are async
 - Use `async def` and `await` for DB operations
 
-### Error Handling
+### Operation Result Enums and API Responses
+
+Use case mutations (create, update, delete) return result enums instead of raising exceptions. The three result enum types are **generic and shared across all entities** — a new entity (User, Order, etc.) uses the exact same enums without adding new files.
+
+**Critical Rules:**
+- Result enums are **generic** — `CreateResult`, `UpdateResult`, `DeleteResult`. Do NOT create entity-specific variants (e.g., `CreateGreetingResult` is wrong)
+- All three result enums live together in `src/domain/enums/operation_results.py` — a single shared file
+- Result enums live in the **Domain layer** and are importable by any layer
+- The shared API operation response schemas live in `src/api/schemas/operation_schema.py` — import them directly in any route file
+- **Repositories own all exception handling** — they catch `IntegrityError`, `DBAPIError`, and `Exception` internally and return the appropriate result enum. No exceptions propagate to the use case or API layers
+- **Use cases contain no exception handling** for mutation operations — they forward the result from the repository directly
+- Create use cases return `tuple[CreateResult, int | None]` — the id is `None` on failure
+- Update and delete use cases return just the result enum
+
+```python
+# src/domain/enums/operation_results.py  ← all three enums, shared by ALL entities
+class CreateResult(StrEnum):
+    SUCCESS = "success"
+    FAILURE = "failure"
+    CONCURRENCY_ERROR = "concurrency_error"
+    UNIQUE_CONSTRAINT_ERROR = "unique_constraint_error"
+
+class UpdateResult(StrEnum):
+    SUCCESS = "success"
+    FAILURE = "failure"
+    CONCURRENCY_ERROR = "concurrency_error"
+    UNIQUE_CONSTRAINT_ERROR = "unique_constraint_error"
+
+class DeleteResult(StrEnum):
+    SUCCESS = "success"
+    FAILURE = "failure"
+    CONCURRENCY_ERROR = "concurrency_error"
+    NOT_FOUND = "not_found"
+```
+
+**Use case return types — no exception handling, just forward the repository result:**
+```python
+# Create — repo returns (CreateResult, int | None) directly; forward as-is
+async def create_greeting(self, create_greeting_dto: CreateGreetingDTO) -> tuple[CreateResult, int | None]:
+    greeting = GreetingEntityConverter.to_entity(create_greeting_dto)
+    return await self._repository.create(greeting)
+
+# Delete — return repo result directly
+async def delete_greeting(self, greeting_id: int) -> DeleteResult:
+    return await self._repository.delete(greeting_id)
+```
+
+**Standard API operation response schemas** — shared across all entities in `src/api/schemas/operation_schema.py`:
+```python
+class CreateOperationResponse(BaseModel):
+    result: CreateResult
+    id: int | None = None          # populated only on success
+
+class UpdateOperationResponse(BaseModel):
+    result: UpdateResult
+
+class DeleteOperationResponse(BaseModel):
+    result: DeleteResult
+```
+
+**Routes call shared response helpers** from `src/api/result_status_maps.py` — each helper builds the response schema and sets the correct HTTP status code in one call:
+```python
+# src/api/result_status_maps.py — reusable by any entity's routes
+def create_response(result: CreateResult, entity_id: int | None) -> JSONResponse: ...
+def update_response(result: UpdateResult) -> JSONResponse: ...
+def delete_response(result: DeleteResult) -> JSONResponse: ...
+
+# route usage
+@router.post("/greetings", response_model=CreateOperationResponse)
+async def create_greeting(...) -> JSONResponse:
+    result, entity_id = await use_case.create_greeting(create_greeting_dto)
+    return create_response(result, entity_id)
+
+@router.delete("/greetings/{greeting_id}", response_model=DeleteOperationResponse)
+async def delete_greeting(...) -> JSONResponse:
+    result = await use_case.delete_greeting(greeting_id)
+    return delete_response(result)
+```
+
+**HTTP status code conventions for operation endpoints:**
+
+| Result | HTTP Code |
+|--------|-----------|
+| SUCCESS (create) | 201 Created |
+| SUCCESS (update/delete) | 200 OK |
+| NOT_FOUND | 404 Not Found |
+| UNIQUE_CONSTRAINT_ERROR | 409 Conflict |
+| CONCURRENCY_ERROR | 409 Conflict |
+| FAILURE | 500 Internal Server Error |
+
+### Error Handling (Read endpoints)
 
 ```python
 if greeting_dto is None:
@@ -422,9 +595,9 @@ blob_storage_connection_string: str = ""
 
 ---
 
-## Multiple Repository Use Cases
+## Multiple Repository Use Cases (Non-Atomic)
 
-Use cases with multiple repositories are resolved automatically via constructor injection:
+When a use case calls multiple repositories but each operation is **independent** (no shared transaction needed), inject each repository directly via constructor injection — the injector resolves the full chain automatically:
 
 ```python
 class OrderUseCase(OrderUseCaseBase):
@@ -432,10 +605,83 @@ class OrderUseCase(OrderUseCaseBase):
         self,
         user_repository: UserRepositoryBase,
         order_repository: OrderRepositoryBase,
-    ):
+    ) -> None:
         self._user_repository = user_repository
         self._order_repository = order_repository
 ```
+
+Each repository method opens its own session. Use this when failures in one operation do not need to roll back the other.
+
+---
+
+## Atomic Multi-Repository Operations (`begin_transaction`)
+
+When a use case must call multiple repository methods **atomically** — all succeed or all roll back — use `connection_factory.begin_transaction()`.
+
+### How it works
+
+`ConnectionFactory` maintains a `ContextVar[AsyncSession | None]` called `_active_session`. When `begin_transaction()` is entered, it opens one session, stores it in the contextvar, and yields. Every subsequent call to `get_session()` on any repository within the same async context detects the active session and reuses it instead of opening a new one. On exit, `begin_transaction()` commits (or rolls back) and resets the contextvar.
+
+**Repositories require zero changes.** The shared session is picked up transparently.
+
+### Session resolution in `get_session()`
+
+```
+get_session() called
+       │
+       ▼
+_active_session set?  ──yes──▶  yield active session  (no commit — begin_transaction owns it)
+       │
+      no
+       │
+       ▼
+open new session, yield, commit/rollback as normal
+```
+
+### Use case — inject `ConnectionFactoryBase` alongside repositories
+
+```python
+class OrderUseCase(OrderUseCaseBase):
+
+    def __init__(
+        self,
+        connection_factory: ConnectionFactoryBase,
+        user_repository: UserRepositoryBase,
+        order_repository: OrderRepositoryBase,
+    ) -> None:
+        self._connection_factory = connection_factory
+        self._user_repository = user_repository
+        self._order_repository = order_repository
+
+    async def create_order_for_user(self, user_id: int, create_order_dto: CreateOrderDTO) -> OrderDTO:
+        async with self._connection_factory.begin_transaction():
+            user = await self._user_repository.get_by_id(user_id)
+            if user is None:
+                raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+            order = OrderEntityConverter.to_entity(create_order_dto, user_id)
+            created_order = await self._order_repository.create(order)
+            return OrderEntityConverter.to_dto(created_order)
+        # Both operations committed atomically here — or both rolled back on any exception
+```
+
+Non-atomic use case methods work exactly as before — omit `begin_transaction()` and each repository call manages its own session.
+
+### No extra container bindings needed
+
+`ConnectionFactoryBase` is already registered as a singleton. The injector resolves it automatically when declared in `__init__`.
+
+### When to use `begin_transaction` vs plain injection
+
+| Scenario | Pattern |
+|---|---|
+| Single repository, any number of methods | Inject repository only |
+| Multiple repositories, independent operations | Inject repositories only |
+| Multiple repositories, must all succeed or all fail | Inject `ConnectionFactoryBase` + repositories, wrap in `begin_transaction()` |
+| Single repository, multiple methods that must be atomic | Inject `ConnectionFactoryBase` + repository, wrap in `begin_transaction()` |
+
+**Critical Rule**: Do NOT use `begin_transaction` when operations are independent. Use it only when atomicity is required.
+
+---
 
 ## Anti-Patterns to Avoid
 
@@ -483,13 +729,17 @@ async def test_create_user():
 ## File References
 
 - [Greeting entity](src/domain/entities/greeting.py)
-- [Greeting enums](src/domain/enums/greeting_enum.py)
+- [Greeting status enum](src/domain/enums/greeting_enum.py)
+- [Operation result enums (shared)](src/domain/enums/operation_results.py)
+- [Operation response schemas (shared)](src/api/schemas/operation_schema.py)
+- [Response helpers and status maps (shared)](src/api/result_status_maps.py)
 - [Repository Base](src/domain/repositories/greeting_repository_base.py)
 - [Repository implementation](src/infrastructure/repositories/greeting_repository.py)
 - [DB Base](src/infrastructure/database/db.py)
 - [DB models](src/infrastructure/database/models.py)
 - [Connection factory Base](src/infrastructure/database/connection_factory_base.py)
 - [Connection factory](src/infrastructure/database/connection_factory.py)
+
 - [Blob storage service Base](src/application/services/blob_storage_service_base.py)
 - [Blob storage service](src/infrastructure/blob_storage/blob_storage_service.py)
 - [DTOs](src/application/dtos/greeting_dto.py)

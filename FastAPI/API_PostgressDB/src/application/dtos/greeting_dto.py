@@ -22,16 +22,3 @@ class GreetingDTO:
     created_at: datetime
 
 
-@dataclass(frozen=True)
-class GreetingListDTO:
-    """DTO for a list of greetings."""
-
-    greetings: tuple["GreetingDTO", ...]
-
-
-@dataclass(frozen=True)
-class DeleteResultDTO:
-    """DTO for deletion result."""
-
-    is_successful: bool
-    deleted_id: int | None = None

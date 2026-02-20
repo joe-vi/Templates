@@ -5,7 +5,6 @@ from src.api.schemas.greeting_schema import (
 from src.application.dtos.greeting_dto import (
     CreateGreetingDTO,
     GreetingDTO,
-    GreetingListDTO,
 )
 
 
@@ -42,13 +41,13 @@ class GreetingConverter:
         )
 
     @staticmethod
-    def to_response_list(greeting_list_dto: GreetingListDTO) -> list[GreetingResponse]:
-        """Convert a greeting list DTO to a list of API response models.
+    def to_response_list(greeting_dtos: list[GreetingDTO]) -> list[GreetingResponse]:
+        """Convert a list of greeting DTOs to a list of API response models.
 
         Args:
-            greeting_list_dto: The application DTO containing a collection of greetings.
+            greeting_dtos: The list of application DTOs to convert.
 
         Returns:
-            A list of GreetingResponse models, one per greeting in the DTO.
+            A list of GreetingResponse models, one per DTO.
         """
-        return [GreetingConverter.to_response(greeting_dto) for greeting_dto in greeting_list_dto.greetings]
+        return [GreetingConverter.to_response(greeting_dto) for greeting_dto in greeting_dtos]
