@@ -462,6 +462,7 @@ class UpdateResult(StrEnum):
     FAILURE = "failure"
     CONCURRENCY_ERROR = "concurrency_error"
     UNIQUE_CONSTRAINT_ERROR = "unique_constraint_error"
+    NOT_FOUND = "not_found"
 
 class DeleteResult(StrEnum):
     SUCCESS = "success"
