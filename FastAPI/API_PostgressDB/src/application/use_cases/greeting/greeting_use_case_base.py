@@ -1,9 +1,6 @@
 from abc import ABC, abstractmethod
 
-from src.application.dtos.greeting_dto import (
-    CreateGreetingDTO,
-    GreetingDTO,
-)
+from src.application.use_cases.greeting.greeting_dto import CreateGreetingDTO, GreetingDTO
 from src.domain.enums.operation_results import CreateResult, DeleteResult
 
 

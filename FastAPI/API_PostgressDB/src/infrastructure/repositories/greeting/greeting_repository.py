@@ -2,9 +2,9 @@ import asyncpg
 from sqlalchemy import delete, select
 from sqlalchemy.exc import DBAPIError, IntegrityError
 
-from src.domain.entities.greeting import Greeting
+from src.domain.entities.greeting.greeting import Greeting
 from src.domain.enums.operation_results import CreateResult, DeleteResult
-from src.domain.repositories.greeting_repository_base import GreetingRepositoryBase
+from src.domain.repositories.greeting.greeting_repository_base import GreetingRepositoryBase
 from src.infrastructure.database.connection_factory_base import ConnectionFactoryBase
 from src.infrastructure.database.models import GreetingModel
 

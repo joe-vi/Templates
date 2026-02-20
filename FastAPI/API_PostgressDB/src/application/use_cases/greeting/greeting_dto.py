@@ -20,5 +20,3 @@ class GreetingDTO:
     message: str
     status: GreetingStatus
     created_at: datetime
-
-

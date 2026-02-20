@@ -1,8 +1,5 @@
-from src.application.dtos.greeting_dto import (
-    CreateGreetingDTO,
-    GreetingDTO,
-)
-from src.domain.entities.greeting import Greeting
+from src.application.use_cases.greeting.greeting_dto import CreateGreetingDTO, GreetingDTO
+from src.domain.entities.greeting.greeting import Greeting
 
 
 class GreetingEntityConverter:

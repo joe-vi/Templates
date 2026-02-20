@@ -1,11 +1,5 @@
-from src.api.schemas.greeting_schema import (
-    GreetingCreateRequest,
-    GreetingResponse,
-)
-from src.application.dtos.greeting_dto import (
-    CreateGreetingDTO,
-    GreetingDTO,
-)
+from src.api.routers.greeting.greeting_schema import GreetingCreateRequest, GreetingResponse
+from src.application.use_cases.greeting.greeting_dto import CreateGreetingDTO, GreetingDTO
 
 
 class GreetingConverter:

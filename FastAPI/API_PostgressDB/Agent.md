@@ -14,11 +14,64 @@ Domain (Core) → Application → Infrastructure → API
 
 | Layer | Location | Contains | Depends On |
 |-------|----------|----------|------------|
-| Domain | `src/domain/` | Entities, Repository ABC (ending with `Base`), result enums | Nothing |
+| Domain | `src/domain/` | Entities, Repository ABC (ending with `Base`), QueryRows, result enums | Nothing |
 | Application | `src/application/` | Use case ABC/implementations, DTOs, Entity converters, External service ABC (ending with `Base`) | Domain only |
 | Infrastructure | `src/infrastructure/` | DB models, Repository implementations | Domain, Application |
 | API | `src/api/` | Routes, Request/Response schemas, API converters | Application (Base classes) |
 | DI Container | `src/container.py` | DI module with `injector.Module` and `Binder.bind()` | All layers |
+
+### File Organisation — Type + Entity Grouping
+
+Within each layer, files are organised by **type** first, then **entity name**. Shared/cross-cutting files (enums, DB infrastructure, external services, operation schemas) stay in their own directories.
+
+```
+src/
+├── domain/
+│   ├── entities/
+│   │   └── greeting/                    ← entity folder
+│   │       └── greeting.py              # entity
+│   ├── repositories/
+│   │   └── greeting/                    ← entity folder
+│   │       ├── greeting_repository_base.py  # repository ABC
+│   │       └── greeting_query_row.py    # query row (when needed)
+│   └── enums/                           ← shared across all entities
+│       ├── greeting_enum.py
+│       └── operation_results.py
+│
+├── application/
+│   ├── use_cases/
+│   │   └── greeting/                    ← entity folder
+│   │       ├── greeting_dto.py
+│   │       ├── greeting_converter.py
+│   │       ├── greeting_use_case_base.py
+│   │       └── greeting_use_case.py
+│   └── services/                        ← shared external service interfaces
+│       └── blob_storage_service_base.py
+│
+├── infrastructure/
+│   ├── repositories/
+│   │   └── greeting/                    ← entity folder
+│   │       └── greeting_repository.py
+│   ├── database/                        ← shared DB infrastructure
+│   │   ├── db.py
+│   │   ├── models.py
+│   │   ├── connection_factory_base.py
+│   │   └── connection_factory.py
+│   └── blob_storage/                    ← shared external service implementations
+│       └── blob_storage_service.py
+│
+└── api/
+    ├── routers/
+    │   └── greeting/                    ← entity folder
+    │       ├── greeting_schema.py
+    │       ├── greeting_converter.py
+    │       └── greeting_routes.py
+    ├── schemas/                         ← shared operation response schemas
+    │   └── operation_schema.py
+    └── result_status_maps.py            ← shared response helpers
+```
+
+**Rule**: When adding a new entity (e.g., `User`), create `src/domain/entities/user/`, `src/domain/repositories/user/`, `src/application/use_cases/user/`, `src/infrastructure/repositories/user/`, and `src/api/routers/user/`. Never scatter entity files into flat shared directories.
 
 ## Key Architectural Patterns
 
@@ -134,7 +187,7 @@ injector = Injector([AppModule()])
 attach_injector(app, injector)
 ```
 
-**Route Injection** ([greeting_routes.py](src/api/routes/greeting_routes.py)):
+**Route Injection** ([greeting_routes.py](src/api/routers/greeting/greeting_routes.py)):
 ```python
 @router.post("/greetings")
 async def create_greeting(
@@ -156,7 +209,7 @@ async def create_greeting(
 
 When adding a new feature (e.g., "User Management"), follow this order:
 
-#### 1. Domain Layer (`src/domain/`)
+#### 1. Domain Layer
 
 ```python
 # src/domain/enums/user_enum.py — define any enums the entity needs
@@ -167,7 +220,7 @@ class UserStatus(StrEnum):
     ACTIVE = "active"
     SUSPENDED = "suspended"
 
-# src/domain/entities/user.py
+# src/domain/entities/user/user.py
 from dataclasses import field
 from src.domain.enums.user_enum import UserStatus
 
@@ -178,7 +231,7 @@ class User:
     email: str
     status: UserStatus = field(default=UserStatus.ACTIVE)
 
-# src/domain/repositories/user_repository_base.py
+# src/domain/repositories/user/user_repository_base.py
 class UserRepositoryBase(ABC):  # Must end with Base
     @abstractmethod
     async def create(self, user: User) -> User:
@@ -193,7 +246,7 @@ class UserRepositoryBase(ABC):  # Must end with Base
         pass
 ```
 
-#### 2. Infrastructure Layer (`src/infrastructure/`)
+#### 2. Infrastructure Layer
 
 ```python
 # src/infrastructure/database/models.py (add to existing models.py)
@@ -206,7 +259,7 @@ class UserModel(Base):
     name: Mapped[str] = mapped_column(nullable=False)
     email: Mapped[str] = mapped_column(unique=True, nullable=False)
 
-# src/infrastructure/repositories/user_repository.py
+# src/infrastructure/repositories/user/user_repository.py
 class UserRepository(UserRepositoryBase):
     def __init__(self, connection_factory: ConnectionFactoryBase):
         self._connection_factory = connection_factory
@@ -217,10 +270,10 @@ class UserRepository(UserRepositoryBase):
             pass
 ```
 
-#### 3. Application Layer (`src/application/`)
+#### 3. Application Layer
 
 ```python
-# src/application/dtos/user_dto.py
+# src/application/use_cases/user/user_dto.py
 @dataclass(frozen=True)
 class CreateUserDTO:
     name: str
@@ -232,7 +285,7 @@ class UserDTO:
     name: str
     email: str
 
-# src/application/converters/user_converter.py
+# src/application/use_cases/user/user_converter.py
 class UserEntityConverter:
     @staticmethod
     def to_dto(user: User) -> UserDTO:
@@ -242,7 +295,7 @@ class UserEntityConverter:
     def to_entity(create_user_dto: CreateUserDTO) -> User:
         return User(id=None, name=create_user_dto.name, email=create_user_dto.email)
 
-# src/application/use_cases/user_use_case_base.py
+# src/application/use_cases/user/user_use_case_base.py
 class UserUseCaseBase(ABC):  # Must end with Base
     @abstractmethod
     async def create_user(self, create_user_dto: CreateUserDTO) -> UserDTO:
@@ -256,7 +309,7 @@ class UserUseCaseBase(ABC):  # Must end with Base
         """
         pass
 
-# src/application/use_cases/user_use_case.py
+# src/application/use_cases/user/user_use_case.py
 class UserUseCase(UserUseCaseBase):
     def __init__(self, repository: UserRepositoryBase):
         self._repository = repository
@@ -267,10 +320,10 @@ class UserUseCase(UserUseCaseBase):
         return UserEntityConverter.to_dto(created_user)
 ```
 
-#### 4. API Layer (`src/api/`)
+#### 4. API Layer
 
 ```python
-# src/api/schemas/user_schema.py
+# src/api/routers/user/user_schema.py
 class UserCreateRequest(BaseModel):
     name: str
     email: EmailStr
@@ -280,7 +333,7 @@ class UserResponse(BaseModel):
     name: str
     email: str
 
-# src/api/converters/user_converter.py
+# src/api/routers/user/user_converter.py
 class UserConverter:
     @staticmethod
     def to_create_dto(request: UserCreateRequest) -> CreateUserDTO:
@@ -290,7 +343,7 @@ class UserConverter:
     def to_response(user_dto: UserDTO) -> UserResponse:
         return UserResponse(id=user_dto.id, name=user_dto.name, email=user_dto.email)
 
-# src/api/routes/user_routes.py
+# src/api/routers/user/user_routes.py
 router = APIRouter(prefix="/api/v1", tags=["users"])
 
 @router.post("/users", response_model=UserResponse, status_code=status.HTTP_201_CREATED)
@@ -311,7 +364,7 @@ binder.bind(UserRepositoryBase, to=UserRepository)
 binder.bind(UserUseCaseBase, to=UserUseCase)
 
 # src/main.py — register router
-from src.api.routes.user_routes import router as user_router
+from src.api.routers.user.user_routes import router as user_router
 app.include_router(user_router)
 ```
 
@@ -355,14 +408,14 @@ from sqlalchemy.orm import Mapped, mapped_column
 greeting_status_enum = SQLAlchemyEnum(GreetingStatus, name="greeting_status")
 status: Mapped[GreetingStatus] = mapped_column(greeting_status_enum, nullable=False, default=GreetingStatus.ACTIVE)
 
-# src/domain/entities/greeting.py — used directly on the entity
+# src/domain/entities/greeting/greeting.py — used directly on the entity
 from dataclasses import field
 status: GreetingStatus = field(default=GreetingStatus.ACTIVE)
 
-# src/application/dtos/greeting_dto.py — carried through as-is
+# src/application/use_cases/greeting/greeting_dto.py — carried through as-is
 status: GreetingStatus
 
-# src/api/schemas/greeting_schema.py — Pydantic handles StrEnum natively
+# src/api/routers/greeting/greeting_schema.py — Pydantic handles StrEnum natively
 status: GreetingStatus = Field(default=GreetingStatus.ACTIVE)
 ```
 
@@ -700,10 +753,10 @@ Use this pattern when a repository query returns **more data than a single domai
 
 ### Where `QueryRow` classes live
 
-`QueryRow` classes live in `src/domain/repositories/`, co-located with the repository base that declares them as return types. They are not entities (no lifecycle, no identity) — they are intermediate projection types that exist solely to carry the result of a specific query. Keeping them next to the repository base makes the contract self-contained and immediately discoverable.
+`QueryRow` classes live in `src/domain/repositories/{entity}/`, co-located with the repository base that declares them as return types. They are not entities (no lifecycle, no identity) — they are intermediate projection types that exist solely to carry the result of a specific query. Keeping them next to the repository base makes the contract self-contained and immediately discoverable.
 
 ```
-src/domain/repositories/
+src/domain/repositories/greeting/
 ├── greeting_repository_base.py      ← declares get_with_author() → GreetingWithAuthorQueryRow
 └── greeting_query_row.py            ← defines GreetingWithAuthorQueryRow
 ```
@@ -711,7 +764,7 @@ src/domain/repositories/
 ### Naming and structure
 
 ```python
-# src/domain/repositories/greeting_query_row.py
+# src/domain/repositories/greeting/greeting_query_row.py
 from dataclasses import dataclass
 from datetime import datetime
 from src.domain.enums.greeting_enum import GreetingStatus
@@ -733,7 +786,7 @@ class GreetingWithAuthorQueryRow:
 ### Repository base (domain layer)
 
 ```python
-# src/domain/repositories/greeting_repository_base.py
+# src/domain/repositories/greeting/greeting_repository_base.py
 @abstractmethod
 async def get_with_author(self, greeting_id: int) -> GreetingWithAuthorQueryRow | None:
     """Fetch a greeting and its author details.
@@ -750,7 +803,7 @@ async def get_with_author(self, greeting_id: int) -> GreetingWithAuthorQueryRow 
 ### Repository implementation (infrastructure layer)
 
 ```python
-# src/infrastructure/repositories/greeting_repository.py
+# src/infrastructure/repositories/greeting/greeting_repository.py
 async def get_with_author(self, greeting_id: int) -> GreetingWithAuthorQueryRow | None:
     async with self._connection_factory.get_session() as session:
         query_result = await session.execute(
@@ -785,7 +838,7 @@ async def get_with_author(self, greeting_id: int) -> GreetingWithAuthorQueryRow 
 Create a **dedicated DTO** for this richer result — do not reuse `GreetingDTO` if the shape differs.
 
 ```python
-# src/application/dtos/greeting_dto.py
+# src/application/use_cases/greeting/greeting_dto.py
 @dataclass(frozen=True)
 class GreetingWithAuthorDTO:
     id: int
@@ -795,7 +848,7 @@ class GreetingWithAuthorDTO:
     author_name: str
     reply_count: int
 
-# src/application/converters/greeting_converter.py
+# src/application/use_cases/greeting/greeting_converter.py
 class GreetingEntityConverter:
     @staticmethod
     def query_row_to_dto(query_row: GreetingWithAuthorQueryRow) -> GreetingWithAuthorDTO:
@@ -837,7 +890,7 @@ API converter → GreetingWithAuthorResponse
 - **Never reuse the domain entity** when the query adds data the entity doesn't model — create a `QueryRow` instead
 - **`QueryRow` is read-only** (`frozen=True`) — it is never passed back into the repository or mutated
 - **One `QueryRow` per query shape** — if two queries return different projections, create two `QueryRow` classes
-- **`QueryRow` lives in domain** — it is part of the repository contract, so it must be co-located with the repository interface
+- **`QueryRow` lives in `src/domain/repositories/{entity}/`** — co-located with the repository base that declares it
 - **Always convert to DTO before leaving the use case** — the API layer never receives a `QueryRow` directly
 
 ---
@@ -855,6 +908,7 @@ API converter → GreetingWithAuthorResponse
 - **Don't forget `attach_injector(app, injector)`** — must be called before including routers
 - **Don't use `singleton` for repositories/use cases** — only `ConnectionFactory` and external service clients (e.g. `BlobStorageService`) should be singleton
 - **Don't forget to close singleton resources** — every singleton that holds an external connection (DB pool, HTTP client, blob storage client) must have a `close()` method on its base class and be closed in the `lifespan` shutdown block in `main.py`
+- **Don't scatter entity files into flat shared directories** — follow the `src/{layer}/{type}/{entity}/` pattern
 
 ## Configuration
 
@@ -888,27 +942,26 @@ async def test_create_user():
 
 ## File References
 
-- [Greeting entity](src/domain/entities/greeting.py)
+- [Greeting entity](src/domain/entities/greeting/greeting.py)
 - [Greeting status enum](src/domain/enums/greeting_enum.py)
 - [Operation result enums (shared)](src/domain/enums/operation_results.py)
 - [Operation response schemas (shared)](src/api/schemas/operation_schema.py)
 - [Response helpers and status maps (shared)](src/api/result_status_maps.py)
-- [Repository Base](src/domain/repositories/greeting_repository_base.py)
-- [Repository implementation](src/infrastructure/repositories/greeting_repository.py)
+- [Repository Base](src/domain/repositories/greeting/greeting_repository_base.py)
+- [Repository implementation](src/infrastructure/repositories/greeting/greeting_repository.py)
 - [DB Base](src/infrastructure/database/db.py)
 - [DB models](src/infrastructure/database/models.py)
 - [Connection factory Base](src/infrastructure/database/connection_factory_base.py)
 - [Connection factory](src/infrastructure/database/connection_factory.py)
-
 - [Blob storage service Base](src/application/services/blob_storage_service_base.py)
 - [Blob storage service](src/infrastructure/blob_storage/blob_storage_service.py)
-- [DTOs](src/application/dtos/greeting_dto.py)
-- [Entity converter](src/application/converters/greeting_converter.py)
-- [Use case Base](src/application/use_cases/greeting_use_case_base.py)
-- [Use case implementation](src/application/use_cases/greeting_use_case.py)
-- [API schemas](src/api/schemas/greeting_schema.py)
-- [API converter](src/api/converters/greeting_converter.py)
-- [Routes](src/api/routes/greeting_routes.py)
+- [DTOs](src/application/use_cases/greeting/greeting_dto.py)
+- [Entity converter](src/application/use_cases/greeting/greeting_converter.py)
+- [Use case Base](src/application/use_cases/greeting/greeting_use_case_base.py)
+- [Use case implementation](src/application/use_cases/greeting/greeting_use_case.py)
+- [API schemas](src/api/routers/greeting/greeting_schema.py)
+- [API converter](src/api/routers/greeting/greeting_converter.py)
+- [Routes](src/api/routers/greeting/greeting_routes.py)
 - [DI Container](src/container.py)
 - [Settings](src/config/settings.py)
 - [Main app](src/main.py)

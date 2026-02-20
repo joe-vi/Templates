@@ -1,11 +1,8 @@
-from src.application.converters.greeting_converter import GreetingEntityConverter
-from src.application.dtos.greeting_dto import (
-    CreateGreetingDTO,
-    GreetingDTO,
-)
-from src.application.use_cases.greeting_use_case_base import GreetingUseCaseBase
+from src.application.use_cases.greeting.greeting_converter import GreetingEntityConverter
+from src.application.use_cases.greeting.greeting_dto import CreateGreetingDTO, GreetingDTO
+from src.application.use_cases.greeting.greeting_use_case_base import GreetingUseCaseBase
 from src.domain.enums.operation_results import CreateResult, DeleteResult
-from src.domain.repositories.greeting_repository_base import GreetingRepositoryBase
+from src.domain.repositories.greeting.greeting_repository_base import GreetingRepositoryBase
 
 
 class GreetingUseCase(GreetingUseCaseBase):

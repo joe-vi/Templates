@@ -3,7 +3,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi_injector import attach_injector
 
-from src.api.routes.greeting_routes import router as greeting_router
+from src.api.routers.greeting.greeting_routes import router as greeting_router
 from src.application.services.blob_storage_service_base import BlobStorageServiceBase
 from src.container import injector
 from src.infrastructure.database.connection_factory_base import ConnectionFactoryBase

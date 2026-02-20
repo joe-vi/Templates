@@ -1,6 +1,6 @@
 from abc import ABC, abstractmethod
 
-from src.domain.entities.greeting import Greeting
+from src.domain.entities.greeting.greeting import Greeting
 from src.domain.enums.operation_results import CreateResult, DeleteResult
 
 

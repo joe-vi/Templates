@@ -4,15 +4,11 @@ from fastapi import APIRouter, HTTPException, status
 from fastapi.responses import JSONResponse
 from fastapi_injector import Injected
 
-from src.api.converters.greeting_converter import GreetingConverter
+from src.api.routers.greeting.greeting_converter import GreetingConverter
+from src.api.routers.greeting.greeting_schema import GreetingCreateRequest, GreetingResponse, HelloWorldResponse
 from src.api.result_status_maps import create_response, delete_response
-from src.api.schemas.greeting_schema import (
-    GreetingCreateRequest,
-    GreetingResponse,
-    HelloWorldResponse,
-)
 from src.api.schemas.operation_schema import CreateOperationResponse, DeleteOperationResponse
-from src.application.use_cases.greeting_use_case_base import GreetingUseCaseBase
+from src.application.use_cases.greeting.greeting_use_case_base import GreetingUseCaseBase
 
 router = APIRouter(prefix="/api/v1", tags=["greetings"])
 
