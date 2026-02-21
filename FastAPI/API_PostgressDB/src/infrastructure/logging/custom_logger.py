@@ -3,6 +3,8 @@ import logging
 import uuid
 from datetime import UTC, datetime
 
+from injector import inject
+
 from src.application.services.custom_logger_base import CustomLoggerBase
 from src.config.settings import Settings
 
@@ -38,6 +40,7 @@ class CustomLogger(CustomLoggerBase):
     implements CustomLoggerBase and update the binding in container.py.
     """
 
+    @inject
     def __init__(self, settings: Settings) -> None:
         """Initialize the logger with a JSON stream handler and a unique request ID.
 

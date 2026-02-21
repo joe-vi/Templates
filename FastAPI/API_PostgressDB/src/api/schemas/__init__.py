@@ -1,11 +1,11 @@
-from src.api.schemas.greeting_schema import (
-    GreetingCreateRequest,
-    GreetingResponse,
-    HelloWorldResponse,
+from src.api.schemas.operation_schema import (
+    CreateOperationResponse,
+    DeleteOperationResponse,
+    UpdateOperationResponse,
 )
 
 __all__ = [
-    "GreetingCreateRequest",
-    "GreetingResponse",
-    "HelloWorldResponse",
+    "CreateOperationResponse",
+    "DeleteOperationResponse",
+    "UpdateOperationResponse",
 ]

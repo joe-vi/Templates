@@ -1,5 +1,6 @@
 from azure.storage.blob import ContentSettings
 from azure.storage.blob.aio import BlobServiceClient
+from injector import inject
 
 from src.application.services.blob_storage_service_base import BlobStorageServiceBase
 from src.config.settings import Settings
@@ -12,6 +13,7 @@ class BlobStorageService(BlobStorageServiceBase):
     BlobStorageServiceBase and update the binding in container.py.
     """
 
+    @inject
     def __init__(self, settings: Settings) -> None:
         """Initialize the Azure Blob Storage client.
 

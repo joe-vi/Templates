@@ -1,8 +1,9 @@
 from datetime import datetime
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
+from src.application.services.password_hasher_base import PasswordHasherBase
 from src.application.use_cases.user.user_dto import CreateUserDTO, UpdateUserRoleDTO, UserDTO
 from src.application.use_cases.user.user_use_case import UserUseCase
 from src.domain.entities.user.user import User
@@ -27,14 +28,21 @@ def mock_repository() -> UserRepositoryBase:
 
 
 @pytest.fixture
-def use_case(mock_repository: UserRepositoryBase) -> UserUseCase:
-    return UserUseCase(repository=mock_repository)
+def mock_password_hasher() -> PasswordHasherBase:
+    hasher = MagicMock(spec=PasswordHasherBase)
+    hasher.hash.return_value = "hashed_password"
+    return hasher
+
+
+@pytest.fixture
+def use_case(mock_repository: UserRepositoryBase, mock_password_hasher: PasswordHasherBase) -> UserUseCase:
+    return UserUseCase(repository=mock_repository, password_hasher=mock_password_hasher)
 
 
 class TestCreateUser:
     async def test_returns_success_result_and_new_id(self, use_case: UserUseCase, mock_repository: UserRepositoryBase):
         mock_repository.create.return_value = (CreateResult.SUCCESS, 1)
-        create_user_dto = CreateUserDTO(email="alice@example.com", username="alice")
+        create_user_dto = CreateUserDTO(email="alice@example.com", username="alice", password="TestPass123")
 
         result, entity_id = await use_case.create_user(create_user_dto)
 
@@ -43,7 +51,7 @@ class TestCreateUser:
 
     async def test_calls_repository_create_with_converted_entity(self, use_case: UserUseCase, mock_repository: UserRepositoryBase):
         mock_repository.create.return_value = (CreateResult.SUCCESS, 1)
-        create_user_dto = CreateUserDTO(email="alice@example.com", username="alice")
+        create_user_dto = CreateUserDTO(email="alice@example.com", username="alice", password="TestPass123")
 
         await use_case.create_user(create_user_dto)
 
@@ -55,7 +63,7 @@ class TestCreateUser:
 
     async def test_returns_unique_constraint_error_forwarded_from_repository(self, use_case: UserUseCase, mock_repository: UserRepositoryBase):
         mock_repository.create.return_value = (CreateResult.UNIQUE_CONSTRAINT_ERROR, None)
-        create_user_dto = CreateUserDTO(email="alice@example.com", username="alice")
+        create_user_dto = CreateUserDTO(email="alice@example.com", username="alice", password="TestPass123")
 
         result, entity_id = await use_case.create_user(create_user_dto)
 
@@ -64,7 +72,7 @@ class TestCreateUser:
 
     async def test_returns_failure_forwarded_from_repository(self, use_case: UserUseCase, mock_repository: UserRepositoryBase):
         mock_repository.create.return_value = (CreateResult.FAILURE, None)
-        create_user_dto = CreateUserDTO(email="alice@example.com", username="alice")
+        create_user_dto = CreateUserDTO(email="alice@example.com", username="alice", password="TestPass123")
 
         result, entity_id = await use_case.create_user(create_user_dto)
 
@@ -73,7 +81,7 @@ class TestCreateUser:
 
     async def test_returns_concurrency_error_forwarded_from_repository(self, use_case: UserUseCase, mock_repository: UserRepositoryBase):
         mock_repository.create.return_value = (CreateResult.CONCURRENCY_ERROR, None)
-        create_user_dto = CreateUserDTO(email="alice@example.com", username="alice")
+        create_user_dto = CreateUserDTO(email="alice@example.com", username="alice", password="TestPass123")
 
         result, entity_id = await use_case.create_user(create_user_dto)
 

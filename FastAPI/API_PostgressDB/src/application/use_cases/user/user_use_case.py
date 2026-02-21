@@ -1,3 +1,5 @@
+from injector import inject
+
 from src.application.services.password_hasher_base import PasswordHasherBase
 from src.application.use_cases.user.user_converter import UserEntityConverter
 from src.application.use_cases.user.user_dto import CreateUserDTO, UpdateUserRoleDTO, UserDTO
@@ -9,6 +11,7 @@ from src.domain.repositories.user.user_repository_base import UserRepositoryBase
 class UserUseCase(UserUseCaseBase):
     """Use case for user operations."""
 
+    @inject
     def __init__(self, repository: UserRepositoryBase, password_hasher: PasswordHasherBase):
         """Initialize the user use case.
 

@@ -1,3 +1,5 @@
+from injector import inject
+
 from src.application.services.password_hasher_base import PasswordHasherBase
 from src.application.services.token_service_base import TokenServiceBase
 from src.application.use_cases.auth.auth_dto import LoginDTO, TokenDTO
@@ -10,6 +12,7 @@ from src.domain.repositories.user.user_repository_base import UserRepositoryBase
 class AuthUseCase(AuthUseCaseBase):
     """Use case for authentication operations."""
 
+    @inject
     def __init__(
         self,
         user_repository: UserRepositoryBase,

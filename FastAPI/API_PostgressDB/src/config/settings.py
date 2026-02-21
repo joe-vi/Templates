@@ -19,17 +19,15 @@ class Settings(BaseSettings):
 
     @computed_field
     @property
-    def database_url(self) -> str:
+    def database_url(self) -> URL:
         """Build the SQLAlchemy database URL from individual connection components."""
-        return str(
-            URL.create(
-                drivername=self.db_driver,
-                username=self.db_user,
-                password=self.db_password,
-                host=self.db_host,
-                port=self.db_port,
-                database=self.db_name,
-            )
+        return URL.create(
+            drivername=self.db_driver,
+            username=self.db_user,
+            password=self.db_password,
+            host=self.db_host,
+            port=self.db_port,
+            database=self.db_name,
         )
 
     # Logging settings

@@ -1,6 +1,7 @@
 from datetime import UTC, datetime, timedelta
 
 import jwt
+from injector import inject
 from jwt.exceptions import InvalidTokenError
 
 from src.application.services.token_service_base import TokenServiceBase
@@ -19,6 +20,7 @@ class TokenService(TokenServiceBase):
     TokenServiceBase and update the binding in container.py.
     """
 
+    @inject
     def __init__(self, settings: Settings) -> None:
         """Initialize the token service with JWT configuration.
 

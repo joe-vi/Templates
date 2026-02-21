@@ -88,9 +88,9 @@ class TestToDtoList:
 
 class TestToEntity:
     def test_sets_id_to_none(self):
-        create_user_dto = CreateUserDTO(email="alice@example.com", username="alice")
+        create_user_dto = CreateUserDTO(email="alice@example.com", username="alice", password="TestPass123")
 
-        user = UserEntityConverter.to_entity(create_user_dto)
+        user = UserEntityConverter.to_entity(create_user_dto, "hashed_password")
 
         assert user.id is None
 
@@ -98,11 +98,12 @@ class TestToEntity:
         create_user_dto = CreateUserDTO(
             email="alice@example.com",
             username="alice",
+            password="TestPass123",
             role=UserRole.ADMIN,
             status=UserStatus.INACTIVE,
         )
 
-        user = UserEntityConverter.to_entity(create_user_dto)
+        user = UserEntityConverter.to_entity(create_user_dto, "hashed_password")
 
         assert isinstance(user, User)
         assert user.email == "alice@example.com"
@@ -111,15 +112,15 @@ class TestToEntity:
         assert user.status == UserStatus.INACTIVE
 
     def test_applies_default_role_when_not_provided(self):
-        create_user_dto = CreateUserDTO(email="bob@example.com", username="bob")
+        create_user_dto = CreateUserDTO(email="bob@example.com", username="bob", password="TestPass123")
 
-        user = UserEntityConverter.to_entity(create_user_dto)
+        user = UserEntityConverter.to_entity(create_user_dto, "hashed_password")
 
         assert user.role == UserRole.USER
 
     def test_applies_default_status_when_not_provided(self):
-        create_user_dto = CreateUserDTO(email="bob@example.com", username="bob")
+        create_user_dto = CreateUserDTO(email="bob@example.com", username="bob", password="TestPass123")
 
-        user = UserEntityConverter.to_entity(create_user_dto)
+        user = UserEntityConverter.to_entity(create_user_dto, "hashed_password")
 
         assert user.status == UserStatus.ACTIVE

@@ -1,4 +1,5 @@
 import asyncpg
+from injector import inject
 from sqlalchemy import delete, select, update
 from sqlalchemy.exc import DBAPIError, IntegrityError
 
@@ -13,6 +14,7 @@ from src.infrastructure.database.models import UserModel
 class UserRepository(UserRepositoryBase):
     """Implementation of user repository using SQLAlchemy."""
 
+    @inject
     def __init__(self, connection_factory: ConnectionFactoryBase):
         """Initialize the user repository.
 

@@ -22,6 +22,7 @@ class TestToCreateDto:
         request = UserCreateRequest(
             email="alice@example.com",
             username="alice",
+            password="TestPass123",
             role=UserRole.ADMIN,
             status=UserStatus.INACTIVE,
         )
@@ -31,18 +32,19 @@ class TestToCreateDto:
         assert isinstance(create_dto, CreateUserDTO)
         assert create_dto.email == "alice@example.com"
         assert create_dto.username == "alice"
+        assert create_dto.password == "TestPass123"
         assert create_dto.role == UserRole.ADMIN
         assert create_dto.status == UserStatus.INACTIVE
 
     def test_applies_default_role_from_request_schema(self):
-        request = UserCreateRequest(email="bob@example.com", username="bob")
+        request = UserCreateRequest(email="bob@example.com", username="bob", password="TestPass123")
 
         create_dto = UserConverter.to_create_dto(request)
 
         assert create_dto.role == UserRole.USER
 
     def test_applies_default_status_from_request_schema(self):
-        request = UserCreateRequest(email="bob@example.com", username="bob")
+        request = UserCreateRequest(email="bob@example.com", username="bob", password="TestPass123")
 
         create_dto = UserConverter.to_create_dto(request)
 

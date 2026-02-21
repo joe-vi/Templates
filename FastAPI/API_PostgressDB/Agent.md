@@ -194,6 +194,9 @@ injector = Injector([AppModule()])
 
 **Attach Middleware** ([main.py](src/main.py)):
 ```python
+from fastapi_injector import InjectorMiddleware, attach_injector
+
+app.add_middleware(InjectorMiddleware, injector=injector)  # required for request_scope
 attach_injector(app, injector)
 ```
 
@@ -210,6 +213,8 @@ async def create_user(
 ```
 
 **Critical Rules**:
+- **All injectable classes MUST have `@inject` on `__init__`** — this is a hard requirement for `injector` 0.24+. Without it the injector calls `__init__()` with no arguments, producing a `TypeError` at startup. Import with `from injector import inject`.
+- **`InjectorMiddleware` MUST be added before `attach_injector()`** — it sets the per-request context variable that `request_scope` depends on. Omitting it causes `LookupError` for any request-scoped service.
 - Routes MUST use `Injected(BaseClass)` for use case and service DI — never `Depends()` for these
 - Routes MUST depend on Base classes (abstractions), never concrete implementations
 - Use `singleton` scope only for shared resources (e.g., ConnectionFactory)
@@ -313,7 +318,10 @@ from src.infrastructure.database.models.user_model import UserModel
 __all__ = ["UserModel"]
 
 # src/infrastructure/repositories/user/user_repository.py
+from injector import inject
+
 class UserRepository(UserRepositoryBase):
+    @inject
     def __init__(self, connection_factory: ConnectionFactoryBase):
         self._connection_factory = connection_factory
 
@@ -363,7 +371,10 @@ class UserUseCaseBase(ABC):  # Must end with Base
         pass
 
 # src/application/use_cases/user/user_use_case.py
+from injector import inject
+
 class UserUseCase(UserUseCaseBase):
+    @inject
     def __init__(self, repository: UserRepositoryBase):
         self._repository = repository
 
@@ -698,9 +709,12 @@ class EmailServiceBase(ABC):
     async def send(self, to: str, subject: str, body: str) -> bool: ...
 
 # src/infrastructure/email/email_service.py
+from injector import inject
+
 class EmailService(EmailServiceBase):
     """Concrete implementation. Swap providers by changing container.py only."""
 
+    @inject
     def __init__(self, settings: Settings) -> None:
         self._client = ...  # provider-specific client
 
@@ -713,7 +727,10 @@ binder.bind(EmailServiceBase, to=EmailService, scope=singleton)
 
 **Use in a use case:**
 ```python
+from injector import inject
+
 class OrderUseCase(OrderUseCaseBase):
+    @inject
     def __init__(self, repository: OrderRepositoryBase, email_service: EmailServiceBase) -> None:
         self._repository = repository
         self._email_service = email_service
@@ -772,7 +789,10 @@ binder.bind(UserContextBase, to=UserContext, scope=request_scope)
 ### Use in a use case
 
 ```python
+from injector import inject
+
 class OrderUseCase(OrderUseCaseBase):
+    @inject
     def __init__(
         self,
         order_repository: OrderRepositoryBase,
@@ -799,7 +819,10 @@ class OrderUseCase(OrderUseCaseBase):
 When a use case calls multiple repositories but each operation is **independent** (no shared transaction needed), inject each repository directly via constructor injection — the injector resolves the full chain automatically:
 
 ```python
+from injector import inject
+
 class OrderUseCase(OrderUseCaseBase):
+    @inject
     def __init__(
         self,
         user_repository: UserRepositoryBase,
@@ -851,10 +874,12 @@ open new session, yield, commit/rollback as normal
 ### Use case — inject `TransactionManagerBase` alongside repositories
 
 ```python
+from injector import inject
 from src.application.services.transaction_manager_base import TransactionManagerBase
 
 class OrderUseCase(OrderUseCaseBase):
 
+    @inject
     def __init__(
         self,
         transaction_manager: TransactionManagerBase,
@@ -1067,6 +1092,8 @@ API converter → GreetingWithAuthorResponse
 - **Don't use concrete types in route signatures** — always use base classes: `Injected(UserUseCaseBase)`
 - **Don't create instances manually** — let the injector resolve the dependency chain
 - **Don't forget to bind in AppModule** — every new base/implementation pair needs `binder.bind()`
+- **Don't forget `@inject` on `__init__`** — every injectable class (repositories, use cases, services) MUST have `@inject` (from `injector`) on its constructor; omitting it causes `TypeError` at runtime because the injector calls `__init__()` with no arguments
+- **Don't forget `InjectorMiddleware`** — add `app.add_middleware(InjectorMiddleware, injector=injector)` before `attach_injector()` in `main.py`; omitting it causes `LookupError` for request-scoped services
 - **Don't forget `attach_injector(app, injector)`** — must be called before including routers
 - **Don't use `singleton` for repositories/use cases** — only `ConnectionFactory` and external service clients (e.g. HTTP clients, connection pools) should be singleton
 - **Don't forget to close singleton resources** — every singleton that holds an external connection (DB pool, HTTP client) must have a `close()` method on its base class and be closed in the `lifespan` shutdown block in `main.py`
@@ -1082,9 +1109,10 @@ Never hardcode configuration values.
 
 1. **Enable SQL Logging**: Set `IS_SQL_ECHO_ENABLED=true` in `.env`
 2. **Check Sessions**: Ensure `async with self._connection_factory.get_session()` is used in repositories
-3. **Verify DI**: Ensure `attach_injector(app, injector)` is called in main.py
-4. **Check Bindings**: Verify all base classes are bound in `AppModule.configure()`
-5. **Layer Violations**: Domain should never import from Infrastructure
+3. **Verify DI**: Ensure `app.add_middleware(InjectorMiddleware, injector=injector)` and `attach_injector(app, injector)` are both called in `main.py` (in that order)
+4. **Check `@inject` decorator**: Every injectable class needs `@inject` on `__init__` — a missing `@inject` produces `TypeError: __init__() missing required positional arguments` at startup
+5. **Check Bindings**: Verify all base classes are bound in `AppModule.configure()`
+6. **Layer Violations**: Domain should never import from Infrastructure
 
 ## Database Migrations
 

@@ -1,7 +1,7 @@
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
-from fastapi_injector import attach_injector
+from fastapi_injector import InjectorMiddleware, attach_injector
 
 from src.api.routers.auth.auth_routes import router as auth_router
 from src.api.routers.user.user_routes import router as user_router
@@ -37,7 +37,8 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-# Attach injector as middleware for dependency injection
+# Attach injector and add middleware for request-scoped dependency injection
+app.add_middleware(InjectorMiddleware, injector=injector)
 attach_injector(app, injector)
 
 app.include_router(auth_router)

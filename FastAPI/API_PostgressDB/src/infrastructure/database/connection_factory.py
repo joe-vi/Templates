@@ -2,6 +2,7 @@ from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
 from contextvars import ContextVar
 
+from injector import inject
 from sqlalchemy.ext.asyncio import (
     AsyncEngine,
     AsyncSession,
@@ -20,6 +21,7 @@ _active_session: ContextVar[AsyncSession | None] = ContextVar("_active_session",
 class ConnectionFactory(ConnectionFactoryBase):
     """Factory for creating and managing database connections."""
 
+    @inject
     def __init__(self, settings: Settings) -> None:
         """Initialize the database engine and session factory.
 

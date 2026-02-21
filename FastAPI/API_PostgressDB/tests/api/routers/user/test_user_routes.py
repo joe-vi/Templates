@@ -7,11 +7,17 @@ from fastapi_injector import attach_injector
 from httpx import ASGITransport, AsyncClient
 from injector import Binder, Injector, InstanceProvider, Module
 
+from src.api.dependencies.jwt_dependency import get_current_user
 from src.api.routers.user.user_routes import router
+from src.application.use_cases.auth.auth_dto import TokenClaimsDTO
 from src.application.use_cases.user.user_dto import UserDTO
 from src.application.use_cases.user.user_use_case_base import UserUseCaseBase
 from src.domain.enums.operation_results import CreateResult, DeleteResult, UpdateResult
 from src.domain.enums.user_enum import UserRole, UserStatus
+
+
+def _mock_current_user() -> TokenClaimsDTO:
+    return TokenClaimsDTO(user_id=1, username="admin", role=UserRole.ADMIN)
 
 
 def _make_user_dto(user_id: int = 1) -> UserDTO:
@@ -41,6 +47,7 @@ def test_app(mock_use_case: AsyncMock) -> FastAPI:
     test_injector = Injector([TestModule()])
     attach_injector(app, test_injector)
     app.include_router(router)
+    app.dependency_overrides[get_current_user] = _mock_current_user
     return app
 
 
@@ -54,7 +61,7 @@ class TestCreateUserRoute:
     async def test_returns_201_with_result_and_id_on_success(self, client: AsyncClient, mock_use_case: AsyncMock):
         mock_use_case.create_user.return_value = (CreateResult.SUCCESS, 1)
 
-        response = await client.post("/api/v1/users", json={"email": "alice@example.com", "username": "alice"})
+        response = await client.post("/api/v1/users", json={"email": "alice@example.com", "username": "alice", "password": "TestPass123"})
 
         assert response.status_code == 201
         body = response.json()
@@ -64,7 +71,7 @@ class TestCreateUserRoute:
     async def test_returns_409_on_unique_constraint_error(self, client: AsyncClient, mock_use_case: AsyncMock):
         mock_use_case.create_user.return_value = (CreateResult.UNIQUE_CONSTRAINT_ERROR, None)
 
-        response = await client.post("/api/v1/users", json={"email": "alice@example.com", "username": "alice"})
+        response = await client.post("/api/v1/users", json={"email": "alice@example.com", "username": "alice", "password": "TestPass123"})
 
         assert response.status_code == 409
         assert response.json()["result"] == CreateResult.UNIQUE_CONSTRAINT_ERROR
@@ -72,7 +79,7 @@ class TestCreateUserRoute:
     async def test_returns_409_on_concurrency_error(self, client: AsyncClient, mock_use_case: AsyncMock):
         mock_use_case.create_user.return_value = (CreateResult.CONCURRENCY_ERROR, None)
 
-        response = await client.post("/api/v1/users", json={"email": "alice@example.com", "username": "alice"})
+        response = await client.post("/api/v1/users", json={"email": "alice@example.com", "username": "alice", "password": "TestPass123"})
 
         assert response.status_code == 409
         assert response.json()["result"] == CreateResult.CONCURRENCY_ERROR
@@ -80,7 +87,7 @@ class TestCreateUserRoute:
     async def test_returns_500_on_failure(self, client: AsyncClient, mock_use_case: AsyncMock):
         mock_use_case.create_user.return_value = (CreateResult.FAILURE, None)
 
-        response = await client.post("/api/v1/users", json={"email": "alice@example.com", "username": "alice"})
+        response = await client.post("/api/v1/users", json={"email": "alice@example.com", "username": "alice", "password": "TestPass123"})
 
         assert response.status_code == 500
         assert response.json()["result"] == CreateResult.FAILURE
