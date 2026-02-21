@@ -1,6 +1,6 @@
 # FastAPI Clean Architecture Template
 
-A production-ready FastAPI application template built with Clean Architecture principles, async SQLAlchemy, and dependency injection.
+A production-ready FastAPI application template built with Clean Architecture principles, async SQLAlchemy, JWT authentication, and dependency injection.
 
 ## Get This Template
 
@@ -18,43 +18,99 @@ Invoke-WebRequest -Uri "https://github.com/joe-vi/Templates/archive/refs/heads/m
 
 ## Features
 
-- **Clean Architecture**: Separation of concerns with distinct layers (Domain, Application, Infrastructure, API)
+- **Clean Architecture**: Four-layer separation of concerns — Domain, Application, Infrastructure, API
 - **Async Database**: Asynchronous PostgreSQL operations using SQLAlchemy 2.0+ and asyncpg
+- **JWT Authentication**: Access and refresh token pair with configurable expiry
 - **Dependency Injection**: Automatic DI with `fastapi-injector` using `Injected[Type]` annotations
-- **ConnectionFactory**: Async context manager for database session management with singleton scope
-- **Type Safety**: Full type hints with ABC base classes for all abstractions
-- **Constructor Injection**: Dependencies automatically injected via constructors
+- **Connection Factory**: Async context manager for per-repository session management (singleton scope)
+- **Transaction Manager**: Atomic multi-repository operations via a shared session
+- **Role-Based Access**: User roles (`admin`, `user`) and statuses (`active`, `inactive`) stored as lowercase enums
+- **Type Safety**: Full type hints with ABC base classes (`Base` suffix) for all abstractions
 - **Package Management**: Modern Python package management with `uv`
+- **Database Migrations**: Alembic for schema versioning; bootstrap admin user seeded via migration
 
 ## Project Structure
 
 ```
 .
 ├── src/
-│   ├── domain/                 # Business entities and repository interfaces
+│   ├── config/
+│   │   └── settings.py                     # Pydantic settings loaded from .env
+│   ├── domain/                             # Business entities, enums, repository ABCs (no external deps)
 │   │   ├── entities/
-│   │   │   └── greeting.py
+│   │   │   └── user/
+│   │   │       └── user.py                 # User domain entity (dataclass)
+│   │   ├── enums/
+│   │   │   ├── operation_results.py        # Generic CreateResult, UpdateResult, DeleteResult, LoginResult
+│   │   │   └── user_enum.py                # UserRole, UserStatus (StrEnum, lowercase values)
 │   │   └── repositories/
-│   │       └── greeting_repository_base.py
-│   ├── application/            # Business logic and use cases
-│   │   ├── schemas/
-│   │   │   └── greeting_schema.py
+│   │       └── user/
+│   │           └── user_repository_base.py # Abstract user repository interface
+│   ├── application/                        # Use cases, DTOs, service ABCs (imports Domain only)
+│   │   ├── services/
+│   │   │   ├── custom_logger_base.py
+│   │   │   ├── password_hasher_base.py
+│   │   │   ├── token_service_base.py
+│   │   │   ├── transaction_manager_base.py
+│   │   │   └── user_context_base.py
 │   │   └── use_cases/
-│   │       ├── greeting_use_case_base.py
-│   │       └── greeting_use_case.py
-│   ├── infrastructure/         # External services and implementations
+│   │       ├── auth/
+│   │       │   ├── auth_dto.py
+│   │       │   ├── auth_use_case.py
+│   │       │   └── auth_use_case_base.py
+│   │       └── user/
+│   │           ├── user_converter.py       # Domain entity ↔ DTO conversion
+│   │           ├── user_dto.py
+│   │           ├── user_use_case.py
+│   │           └── user_use_case_base.py
+│   ├── infrastructure/                     # Concrete implementations (imports Domain + Application)
+│   │   ├── auth/
+│   │   │   ├── password_hasher.py          # bcrypt via passlib
+│   │   │   ├── token_service.py            # PyJWT access + refresh tokens
+│   │   │   └── user_context.py             # Extracts user identity from JWT
 │   │   ├── database/
-│   │   │   ├── config.py
-│   │   │   ├── connection_factory.py
-│   │   │   └── models.py
+│   │   │   ├── base.py                     # SQLAlchemy DeclarativeBase
+│   │   │   ├── connection_factory.py       # Async session factory (singleton)
+│   │   │   ├── connection_factory_base.py
+│   │   │   ├── transaction_manager.py      # Shared-session atomic operations
+│   │   │   └── models/
+│   │   │       └── user_model.py           # ORM model for users table
+│   │   ├── logging/
+│   │   │   └── custom_logger.py            # Request-scoped structured logger
 │   │   └── repositories/
-│   │       └── greeting_repository.py
-│   ├── api/                    # API layer
-│   │   ├── dependencies.py
-│   │   └── routes/
-│   │       └── greeting_routes.py
-│   ├── container.py            # DI container with bindings
-│   └── main.py                 # FastAPI application
+│   │       └── user/
+│   │           └── user_repository.py      # Async CRUD implementation
+│   ├── api/                                # Routes and schemas (imports Application ABCs only)
+│   │   ├── dependencies/
+│   │   │   └── jwt_dependency.py           # JWT guard — resolves current user via Depends()
+│   │   ├── routers/
+│   │   │   ├── auth/
+│   │   │   │   ├── auth_converter.py
+│   │   │   │   ├── auth_routes.py
+│   │   │   │   └── auth_schema.py
+│   │   │   └── user/
+│   │   │       ├── user_converter.py
+│   │   │       ├── user_routes.py
+│   │   │       └── user_schema.py
+│   │   ├── schemas/
+│   │   │   └── operation_schema.py         # Shared response envelope
+│   │   └── result_status_maps.py           # Operation result → HTTP status + message
+│   ├── container.py                        # DI bindings (imports all layers)
+│   └── main.py                             # FastAPI app, middleware, router registration
+├── tests/
+│   ├── api/
+│   │   └── routers/
+│   │       └── user/
+│   │           ├── test_user_converter.py
+│   │           └── test_user_routes.py     # Route tests via minimal FastAPI + TestModule
+│   └── application/
+│       └── use_cases/
+│           └── user/
+│               ├── test_user_converter.py
+│               └── test_user_use_case.py   # Use case tests via AsyncMock repositories
+├── alembic/                                # Database migration scripts
+├── alembic.ini
+├── docker-compose.yml                      # PostgreSQL 18
 ├── pyproject.toml
 ├── .env.example
 └── README.md
@@ -62,38 +118,40 @@ Invoke-WebRequest -Uri "https://github.com/joe-vi/Templates/archive/refs/heads/m
 
 ## Clean Architecture Layers
 
-### 1. Domain Layer
-- **Entities**: Core business objects (`greeting.py`)
-- **Repository Interfaces**: Abstract base classes ending with `Base` (`GreetingRepositoryBase`)
-- **Rules**: No dependencies on outer layers
+### 1. Domain Layer (`src/domain/`)
+- **Entities**: Core business objects as dataclasses (`User`)
+- **Enums**: `UserRole` (admin/user), `UserStatus` (active/inactive), generic operation result enums
+- **Repository Interfaces**: Abstract base classes ending in `Base` (`UserRepositoryBase`)
+- **Rule**: No dependencies on any other layer
 
-### 2. Application Layer
-- **Use Cases**: Business logic operations with base classes (`GreetingUseCaseBase`, `GreetingUseCase`)
-- **Schemas**: Request/Response DTOs using Pydantic
-- **Rules**: Depends only on Domain layer. All use cases have Base abstractions.
+### 2. Application Layer (`src/application/`)
+- **Use Cases**: Business logic with paired Base abstractions (`UserUseCaseBase` / `UserUseCase`, `AuthUseCaseBase` / `AuthUseCase`)
+- **DTOs**: Frozen dataclasses with `DTO` suffix
+- **Service ABCs**: `PasswordHasherBase`, `TokenServiceBase`, `TransactionManagerBase`, `UserContextBase`, `CustomLoggerBase`
+- **Rule**: Imports Domain only
 
-### 3. Infrastructure Layer
-- **Database**: ConnectionFactory for async session management
-- **Repository Implementations**: Concrete implementations of repository interfaces
-- **External Services**: Third-party integrations
-- **Rules**: Implements interfaces from Domain layer
+### 3. Infrastructure Layer (`src/infrastructure/`)
+- **Database**: `ConnectionFactory` (async session, singleton), `TransactionManager` (shared-session atomic ops)
+- **Repository Implementations**: Concrete async CRUD for each domain repository interface
+- **Auth Implementations**: `PasswordHasher` (bcrypt/passlib), `TokenService` (PyJWT), `UserContext` (JWT → user identity)
+- **Rule**: Implements interfaces from Domain and Application layers
 
-### 4. API Layer
-- **Routes**: FastAPI endpoints
-- **Dependencies**: Dependency injection setup
-- **Main**: Application entry point
-- **Rules**: Depends on Application layer through DI
+### 4. API Layer (`src/api/`)
+- **Routes**: FastAPI endpoints using `Injected[BaseClass]` for use case injection
+- **Dependencies**: `jwt_dependency.py` — JWT guard using `Depends()` (the only permitted use of `Depends()` for auth guards)
+- **Schemas**: Pydantic request/response models
+- **Rule**: Imports Application ABCs only; never calls repositories directly
 
 ## Installation
 
 ### Prerequisites
 - Python 3.11+
-- PostgreSQL 13+
+- Docker (for PostgreSQL)
 - [uv](https://github.com/astral-sh/uv) package manager
 
 ### Setup
 
-1. Clone the repository
+1. Download the template (see **Get This Template** above) or clone the repository.
 
 2. Install uv (if not already installed):
 
@@ -107,7 +165,7 @@ curl -LsSf https://astral.sh/uv/install.sh | sh
 powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"
 ```
 
-3. Install dependencies (creates the virtual environment automatically):
+3. Install dependencies:
 ```bash
 uv sync
 ```
@@ -115,65 +173,26 @@ uv sync
 4. Configure environment variables:
 ```bash
 cp .env.example .env
-# Edit .env with your database credentials
+# Edit .env — set a strong JWT_SECRET_KEY for production
 ```
 
-5. Ensure PostgreSQL is running and create the database:
-```bash
-createdb fastapi_db
-```
-
-## Running the Application
-
-### 1. Start the Database
-
-The project includes a `docker-compose.yml` to run PostgreSQL 18:
-
+5. Start PostgreSQL:
 ```bash
 docker compose up -d
 ```
 
-To stop the database:
-
+6. Run database migrations (creates tables and seeds the bootstrap admin):
 ```bash
-docker compose down
+uv run alembic upgrade head
 ```
 
-To stop and delete the database volume:
+## Running the Application
 
-```bash
-docker compose down -v
-```
-
-### 2. Start the Application
-
-#### Option A: VS Code (Recommended)
+### Option A: VS Code (Recommended)
 
 A `.vscode/launch.json` is included for one-click debugging. Press `F5` or open the **Run and Debug** panel and select **FastAPI**.
 
-```json
-{
-    "version": "0.2.0",
-    "configurations": [
-        {
-            "name": "FastAPI",
-            "type": "debugpy",
-            "request": "launch",
-            "module": "uvicorn",
-            "args": [
-                "src.main:app",
-                "--host", "0.0.0.0",
-                "--port", "8000",
-                "--reload"
-            ],
-            "envFile": "${workspaceFolder}/.env",
-            "jinja": true
-        }
-    ]
-}
-```
-
-#### Option B: Command Line
+### Option B: Command Line
 
 ```bash
 uv run uvicorn src.main:app --reload --host 0.0.0.0 --port 8000
@@ -184,167 +203,24 @@ The API will be available at:
 - Interactive docs: http://localhost:8000/docs
 - ReDoc: http://localhost:8000/redoc
 
-## API Endpoints
+## Environment Variables
 
-### Hello World
-```bash
-GET /api/v1/hello
-```
-
-Response:
-```json
-{
-  "message": "Hello, World!",
-  "timestamp": "2024-01-01T12:00:00.000000"
-}
-```
-
-### Create Greeting
-```bash
-POST /api/v1/greetings
-Content-Type: application/json
-
-{
-  "message": "Welcome to Clean Architecture!"
-}
-```
-
-### Get Greeting by ID
-```bash
-GET /api/v1/greetings/{greeting_id}
-```
-
-### Get All Greetings
-```bash
-GET /api/v1/greetings
-```
-
-### Delete Greeting
-```bash
-DELETE /api/v1/greetings/{greeting_id}
-```
-
-## Database Session Management
-
-The application uses `ConnectionFactory` injected into repositories for session management.
-
-### Repository Pattern with ConnectionFactory
-
-Repositories receive `ConnectionFactoryBase` via dependency injection and manage their own sessions:
-
-```python
-class GreetingRepository(GreetingRepositoryBase):
-    def __init__(self, connection_factory: ConnectionFactoryBase):
-        self.connection_factory = connection_factory
-
-    async def get_by_id(self, greeting_id: int) -> Optional[Greeting]:
-        async with self.connection_factory.get_session() as session:
-            # Session is automatically created
-            result = await session.execute(...)
-            # Session is automatically committed and closed
-            return result
-```
-
-Benefits:
-- Repositories manage their own session lifecycle
-- Automatic transaction handling with auto-commit/rollback
-- Connection pooling
-- Resource cleanup
-- Better separation of concerns (session management within repository layer)
-
-## Dependency Injection
-
-This application uses `fastapi-injector` which integrates the `injector` library with FastAPI middleware for automatic dependency injection.
-
-### AppModule Setup
-
-The DI module uses `Binder.bind()` to map abstract base classes to their concrete implementations:
-
-```python
-# src/container.py
-from injector import Module, Binder, Injector, singleton
-
-class AppModule(Module):
-    """Dependency Injection Module using injector.Module."""
-
-    def configure(self, binder: Binder) -> None:
-        # Bind ConnectionFactory as singleton (shared across app)
-        binder.bind(
-            ConnectionFactoryBase,   # Interface (ABC)
-            to=ConnectionFactory,    # Implementation
-            scope=singleton,         # Singleton scope
-        )
-
-        # Bind Repository interfaces to implementations (request scope)
-        binder.bind(
-            GreetingRepositoryBase,  # Interface (ABC)
-            to=GreetingRepository,   # Implementation
-        )
-
-        # Bind Use Case interfaces to implementations (request scope)
-        binder.bind(
-            GreetingUseCaseBase,     # Interface (ABC)
-            to=GreetingUseCase,      # Implementation
-        )
-
-# Global injector instance
-injector = Injector([AppModule()])
-```
-
-### Attach Injector Middleware
-
-Attach the injector to the FastAPI app to enable automatic dependency injection:
-
-```python
-# src/main.py
-from fastapi import FastAPI
-from fastapi_injector import attach_injector
-from src.container import injector
-
-app = FastAPI(...)
-
-# Attach injector as middleware - enables Injected[Type] in routes
-attach_injector(app, injector)
-```
-
-### Using Dependencies in Routes
-
-Routes use `Injected[Type]` for automatic dependency injection:
-
-```python
-# src/api/routes/greeting_routes.py
-from fastapi_injector import Injected
-from src.application.use_cases.greeting_use_case_base import GreetingUseCaseBase
-
-@router.post("/greetings", status_code=status.HTTP_201_CREATED)
-async def create_greeting(
-    greeting_data: GreetingCreateSchema,
-    use_case: Injected[GreetingUseCaseBase],  # Automatic injection!
-) -> GreetingResponseSchema:
-    greeting = await use_case.create_greeting(greeting_data.message)
-    return GreetingResponseSchema(
-        id=greeting.id,
-        message=greeting.message,
-        created_at=greeting.created_at,
-    )
-```
-
-**How it works:**
-1. `Injected[GreetingUseCaseBase]` requests the use case
-2. Injector resolves `GreetingUseCaseBase` to `GreetingUseCase`
-3. Injector creates `GreetingUseCase` and injects `GreetingRepositoryBase` via constructor
-4. Injector resolves `GreetingRepositoryBase` to `GreetingRepository`
-5. Injector creates `GreetingRepository` and injects `ConnectionFactoryBase` (singleton) via constructor
-6. Entire dependency chain resolved automatically!
-
-Benefits:
-- **Zero boilerplate**: No manual dependency functions needed
-- **Loose coupling**: Routes depend on abstractions, not implementations
-- **Constructor injection**: Dependencies injected via constructors
-- **Easy testing**: Mock base classes instead of concrete types
-- **Flexibility**: Change implementations without modifying routes
-- **Automatic resolution**: Injector handles the entire dependency graph
-- **Singleton support**: ConnectionFactory shared across all requests
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `DB_DRIVER` | SQLAlchemy async driver | `postgresql+asyncpg` |
+| `DB_USER` | Database user | `postgres` |
+| `DB_PASSWORD` | Database password | `postgres` |
+| `DB_HOST` | Database host | `localhost` |
+| `DB_PORT` | Database port | `5432` |
+| `DB_NAME` | Database name | `fastapi_db` |
+| `IS_SQL_ECHO_ENABLED` | Log SQL queries | `false` |
+| `POOL_SIZE` | Connection pool size | `5` |
+| `MAX_OVERFLOW` | Max overflow connections | `10` |
+| `JWT_SECRET_KEY` | Secret for signing JWTs | `changeme-use-a-strong-random-secret-in-production` |
+| `JWT_ALGORITHM` | JWT signing algorithm | `HS256` |
+| `ACCESS_TOKEN_EXPIRE_MINUTES` | Access token lifetime | `30` |
+| `REFRESH_TOKEN_EXPIRE_DAYS` | Refresh token lifetime | `7` |
+| `LOG_LEVEL` | Logging level | `INFO` |
 
 ## Development
 
@@ -360,7 +236,7 @@ uv run ruff format src/
 
 ### Linting
 ```bash
-uv run ruff check src/
+uv run ruff check src/ --fix
 ```
 
 ### Type Checking
@@ -368,49 +244,43 @@ uv run ruff check src/
 uv run mypy src/
 ```
 
-## Environment Variables
+### Database — Docker
 
-| Variable | Description | Default |
-|----------|-------------|---------|
-| DATABASE_URL | PostgreSQL connection string | postgresql+asyncpg://postgres:postgres@localhost:5432/fastapi_db |
-| ECHO_SQL | Log SQL queries | false |
-| POOL_SIZE | Connection pool size | 5 |
-| MAX_OVERFLOW | Max overflow connections | 10 |
+```bash
+docker compose up -d       # Start PostgreSQL
+docker compose down        # Stop (data preserved)
+docker compose down -v     # Stop and delete volume
+```
 
-## Design Principles
+### Database Migrations
 
-1. **Dependency Inversion**: High-level modules don't depend on low-level modules
-2. **Single Responsibility**: Each class has one reason to change
-3. **Open/Closed**: Open for extension, closed for modification
-4. **Interface Segregation**: All ABC classes end with `Base`
-5. **Async/Await**: Full async support for database operations
+```bash
+uv run alembic upgrade head                              # Apply all migrations
+uv run alembic revision --autogenerate -m "description" # Generate new migration
+uv run alembic downgrade -1                              # Roll back one step
+```
 
 ## Adding New Features
 
-1. Create entity in `domain/entities/`
-2. Create repository interface in `domain/repositories/` (ending with `Base`)
-3. Create repository implementation in `infrastructure/repositories/` (inject `ConnectionFactoryBase` in constructor)
-4. Create use case interface in `application/use_cases/` (ending with `Base`)
-5. Create use case implementation in `application/use_cases/` (inject repository in constructor)
-6. Create schemas in `application/schemas/`
-7. Add bindings to `AppModule` in `container.py`:
+1. **Domain**: Add entity in `src/domain/entities/<name>/` and repository ABC in `src/domain/repositories/<name>/` (class name ending with `Base`)
+2. **Application**: Add DTO, use case ABC and implementation, and a converter in `src/application/use_cases/<name>/`
+3. **Infrastructure**: Add ORM model in `src/infrastructure/database/models/` and repository implementation in `src/infrastructure/repositories/<name>/`
+4. **API**: Add Pydantic schemas, a converter, and routes in `src/api/routers/<name>/` using `Injected[UseCaseBase]`
+5. **Container**: Register bindings in `src/container.py`:
    ```python
-   binder.bind(NewRepositoryBase, to=NewRepository)  # Request scope
-   binder.bind(NewUseCaseBase, to=NewUseCase)        # Request scope
+   binder.bind(NewRepositoryBase, to=NewRepository)
+   binder.bind(NewUseCaseBase, to=NewUseCase)
    ```
-8. Create routes in `api/routes/` using `Injected[BaseClass]`:
-   ```python
-   from fastapi_injector import Injected
+6. **Main**: Include the new router in `src/main.py`
+7. **Migration**: Generate and apply an Alembic migration for any new DB models
 
-   @router.post("/items")
-   async def create_item(
-       use_case: Injected[ItemUseCaseBase],  # Automatic injection!
-   ) -> ItemResponseSchema:
-       ...
-   ```
-9. Register routes in `main.py` (after `attach_injector()`)
+## Design Principles
 
-**Note**: No manual dependency functions needed! The injector automatically resolves the entire dependency chain through constructor injection.
+1. **Dependency Inversion**: High-level modules depend on abstractions, not implementations
+2. **Single Responsibility**: One use case per operation; one CRUD operation per repository method
+3. **Open/Closed**: Swap implementations by changing container bindings only
+4. **Interface Segregation**: All ABC classes end with `Base`
+5. **Async/Await**: Full async support for all database and I/O operations
 
 ## License
 
