@@ -45,7 +45,8 @@ src/
 │   │       ├── <entity>_converter.py
 │   │       ├── <entity>_use_case_base.py
 │   │       └── <entity>_use_case.py
-│   └── services/                        ← shared external service interfaces (optional)
+│   └── services/                        ← shared service interfaces
+│       └── transaction_manager_base.py  # atomic transaction ABC (use cases inject this)
 │
 ├── infrastructure/
 │   ├── repositories/
@@ -57,7 +58,8 @@ src/
 │       │   ├── __init__.py              # re-exports all models
 │       │   └── <entity>_model.py
 │       ├── connection_factory_base.py
-│       └── connection_factory.py
+│       ├── connection_factory.py
+│       └── transaction_manager.py       # implements TransactionManagerBase; injects ConnectionFactoryBase
 │
 └── api/
     ├── routers/
@@ -1133,6 +1135,8 @@ class TestCreateUserRoute:
 - [DB models](src/infrastructure/database/models/)
 - [Connection factory Base](src/infrastructure/database/connection_factory_base.py)
 - [Connection factory](src/infrastructure/database/connection_factory.py)
+- [Transaction manager Base](src/application/services/transaction_manager_base.py)
+- [Transaction manager](src/infrastructure/database/transaction_manager.py)
 - [DI Container](src/container.py)
 - [Settings](src/config/settings.py)
 - [Main app](src/main.py)
