@@ -1,4 +1,4 @@
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
 from contextvars import ContextVar
 
@@ -8,6 +8,7 @@ from sqlalchemy.ext.asyncio import (
     async_sessionmaker,
     create_async_engine,
 )
+
 from src.config.settings import Settings
 from src.infrastructure.database.connection_factory_base import ConnectionFactoryBase
 
@@ -53,12 +54,21 @@ class ConnectionFactory(ConnectionFactoryBase):
                 raise
 
     @asynccontextmanager
-    async def begin_transaction(self) -> AsyncIterator[None]:
+    async def begin_transaction(self) -> AsyncIterator[Callable[[], Awaitable[None]]]:
         async with self._session_factory() as session:
             token = _active_session.set(session)
+            should_rollback = False
+
+            async def rollback() -> None:
+                nonlocal should_rollback
+                should_rollback = True
+
             try:
-                yield
-                await session.commit()
+                yield rollback
+                if should_rollback:
+                    await session.rollback()
+                else:
+                    await session.commit()
             except Exception:
                 await session.rollback()
                 raise

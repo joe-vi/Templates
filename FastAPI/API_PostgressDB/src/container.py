@@ -3,6 +3,7 @@ from injector import Binder, Injector, Module, singleton
 
 from src.application.services.blob_storage_service_base import BlobStorageServiceBase
 from src.application.services.custom_logger_base import CustomLoggerBase
+from src.application.services.transaction_manager_base import TransactionManagerBase
 from src.application.use_cases.user.user_use_case import UserUseCase
 from src.application.use_cases.user.user_use_case_base import UserUseCaseBase
 from src.config.settings import Settings
@@ -10,6 +11,7 @@ from src.domain.repositories.user.user_repository_base import UserRepositoryBase
 from src.infrastructure.blob_storage.blob_storage_service import BlobStorageService
 from src.infrastructure.database.connection_factory import ConnectionFactory
 from src.infrastructure.database.connection_factory_base import ConnectionFactoryBase
+from src.infrastructure.database.transaction_manager import TransactionManager
 from src.infrastructure.logging.custom_logger import CustomLogger
 from src.infrastructure.repositories.user.user_repository import UserRepository
 
@@ -33,6 +35,11 @@ class AppModule(Module):
             ConnectionFactoryBase,
             to=ConnectionFactory,
             scope=singleton,
+        )
+
+        binder.bind(
+            TransactionManagerBase,
+            to=TransactionManager,
         )
 
         binder.bind(

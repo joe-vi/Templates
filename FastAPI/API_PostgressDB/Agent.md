@@ -175,6 +175,7 @@ Uses `fastapi-injector` which integrates the `injector` library with FastAPI mid
 class AppModule(Module):
     def configure(self, binder: Binder) -> None:
         binder.bind(ConnectionFactoryBase, to=ConnectionFactory, scope=singleton)
+        binder.bind(TransactionManagerBase, to=TransactionManager)
         binder.bind(UserRepositoryBase, to=UserRepository)
         binder.bind(UserUseCaseBase, to=UserUseCase)
 
@@ -697,13 +698,24 @@ Each repository method opens its own session. Use this when failures in one oper
 
 ## Atomic Multi-Repository Operations (`begin_transaction`)
 
-When a use case must call multiple repository methods **atomically** — all succeed or all roll back — use `connection_factory.begin_transaction()`.
+When a use case must call multiple repository methods **atomically** — all succeed or all roll back — use `transaction_manager.begin_transaction()`.
+
+Use cases inject `TransactionManagerBase` from the **application layer** (`src/application/services/transaction_manager_base.py`). This keeps the application layer free of any infrastructure dependency: use cases know nothing about sessions, engines, or SQLAlchemy.
 
 ### How it works
 
 `ConnectionFactory` maintains a `ContextVar[AsyncSession | None]` called `_active_session`. When `begin_transaction()` is entered, it opens one session, stores it in the contextvar, and yields. Every subsequent call to `get_session()` on any repository within the same async context detects the active session and reuses it instead of opening a new one. On exit, `begin_transaction()` commits (or rolls back) and resets the contextvar.
 
 **Repositories require zero changes.** The shared session is picked up transparently.
+
+### Layer responsibilities
+
+| Interface | Layer | Injected into | Purpose |
+|---|---|---|---|
+| `TransactionManagerBase` | Application | Use cases | `begin_transaction()` — atomic scope |
+| `ConnectionFactoryBase` | Infrastructure | Repositories + `TransactionManager` | `get_session()` / `begin_transaction()` — session management |
+
+`TransactionManager` (infrastructure) implements `TransactionManagerBase` by injecting `ConnectionFactoryBase` and delegating `begin_transaction()` to it. The two abstractions are completely independent — no inheritance relationship.
 
 ### Session resolution in `get_session()`
 
@@ -719,23 +731,25 @@ _active_session set?  ──yes──▶  yield active session  (no commit — b
 open new session, yield, commit/rollback as normal
 ```
 
-### Use case — inject `ConnectionFactoryBase` alongside repositories
+### Use case — inject `TransactionManagerBase` alongside repositories
 
 ```python
+from src.application.services.transaction_manager_base import TransactionManagerBase
+
 class OrderUseCase(OrderUseCaseBase):
 
     def __init__(
         self,
-        connection_factory: ConnectionFactoryBase,
+        transaction_manager: TransactionManagerBase,
         user_repository: UserRepositoryBase,
         order_repository: OrderRepositoryBase,
     ) -> None:
-        self._connection_factory = connection_factory
+        self._transaction_manager = transaction_manager
         self._user_repository = user_repository
         self._order_repository = order_repository
 
     async def create_order_for_user(self, user_id: int, create_order_dto: CreateOrderDTO) -> OrderDTO:
-        async with self._connection_factory.begin_transaction():
+        async with self._transaction_manager.begin_transaction():
             user = await self._user_repository.get_by_id(user_id)
             if user is None:
                 raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
@@ -747,9 +761,14 @@ class OrderUseCase(OrderUseCaseBase):
 
 Non-atomic use case methods work exactly as before — omit `begin_transaction()` and each repository call manages its own session.
 
-### No extra container bindings needed
+### Container binding
 
-`ConnectionFactoryBase` is already registered as a singleton. The injector resolves it automatically when declared in `__init__`.
+`TransactionManagerBase` is bound to `TransactionManager` in `container.py`. The injector automatically resolves `TransactionManager`'s `ConnectionFactoryBase` dependency:
+
+```python
+binder.bind(ConnectionFactoryBase, to=ConnectionFactory, scope=singleton)
+binder.bind(TransactionManagerBase, to=TransactionManager)
+```
 
 ### When to use `begin_transaction` vs plain injection
 
@@ -757,8 +776,8 @@ Non-atomic use case methods work exactly as before — omit `begin_transaction()
 |---|---|
 | Single repository, any number of methods | Inject repository only |
 | Multiple repositories, independent operations | Inject repositories only |
-| Multiple repositories, must all succeed or all fail | Inject `ConnectionFactoryBase` + repositories, wrap in `begin_transaction()` |
-| Single repository, multiple methods that must be atomic | Inject `ConnectionFactoryBase` + repository, wrap in `begin_transaction()` |
+| Multiple repositories, must all succeed or all fail | Inject `TransactionManagerBase` + repositories, wrap in `begin_transaction()` |
+| Single repository, multiple methods that must be atomic | Inject `TransactionManagerBase` + repository, wrap in `begin_transaction()` |
 
 **Critical Rule**: Do NOT use `begin_transaction` when operations are independent. Use it only when atomicity is required.
 
@@ -923,6 +942,7 @@ API converter → GreetingWithAuthorResponse
 ## Anti-Patterns to Avoid
 
 - **Don't pass sessions to repository constructors** — inject `ConnectionFactoryBase` instead
+- **Don't inject `ConnectionFactoryBase` into use cases** — use cases must inject `TransactionManagerBase` (application layer) for `begin_transaction()`; only repositories inject `ConnectionFactoryBase` (infrastructure layer) for `get_session()`
 - **Don't use `Depends()`** — use `Injected(BaseClass)` with fastapi-injector
 - **Don't bypass use cases in routes** — routes should never call repositories directly
 - **Don't let Domain depend on Infrastructure** — no `from src.infrastructure...` in domain layer
