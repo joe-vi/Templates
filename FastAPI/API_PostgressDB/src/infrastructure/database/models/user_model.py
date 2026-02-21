@@ -1,6 +1,7 @@
 from datetime import datetime
 
-from sqlalchemy import Enum as SQLAlchemyEnum, String, UniqueConstraint, func
+from sqlalchemy import Enum as SQLAlchemyEnum
+from sqlalchemy import String, UniqueConstraint, func
 from sqlalchemy.orm import Mapped, mapped_column
 
 from src.domain.enums.user_enum import UserRole, UserStatus
@@ -22,6 +23,7 @@ class UserModel(Base):
     id: Mapped[int] = mapped_column(primary_key=True, index=True, autoincrement=True)
     email: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
     username: Mapped[str] = mapped_column(String(100), nullable=False)
+    password_hash: Mapped[str | None] = mapped_column(String(255), nullable=True)
     role: Mapped[UserRole] = mapped_column(user_role_enum, nullable=False, default=UserRole.USER)
     status: Mapped[UserStatus] = mapped_column(user_status_enum, nullable=False, default=UserStatus.ACTIVE)
     created_at: Mapped[datetime] = mapped_column(server_default=func.now(), nullable=False)

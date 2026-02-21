@@ -38,6 +38,12 @@ class Settings(BaseSettings):
     # Blob storage settings
     blob_storage_connection_string: str = ""
 
+    # JWT settings
+    jwt_secret_key: str = "changeme-use-a-strong-random-secret-in-production"
+    jwt_algorithm: str = "HS256"
+    access_token_expire_minutes: int = 30
+    refresh_token_expire_days: int = 7
+
     class Config:
         env_file = ".env"
         env_file_encoding = "utf-8"

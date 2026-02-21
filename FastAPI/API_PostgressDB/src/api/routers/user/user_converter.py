@@ -18,6 +18,7 @@ class UserConverter:
         return CreateUserDTO(
             email=request.email,
             username=request.username,
+            password=request.password,
             role=request.role,
             status=request.status,
         )

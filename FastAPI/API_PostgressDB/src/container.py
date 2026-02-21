@@ -3,11 +3,19 @@ from injector import Binder, Injector, Module, singleton
 
 from src.application.services.blob_storage_service_base import BlobStorageServiceBase
 from src.application.services.custom_logger_base import CustomLoggerBase
+from src.application.services.password_hasher_base import PasswordHasherBase
+from src.application.services.token_service_base import TokenServiceBase
 from src.application.services.transaction_manager_base import TransactionManagerBase
+from src.application.services.user_context_base import UserContextBase
+from src.application.use_cases.auth.auth_use_case import AuthUseCase
+from src.application.use_cases.auth.auth_use_case_base import AuthUseCaseBase
 from src.application.use_cases.user.user_use_case import UserUseCase
 from src.application.use_cases.user.user_use_case_base import UserUseCaseBase
 from src.config.settings import Settings
 from src.domain.repositories.user.user_repository_base import UserRepositoryBase
+from src.infrastructure.auth.password_hasher import PasswordHasher
+from src.infrastructure.auth.token_service import TokenService
+from src.infrastructure.auth.user_context import UserContext
 from src.infrastructure.blob_storage.blob_storage_service import BlobStorageService
 from src.infrastructure.database.connection_factory import ConnectionFactory
 from src.infrastructure.database.connection_factory_base import ConnectionFactoryBase
@@ -54,14 +62,37 @@ class AppModule(Module):
         )
 
         binder.bind(
+            UserContextBase,
+            to=UserContext,
+            scope=request_scope,
+        )
+
+        binder.bind(
             BlobStorageServiceBase,
             to=BlobStorageService,
             scope=singleton,
         )
 
         binder.bind(
+            PasswordHasherBase,
+            to=PasswordHasher,
+            scope=singleton,
+        )
+
+        binder.bind(
+            TokenServiceBase,
+            to=TokenService,
+            scope=singleton,
+        )
+
+        binder.bind(
             UserUseCaseBase,
             to=UserUseCase,
+        )
+
+        binder.bind(
+            AuthUseCaseBase,
+            to=AuthUseCase,
         )
 
 

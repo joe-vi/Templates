@@ -37,11 +37,12 @@ class UserEntityConverter:
         return [UserEntityConverter.to_dto(user) for user in users]
 
     @staticmethod
-    def to_entity(create_user_dto: CreateUserDTO) -> User:
+    def to_entity(create_user_dto: CreateUserDTO, hashed_password: str) -> User:
         """Convert a creation DTO to a domain user entity.
 
         Args:
             create_user_dto: The DTO containing data for the new user.
+            hashed_password: The bcrypt-hashed password to store on the entity.
 
         Returns:
             A new User entity with id set to None.
@@ -50,6 +51,7 @@ class UserEntityConverter:
             id=None,
             email=create_user_dto.email,
             username=create_user_dto.username,
+            hashed_password=hashed_password,
             role=create_user_dto.role,
             status=create_user_dto.status,
         )

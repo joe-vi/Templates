@@ -10,6 +10,7 @@ class UserCreateRequest(BaseModel):
 
     email: EmailStr = Field(..., description="User email address")
     username: str = Field(..., min_length=1, max_length=100, description="Username")
+    password: str = Field(..., min_length=8, description="Plain-text password (will be hashed before storage)")
     role: UserRole = Field(default=UserRole.USER, description="User role")
     status: UserStatus = Field(default=UserStatus.ACTIVE, description="User status")
 

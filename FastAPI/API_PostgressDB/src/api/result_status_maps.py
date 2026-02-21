@@ -31,7 +31,7 @@ UPDATE_MESSAGE_MAP: dict[UpdateResult, str] = {
     UpdateResult.UNIQUE_CONSTRAINT_ERROR: "Conflict: resource already exists",
     UpdateResult.CONCURRENCY_ERROR: "Conflict: concurrent modification detected",
     UpdateResult.FAILURE: "Operation failed",
-    UpdateResult.NOT_FOUND: "Resource not found"
+    UpdateResult.NOT_FOUND: "Resource not found",
 }
 
 DELETE_STATUS_MAP: dict[DeleteResult, int] = {

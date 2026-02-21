@@ -27,6 +27,7 @@ class UserRepository(UserRepositoryBase):
                 user_model = UserModel(
                     email=user.email,
                     username=user.username,
+                    password_hash=user.hashed_password,
                     role=user.role,
                     status=user.status,
                 )
@@ -56,6 +57,7 @@ class UserRepository(UserRepositoryBase):
                 id=user_model.id,
                 email=user_model.email,
                 username=user_model.username,
+                hashed_password=user_model.password_hash,
                 role=user_model.role,
                 status=user_model.status,
                 created_at=user_model.created_at,
@@ -71,6 +73,7 @@ class UserRepository(UserRepositoryBase):
                     id=user_model.id,
                     email=user_model.email,
                     username=user_model.username,
+                    hashed_password=user_model.password_hash,
                     role=user_model.role,
                     status=user_model.status,
                     created_at=user_model.created_at,
@@ -78,12 +81,28 @@ class UserRepository(UserRepositoryBase):
                 for user_model in user_models
             ]
 
+    async def get_by_username(self, username: str) -> User | None:
+        async with self._connection_factory.get_session() as session:
+            query_result = await session.execute(select(UserModel).where(UserModel.username == username))
+            user_model = query_result.scalar_one_or_none()
+
+            if user_model is None:
+                return None
+
+            return User(
+                id=user_model.id,
+                email=user_model.email,
+                username=user_model.username,
+                hashed_password=user_model.password_hash,
+                role=user_model.role,
+                status=user_model.status,
+                created_at=user_model.created_at,
+            )
+
     async def update_role(self, user_id: int, role: UserRole) -> UpdateResult:
         try:
             async with self._connection_factory.get_session() as session:
-                update_result = await session.execute(
-                    update(UserModel).where(UserModel.id == user_id).values(role=role)
-                )
+                update_result = await session.execute(update(UserModel).where(UserModel.id == user_id).values(role=role))
                 return UpdateResult.SUCCESS if update_result.rowcount > 0 else UpdateResult.NOT_FOUND
         except DBAPIError as exc:
             if isinstance(exc.__cause__, asyncpg.exceptions.DeadlockDetectedError):

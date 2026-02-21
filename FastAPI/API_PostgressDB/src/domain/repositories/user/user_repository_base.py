@@ -55,6 +55,18 @@ class UserRepositoryBase(ABC):
         pass
 
     @abstractmethod
+    async def get_by_username(self, username: str) -> User | None:
+        """Retrieve a user entity by its username.
+
+        Args:
+            username: The username of the user to retrieve.
+
+        Returns:
+            The User entity if found, None otherwise.
+        """
+        pass
+
+    @abstractmethod
     async def delete(self, user_id: int) -> DeleteResult:
         """Delete a user entity by its unique identifier.
 

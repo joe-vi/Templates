@@ -18,6 +18,7 @@ class CreateUserDTO:
 
     email: str
     username: str
+    password: str
     role: UserRole = UserRole.USER
     status: UserStatus = UserStatus.ACTIVE
 

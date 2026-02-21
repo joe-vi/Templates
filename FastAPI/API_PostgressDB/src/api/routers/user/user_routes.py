@@ -1,14 +1,22 @@
-from fastapi import APIRouter, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.responses import JSONResponse
 from fastapi_injector import Injected
 
+from src.api.dependencies.jwt_dependency import get_current_user
+from src.api.result_status_maps import create_response, delete_response, update_response
 from src.api.routers.user.user_converter import UserConverter
 from src.api.routers.user.user_schema import UserCreateRequest, UserResponse, UserUpdateRoleRequest
-from src.api.result_status_maps import create_response, delete_response, update_response
 from src.api.schemas.operation_schema import CreateOperationResponse, DeleteOperationResponse, UpdateOperationResponse
 from src.application.use_cases.user.user_use_case_base import UserUseCaseBase
 
-router = APIRouter(prefix="/api/v1", tags=["users"])
+# Every route in this router requires a valid JWT. get_current_user validates the
+# Bearer token and populates the request-scoped UserContextBase so use cases can
+# read the current user's identity via Injected(UserContextBase).
+router = APIRouter(
+    prefix="/api/v1",
+    tags=["users"],
+    dependencies=[Depends(get_current_user)],
+)
 
 
 @router.post(
@@ -16,6 +24,7 @@ router = APIRouter(prefix="/api/v1", tags=["users"])
     response_model=CreateOperationResponse,
     responses={
         status.HTTP_201_CREATED: {"description": "User created successfully"},
+        status.HTTP_401_UNAUTHORIZED: {"description": "Missing or invalid JWT token"},
         status.HTTP_409_CONFLICT: {"description": "Unique constraint violation or concurrency conflict"},
         status.HTTP_500_INTERNAL_SERVER_ERROR: {"description": "Unexpected failure"},
     },
@@ -38,7 +47,14 @@ async def create_user(
     return create_response(result, entity_id)
 
 
-@router.get("/users/{user_id}", response_model=UserResponse)
+@router.get(
+    "/users/{user_id}",
+    response_model=UserResponse,
+    responses={
+        status.HTTP_401_UNAUTHORIZED: {"description": "Missing or invalid JWT token"},
+        status.HTTP_404_NOT_FOUND: {"description": "User not found"},
+    },
+)
 async def get_user(
     user_id: int,
     use_case: UserUseCaseBase = Injected(UserUseCaseBase),
@@ -66,7 +82,13 @@ async def get_user(
     return UserConverter.to_response(user_dto)
 
 
-@router.get("/users", response_model=list[UserResponse])
+@router.get(
+    "/users",
+    response_model=list[UserResponse],
+    responses={
+        status.HTTP_401_UNAUTHORIZED: {"description": "Missing or invalid JWT token"},
+    },
+)
 async def get_all_users(
     use_case: UserUseCaseBase = Injected(UserUseCaseBase),
 ) -> list[UserResponse]:
@@ -87,6 +109,7 @@ async def get_all_users(
     response_model=UpdateOperationResponse,
     responses={
         status.HTTP_200_OK: {"description": "User role updated successfully"},
+        status.HTTP_401_UNAUTHORIZED: {"description": "Missing or invalid JWT token"},
         status.HTTP_404_NOT_FOUND: {"description": "User not found"},
         status.HTTP_409_CONFLICT: {"description": "Concurrency conflict"},
         status.HTTP_500_INTERNAL_SERVER_ERROR: {"description": "Unexpected failure"},
@@ -117,6 +140,7 @@ async def update_user_role(
     response_model=DeleteOperationResponse,
     responses={
         status.HTTP_200_OK: {"description": "User deleted successfully"},
+        status.HTTP_401_UNAUTHORIZED: {"description": "Missing or invalid JWT token"},
         status.HTTP_404_NOT_FOUND: {"description": "User not found"},
         status.HTTP_409_CONFLICT: {"description": "Concurrency conflict"},
         status.HTTP_500_INTERNAL_SERVER_ERROR: {"description": "Unexpected failure"},

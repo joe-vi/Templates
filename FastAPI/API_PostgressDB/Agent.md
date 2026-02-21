@@ -45,13 +45,19 @@ src/
 │   │       ├── <entity>_converter.py
 │   │       ├── <entity>_use_case_base.py
 │   │       └── <entity>_use_case.py
-│   └── services/                        ← shared service interfaces
-│       └── transaction_manager_base.py  # atomic transaction ABC (use cases inject this)
+│   └── services/                        ← shared service interfaces (ports)
+│       ├── transaction_manager_base.py  # atomic transaction ABC
+│       ├── user_context_base.py         # request-scoped authenticated user identity ABC
+│       └── <service>_base.py            # any other external service port (email, payment, etc.)
 │
 ├── infrastructure/
 │   ├── repositories/
 │   │   └── <entity>/                    ← one folder per entity
 │   │       └── <entity>_repository.py
+│   ├── auth/                            ← auth infrastructure implementations
+│   │   ├── password_hasher.py           # PasswordHasherBase implementation (bcrypt)
+│   │   ├── token_service.py             # TokenServiceBase implementation (JWT)
+│   │   └── user_context.py             # UserContextBase implementation (request-scoped)
 │   └── database/                        ← shared DB infrastructure
 │       ├── base.py                      # DeclarativeBase
 │       ├── models/                      ← one file per entity
@@ -62,6 +68,8 @@ src/
 │       └── transaction_manager.py       # implements TransactionManagerBase; injects ConnectionFactoryBase
 │
 └── api/
+    ├── dependencies/                    ← cross-cutting FastAPI Depends() guards
+    │   └── jwt_dependency.py            # Bearer token validation + UserContextBase population
     ├── routers/
     │   └── <entity>/                    ← one folder per entity
     │       ├── <entity>_schema.py
@@ -202,10 +210,49 @@ async def create_user(
 ```
 
 **Critical Rules**:
-- Routes MUST use `Injected(BaseClass)` for DI (not `Depends(...)`)
+- Routes MUST use `Injected(BaseClass)` for use case and service DI — never `Depends()` for these
 - Routes MUST depend on Base classes (abstractions), never concrete implementations
 - Use `singleton` scope only for shared resources (e.g., ConnectionFactory)
 - The injector automatically resolves the entire dependency chain via constructor injection
+
+### 4. Authentication Guards
+
+Protecting routes uses two components: a **guard function** in `src/api/dependencies/` and a **router-level declaration**.
+
+**Guard function** (`src/api/dependencies/jwt_dependency.py`):
+```python
+# Validates the Bearer token, populates UserContextBase, returns decoded claims.
+# All cross-cutting Depends()-based guards live here — never inline in route files.
+async def get_current_user(
+    credentials: HTTPAuthorizationCredentials = Depends(HTTPBearer()),
+    token_service: TokenServiceBase = Injected(TokenServiceBase),
+    user_context: UserContextBase = Injected(UserContextBase),
+) -> TokenClaimsDTO:
+    token_claims = token_service.decode_access_token(credentials.credentials)
+    if token_claims is None:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, ...)
+    user_context.populate(token_claims.user_id, token_claims.username, token_claims.role)
+    return token_claims
+```
+
+**Router-level protection** — declare once on the `APIRouter`, automatically applied to every route:
+```python
+router = APIRouter(
+    prefix="/api/v1",
+    tags=["users"],
+    dependencies=[Depends(get_current_user)],   # ← applied to every route in this router
+)
+
+# Route functions stay clean — no auth parameter needed
+@router.get("/users/{user_id}", response_model=UserResponse)
+async def get_user(user_id: int, use_case: UserUseCaseBase = Injected(UserUseCaseBase)) -> UserResponse:
+    ...
+```
+
+**Critical Rules**:
+- `Depends()` is permitted **only** for cross-cutting guards in `src/api/dependencies/` — never for use case or service injection (use `Injected(BaseClass)` for those)
+- Always protect an entire router with `dependencies=[Depends(get_current_user)]` — never scatter individual `Depends(get_current_user)` parameters across route function signatures
+- Guard functions belong exclusively in `src/api/dependencies/` — never define them inside a route file
 
 ## Adding New Features
 
@@ -537,7 +584,8 @@ Use case mutations (create, update, delete) return result enums instead of raisi
 
 **Critical Rules:**
 - Result enums are **generic** — `CreateResult`, `UpdateResult`, `DeleteResult`. Do NOT create entity-specific variants (e.g., `CreateGreetingResult` is wrong)
-- All three result enums live together in `src/domain/enums/operation_results.py` — a single shared file
+- Authentication operations use `LoginResult` — the one permitted operation-specific result enum, also in `operation_results.py`. It covers outcomes unique to auth (`INVALID_CREDENTIALS`, `USER_INACTIVE`) that don't map to CRUD results
+- All result enums live together in `src/domain/enums/operation_results.py` — a single shared file
 - Result enums live in the **Domain layer** and are importable by any layer
 - The shared API operation response schemas live in `src/api/schemas/operation_schema.py` — import them directly in any route file
 - **Repositories own all exception handling** — they catch `IntegrityError`, `DBAPIError`, and `Exception` internally and return the appropriate result enum. No exceptions propagate to the use case or API layers
@@ -676,6 +724,73 @@ class OrderUseCase(OrderUseCaseBase):
 **Singleton cleanup rule**: Any singleton service that holds a long-lived resource (HTTP client, connection pool, socket) that is not automatically released must implement a `close()` method on its base class and call it in the `lifespan` shutdown block in `main.py`. The `ConnectionFactoryBase.close()` pattern is the template — follow it for every new singleton that manages external resources.
 
 **Settings**: Add any required config to `src/config/settings.py` (loaded from env var automatically).
+
+---
+
+## Request-Scoped User Context
+
+`UserContextBase` is a request-scoped service that holds the authenticated user's identity (id, username, role) for the lifetime of one HTTP request. Inject it into any use case that needs to know who is acting — without threading token data through function signatures.
+
+### How it works
+
+1. The injector creates a fresh `UserContext` (empty) at the start of every request.
+2. `get_current_user` decodes the JWT and calls `populate()` — exactly once.
+3. Any injected component within the same request receives the same populated instance.
+4. `populate()` raises `RuntimeError` on a second call, preventing accidental identity overwrites.
+
+### Interface (`src/application/services/user_context_base.py`)
+
+```python
+class UserContextBase(ABC):
+    """Request-scoped context — inject wherever the current user's identity is needed."""
+
+    @property
+    @abstractmethod
+    def user_id(self) -> int: ...
+
+    @property
+    @abstractmethod
+    def username(self) -> str: ...
+
+    @property
+    @abstractmethod
+    def role(self) -> UserRole: ...
+
+    @abstractmethod
+    def populate(self, user_id: int, username: str, role: UserRole) -> None:
+        """Called exactly once per request by the JWT validation dependency."""
+```
+
+### Binding (`src/container.py`)
+
+```python
+binder.bind(UserContextBase, to=UserContext, scope=request_scope)
+```
+
+`request_scope` creates one instance per HTTP request — shared across all injected components within that request.
+
+### Use in a use case
+
+```python
+class OrderUseCase(OrderUseCaseBase):
+    def __init__(
+        self,
+        order_repository: OrderRepositoryBase,
+        user_context: UserContextBase,
+    ) -> None:
+        self._order_repository = order_repository
+        self._user_context = user_context
+
+    async def create_order(self, create_order_dto: CreateOrderDTO) -> tuple[CreateResult, int | None]:
+        order = OrderEntityConverter.to_entity(create_order_dto, self._user_context.user_id)
+        return await self._order_repository.create(order)
+```
+
+**Critical Rules**:
+- `UserContextBase` is only valid on routes protected by `get_current_user`. Accessing properties on an unprotected route raises `RuntimeError`.
+- Never pass `UserContextBase` to repositories — use cases read scalar values from it (e.g., `self._user_context.user_id`) and pass those scalars to the repository.
+- `UserContextBase` MUST be bound with `request_scope` — never `singleton`.
+- The implementation (`UserContext`) lives in `src/infrastructure/auth/` following the external service port pattern.
 
 ---
 
@@ -945,7 +1060,7 @@ API converter → GreetingWithAuthorResponse
 
 - **Don't pass sessions to repository constructors** — inject `ConnectionFactoryBase` instead
 - **Don't inject `ConnectionFactoryBase` into use cases** — use cases must inject `TransactionManagerBase` (application layer) for `begin_transaction()`; only repositories inject `ConnectionFactoryBase` (infrastructure layer) for `get_session()`
-- **Don't use `Depends()`** — use `Injected(BaseClass)` with fastapi-injector
+- **Don't use `Depends()` for use case or service injection** — use `Injected(BaseClass)` with fastapi-injector. `Depends()` is only permitted for cross-cutting guards in `src/api/dependencies/` and for `dependencies=[...]` on an `APIRouter`
 - **Don't bypass use cases in routes** — routes should never call repositories directly
 - **Don't let Domain depend on Infrastructure** — no `from src.infrastructure...` in domain layer
 - **Don't forget `Base` suffix on ABC classes** — `UserRepositoryBase`, not `UserRepository(ABC)`
@@ -1125,6 +1240,49 @@ class TestCreateUserRoute:
 - **Repository tests are out of scope** — they require a live database and belong in integration tests, not unit tests
 - **Group tests by method under test** using inner classes (e.g., `class TestCreateUser`, `class TestGetUser`) to keep related assertions together
 
+### Testing Routes Protected by JWT
+
+For routers that declare `dependencies=[Depends(get_current_user)]`, bypass auth in tests by binding mock implementations of `TokenServiceBase` and `UserContextBase` in the `TestModule`:
+
+```python
+from unittest.mock import MagicMock
+from injector import InstanceProvider
+
+@pytest.fixture
+def test_app(mock_use_case: AsyncMock) -> FastAPI:
+    app = FastAPI()
+
+    # Stub token service — always returns valid claims
+    mock_token_service = MagicMock(spec=TokenServiceBase)
+    mock_token_service.decode_access_token.return_value = TokenClaimsDTO(
+        user_id=1, username="testuser", role=UserRole.USER
+    )
+
+    # Stub user context — pre-populated, no-op populate()
+    mock_user_context = MagicMock(spec=UserContextBase)
+    mock_user_context.user_id = 1
+    mock_user_context.username = "testuser"
+    mock_user_context.role = UserRole.USER
+
+    class TestModule(Module):
+        def configure(self, binder: Binder) -> None:
+            binder.bind(UserUseCaseBase, to=InstanceProvider(mock_use_case))
+            binder.bind(TokenServiceBase, to=InstanceProvider(mock_token_service))
+            binder.bind(UserContextBase, to=InstanceProvider(mock_user_context))
+
+    attach_injector(app, Injector([TestModule()]))
+    app.include_router(router)
+    return app
+```
+
+Send requests with a dummy `Authorization: Bearer <token>` header — the stub token service will accept any value:
+```python
+async def test_get_user(client: AsyncClient, mock_use_case: AsyncMock):
+    mock_use_case.get_user.return_value = UserDTO(...)
+    response = await client.get("/api/v1/users/1", headers={"Authorization": "Bearer test-token"})
+    assert response.status_code == 200
+```
+
 ## File References
 
 **Shared infrastructure (present in every project)**
@@ -1140,6 +1298,19 @@ class TestCreateUserRoute:
 - [DI Container](src/container.py)
 - [Settings](src/config/settings.py)
 - [Main app](src/main.py)
+
+**Authentication infrastructure (present in every project using JWT)**
+- [JWT guard dependency](src/api/dependencies/jwt_dependency.py)
+- [User context Base](src/application/services/user_context_base.py)
+- [User context implementation](src/infrastructure/auth/user_context.py)
+- [Password hasher Base](src/application/services/password_hasher_base.py)
+- [Password hasher implementation](src/infrastructure/auth/password_hasher.py)
+- [Token service Base](src/application/services/token_service_base.py)
+- [Token service implementation](src/infrastructure/auth/token_service.py)
+- [Auth use case Base](src/application/use_cases/auth/auth_use_case_base.py)
+- [Auth use case implementation](src/application/use_cases/auth/auth_use_case.py)
+- [Auth DTOs](src/application/use_cases/auth/auth_dto.py)
+- [Auth routes](src/api/routers/auth/auth_routes.py)
 
 **Per-entity file locations** (substitute `<entity>` with your entity name)
 

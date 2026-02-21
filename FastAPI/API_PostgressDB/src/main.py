@@ -3,6 +3,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi_injector import attach_injector
 
+from src.api.routers.auth.auth_routes import router as auth_router
 from src.api.routers.user.user_routes import router as user_router
 from src.application.services.blob_storage_service_base import BlobStorageServiceBase
 from src.container import injector
@@ -39,6 +40,7 @@ app = FastAPI(
 # Attach injector as middleware for dependency injection
 attach_injector(app, injector)
 
+app.include_router(auth_router)
 app.include_router(user_router)
 
 

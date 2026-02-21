@@ -11,6 +11,7 @@ class User:
     id: int | None
     email: str
     username: str
+    hashed_password: str | None = None
     role: UserRole = field(default=UserRole.USER)
     status: UserStatus = field(default=UserStatus.ACTIVE)
     created_at: datetime | None = None
