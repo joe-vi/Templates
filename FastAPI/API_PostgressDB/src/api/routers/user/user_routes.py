@@ -9,9 +9,6 @@ from src.api.routers.user.user_schema import UserCreateRequest, UserResponse, Us
 from src.api.schemas.operation_schema import CreateOperationResponse, DeleteOperationResponse, UpdateOperationResponse
 from src.application.use_cases.user.user_use_case_base import UserUseCaseBase
 
-# Every route in this router requires a valid JWT. get_current_user validates the
-# Bearer token and populates the request-scoped UserContextBase so use cases can
-# read the current user's identity via Injected(UserContextBase).
 router = APIRouter(
     prefix="/api/v1",
     tags=["users"],

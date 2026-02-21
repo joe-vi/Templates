@@ -22,7 +22,6 @@ async def lifespan(app: FastAPI):
     """
     yield
 
-    # Cleanup: Close database connections and external service clients
     connection_factory = injector.get(ConnectionFactoryBase)
     await connection_factory.close()
 
@@ -37,7 +36,6 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-# Attach injector and add middleware for request-scoped dependency injection
 app.add_middleware(InjectorMiddleware, injector=injector)
 attach_injector(app, injector)
 

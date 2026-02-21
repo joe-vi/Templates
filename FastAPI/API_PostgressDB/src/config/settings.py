@@ -6,7 +6,6 @@ from sqlalchemy.engine import URL
 class Settings(BaseSettings):
     """Application settings loaded from environment variables."""
 
-    # Database settings
     db_driver: str = "postgresql+asyncpg"
     db_user: str = "postgres"
     db_password: str = "postgres"
@@ -30,13 +29,10 @@ class Settings(BaseSettings):
             database=self.db_name,
         )
 
-    # Logging settings
     log_level: str = "INFO"
 
-    # Blob storage settings
     blob_storage_connection_string: str = ""
 
-    # JWT settings
     jwt_secret_key: str = "changeme-use-a-strong-random-secret-in-production"
     jwt_algorithm: str = "HS256"
     access_token_expire_minutes: int = 30

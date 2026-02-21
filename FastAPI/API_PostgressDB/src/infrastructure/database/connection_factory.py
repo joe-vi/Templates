@@ -13,8 +13,6 @@ from sqlalchemy.ext.asyncio import (
 from src.config.settings import Settings
 from src.infrastructure.database.connection_factory_base import ConnectionFactoryBase
 
-# Holds the active session for the current async context (task/coroutine).
-# Set by begin_transaction(); None when no shared transaction is in progress.
 _active_session: ContextVar[AsyncSession | None] = ContextVar("_active_session", default=None)
 
 
@@ -44,7 +42,7 @@ class ConnectionFactory(ConnectionFactoryBase):
     async def get_session(self) -> AsyncIterator[AsyncSession]:
         active = _active_session.get()
         if active is not None:
-            yield active  # reuse the active transaction — commit/rollback owned by begin_transaction()
+            yield active
             return
 
         async with self._session_factory() as session:

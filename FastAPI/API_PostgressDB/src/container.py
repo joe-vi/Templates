@@ -96,5 +96,4 @@ class AppModule(Module):
         )
 
 
-# Global injector instance
 injector = Injector([AppModule()])

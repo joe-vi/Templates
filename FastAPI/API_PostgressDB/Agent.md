@@ -250,6 +250,7 @@ Use when a repository query returns more data than a single domain entity holds 
 - Modern type annotations: `list[X]` not `List[X]`, `X | None` not `Optional[X]`.
 - All DB operations are async; use `async def` and `await`.
 - API prefix: `/api/v1`.
+- **Never add `#` inline comments.** Code must be self-explanatory through clear naming — descriptive variable names, explicit function names, and well-structured logic eliminate the need for inline narration. If a line needs a comment to be understood, rename or restructure until it does not.
 
 ---
 
@@ -323,6 +324,7 @@ pytest -v                 # verbose
 - Don't use `singleton` scope for repositories or use cases
 - Don't forget to close singleton resources — implement `close()` on base class and call in `lifespan` shutdown
 - Don't scatter entity files into flat shared directories
+- Don't add `#` inline comments — use clear naming and structure to make code self-explanatory
 - Don't create entity-specific result enums — use `CreateResult`, `UpdateResult`, `DeleteResult`
 - Don't create a wrapper DTO for collections — return `list[EntityDTO]` directly
 - Don't define guard functions inside route files — they belong in `src/api/dependencies/`
