@@ -2,6 +2,20 @@
 
 A production-ready FastAPI application template built with Clean Architecture principles, async SQLAlchemy, and dependency injection.
 
+## Get This Template
+
+Navigate to your target directory first, then run the appropriate command for your OS:
+
+**macOS / Linux**
+```bash
+curl -fsSL https://github.com/joe-vi/Templates/archive/refs/heads/main.tar.gz | tar -xz --strip-components=3 "Templates-main/FastAPI/API_PostgressDB"
+```
+
+**Windows (PowerShell)**
+```powershell
+Invoke-WebRequest -Uri "https://github.com/joe-vi/Templates/archive/refs/heads/main.zip" -OutFile t.zip; Expand-Archive t.zip .; Move-Item "Templates-main/FastAPI/API_PostgressDB/*" .; Remove-Item Templates-main,t.zip -Recurse
+```
+
 ## Features
 
 - **Clean Architecture**: Separation of concerns with distinct layers (Domain, Application, Infrastructure, API)
