@@ -1,7 +1,6 @@
 from fastapi_injector import request_scope
 from injector import Binder, Injector, Module, singleton
 
-from src.application.services.blob_storage_service_base import BlobStorageServiceBase
 from src.application.services.custom_logger_base import CustomLoggerBase
 from src.application.services.password_hasher_base import PasswordHasherBase
 from src.application.services.token_service_base import TokenServiceBase
@@ -16,7 +15,6 @@ from src.domain.repositories.user.user_repository_base import UserRepositoryBase
 from src.infrastructure.auth.password_hasher import PasswordHasher
 from src.infrastructure.auth.token_service import TokenService
 from src.infrastructure.auth.user_context import UserContext
-from src.infrastructure.blob_storage.blob_storage_service import BlobStorageService
 from src.infrastructure.database.connection_factory import ConnectionFactory
 from src.infrastructure.database.connection_factory_base import ConnectionFactoryBase
 from src.infrastructure.database.transaction_manager import TransactionManager
@@ -65,12 +63,6 @@ class AppModule(Module):
             UserContextBase,
             to=UserContext,
             scope=request_scope,
-        )
-
-        binder.bind(
-            BlobStorageServiceBase,
-            to=BlobStorageService,
-            scope=singleton,
         )
 
         binder.bind(

@@ -31,8 +31,6 @@ class Settings(BaseSettings):
 
     log_level: str = "INFO"
 
-    blob_storage_connection_string: str = ""
-
     jwt_secret_key: str = "changeme-use-a-strong-random-secret-in-production"
     jwt_algorithm: str = "HS256"
     access_token_expire_minutes: int = 30

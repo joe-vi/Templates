@@ -5,7 +5,6 @@ from fastapi_injector import InjectorMiddleware, attach_injector
 
 from src.api.routers.auth.auth_routes import router as auth_router
 from src.api.routers.user.user_routes import router as user_router
-from src.application.services.blob_storage_service_base import BlobStorageServiceBase
 from src.container import injector
 from src.infrastructure.database.connection_factory_base import ConnectionFactoryBase
 
@@ -24,9 +23,6 @@ async def lifespan(app: FastAPI):
 
     connection_factory = injector.get(ConnectionFactoryBase)
     await connection_factory.close()
-
-    blob_storage_service = injector.get(BlobStorageServiceBase)
-    await blob_storage_service.close()
 
 
 app = FastAPI(
