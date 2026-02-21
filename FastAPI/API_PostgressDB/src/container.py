@@ -31,61 +31,23 @@ class AppModule(Module):
     """
 
     def configure(self, binder: Binder) -> None:
-        binder.bind(
-            Settings,
-            to=Settings,
-            scope=singleton,
-        )
+        # Singletons
+        binder.bind(Settings, to=Settings, scope=singleton)
+        binder.bind(ConnectionFactoryBase, to=ConnectionFactory, scope=singleton)
+        binder.bind(PasswordHasherBase, to=PasswordHasher, scope=singleton)
+        binder.bind(TokenServiceBase, to=TokenService, scope=singleton)
 
-        binder.bind(
-            ConnectionFactoryBase,
-            to=ConnectionFactory,
-            scope=singleton,
-        )
+        # Request-scoped services
+        binder.bind(CustomLoggerBase, to=CustomLogger, scope=request_scope)
+        binder.bind(UserContextBase, to=UserContext, scope=request_scope)
 
-        binder.bind(
-            TransactionManagerBase,
-            to=TransactionManager,
-        )
+        # Repositories
+        binder.bind(TransactionManagerBase, to=TransactionManager)
+        binder.bind(UserRepositoryBase, to=UserRepository)
 
-        binder.bind(
-            UserRepositoryBase,
-            to=UserRepository,
-        )
-
-        binder.bind(
-            CustomLoggerBase,
-            to=CustomLogger,
-            scope=request_scope,
-        )
-
-        binder.bind(
-            UserContextBase,
-            to=UserContext,
-            scope=request_scope,
-        )
-
-        binder.bind(
-            PasswordHasherBase,
-            to=PasswordHasher,
-            scope=singleton,
-        )
-
-        binder.bind(
-            TokenServiceBase,
-            to=TokenService,
-            scope=singleton,
-        )
-
-        binder.bind(
-            UserUseCaseBase,
-            to=UserUseCase,
-        )
-
-        binder.bind(
-            AuthUseCaseBase,
-            to=AuthUseCase,
-        )
+        # Use cases
+        binder.bind(UserUseCaseBase, to=UserUseCase)
+        binder.bind(AuthUseCaseBase, to=AuthUseCase)
 
 
 injector = Injector([AppModule()])
