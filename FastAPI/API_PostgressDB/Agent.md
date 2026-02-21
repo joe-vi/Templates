@@ -28,44 +28,41 @@ Within each layer, files are organised by **type** first, then **entity name**. 
 src/
 ├── domain/
 │   ├── entities/
-│   │   └── user/                        ← entity folder
-│   │       └── user.py                  # entity
+│   │   └── <entity>/                    ← one folder per entity
+│   │       └── <entity>.py              # entity dataclass
 │   ├── repositories/
-│   │   └── user/                        ← entity folder
-│   │       ├── user_repository_base.py  # repository ABC
-│   │       └── user_query_row.py        # query row (when needed)
+│   │   └── <entity>/                    ← one folder per entity
+│   │       ├── <entity>_repository_base.py  # repository ABC
+│   │       └── <entity>_query_row.py        # query row (when needed)
 │   └── enums/                           ← shared across all entities
-│       ├── user_enum.py
+│       ├── <entity>_enum.py
 │       └── operation_results.py
 │
 ├── application/
 │   ├── use_cases/
-│   │   └── user/                        ← entity folder
-│   │       ├── user_dto.py
-│   │       ├── user_converter.py
-│   │       ├── user_use_case_base.py
-│   │       └── user_use_case.py
-│   └── services/                        ← shared external service interfaces
-│       └── blob_storage_service_base.py
+│   │   └── <entity>/                    ← one folder per entity
+│   │       ├── <entity>_dto.py
+│   │       ├── <entity>_converter.py
+│   │       ├── <entity>_use_case_base.py
+│   │       └── <entity>_use_case.py
+│   └── services/                        ← shared external service interfaces (optional)
 │
 ├── infrastructure/
 │   ├── repositories/
-│   │   └── user/                        ← entity folder
-│   │       └── user_repository.py
-│   ├── database/                        ← shared DB infrastructure
-│   │   ├── db.py
-│   │   ├── models.py
-│   │   ├── connection_factory_base.py
-│   │   └── connection_factory.py
-│   └── blob_storage/                    ← shared external service implementations
-│       └── blob_storage_service.py
+│   │   └── <entity>/                    ← one folder per entity
+│   │       └── <entity>_repository.py
+│   └── database/                        ← shared DB infrastructure
+│       ├── db.py
+│       ├── models.py
+│       ├── connection_factory_base.py
+│       └── connection_factory.py
 │
 └── api/
     ├── routers/
-    │   └── user/                        ← entity folder
-    │       ├── user_schema.py
-    │       ├── user_converter.py
-    │       └── user_routes.py
+    │   └── <entity>/                    ← one folder per entity
+    │       ├── <entity>_schema.py
+    │       ├── <entity>_converter.py
+    │       └── <entity>_routes.py
     ├── schemas/                         ← shared operation response schemas
     │   └── operation_schema.py
     └── result_status_maps.py            ← shared response helpers
@@ -591,63 +588,48 @@ if greeting_dto is None:
 
 ## External Services (Application Layer Ports)
 
-For external services that use cases call directly (blob storage, email, payment, etc.), the interface lives in the **application layer** — not the infrastructure layer. This keeps use cases framework-agnostic and the provider swappable with a single line change in `container.py`.
+When a use case needs to call an external service (email, payment, etc.), the interface lives in the **application layer** — not the infrastructure layer. This keeps use cases framework-agnostic and the provider swappable with a single line change in `container.py`.
 
 | File | Location | Purpose |
 |------|----------|---------|
-| `BlobStorageServiceBase` | `src/application/services/` | Interface — use cases import this |
-| `BlobStorageService` | `src/infrastructure/blob_storage/` | Azure implementation |
+| `<Service>Base` | `src/application/services/` | Interface — use cases import this |
+| `<Service>` | `src/infrastructure/<service>/` | Concrete implementation |
 
 ```python
-# src/application/services/blob_storage_service_base.py
-class BlobStorageServiceBase(ABC):
+# src/application/services/email_service_base.py
+class EmailServiceBase(ABC):
     """Abstract base class — use cases depend only on this."""
 
     @abstractmethod
-    async def upload(self, container_name: str, blob_name: str, data: bytes, content_type: str = "application/octet-stream") -> str:
-        """Upload raw bytes, returns the blob URL."""
+    async def send(self, to: str, subject: str, body: str) -> bool: ...
 
-    @abstractmethod
-    async def download(self, container_name: str, blob_name: str) -> bytes: ...
-
-    @abstractmethod
-    async def delete(self, container_name: str, blob_name: str) -> bool: ...
-
-    @abstractmethod
-    async def exists(self, container_name: str, blob_name: str) -> bool: ...
-
-# src/infrastructure/blob_storage/blob_storage_service.py
-class BlobStorageService(BlobStorageServiceBase):
-    """Azure Blob Storage implementation. Swap to S3BlobStorageService by changing container.py only."""
+# src/infrastructure/email/email_service.py
+class EmailService(EmailServiceBase):
+    """Concrete implementation. Swap providers by changing container.py only."""
 
     def __init__(self, settings: Settings) -> None:
-        self._client = BlobServiceClient.from_connection_string(settings.blob_storage_connection_string)
+        self._client = ...  # provider-specific client
 
-    async def upload(self, container_name: str, blob_name: str, data: bytes, content_type: str = "application/octet-stream") -> str:
-        async with self._client.get_blob_client(container=container_name, blob=blob_name) as blob_client:
-            await blob_client.upload_blob(data, overwrite=True, content_settings=ContentSettings(content_type=content_type))
-            return blob_client.url
+    async def send(self, to: str, subject: str, body: str) -> bool:
+        ...
 
 # src/container.py — bind as singleton (shared client connection)
-binder.bind(BlobStorageServiceBase, to=BlobStorageService, scope=singleton)
+binder.bind(EmailServiceBase, to=EmailService, scope=singleton)
 ```
 
 **Use in a use case:**
 ```python
-class GreetingUseCase(GreetingUseCaseBase):
-    def __init__(self, repository: GreetingRepositoryBase, blob_storage_service: BlobStorageServiceBase) -> None:
+class OrderUseCase(OrderUseCaseBase):
+    def __init__(self, repository: OrderRepositoryBase, email_service: EmailServiceBase) -> None:
         self._repository = repository
-        self._blob_storage_service = blob_storage_service
+        self._email_service = email_service
 ```
 
-**To switch providers**: Create `S3BlobStorageService(BlobStorageServiceBase)` in `src/infrastructure/blob_storage/` and change `to=BlobStorageService` → `to=S3BlobStorageService` in `container.py`. The use case is untouched.
+**To switch providers**: Create the new implementation in `src/infrastructure/<service>/` and update `to=NewImpl` in `container.py`. The use case is untouched.
 
-**Singleton cleanup rule**: Any singleton service that holds a long-lived resource (HTTP client, connection pool, socket) that is not automatically released must implement a `close()` method on its base class and call it in the `lifespan` shutdown block in `main.py`. The `BlobStorageServiceBase.close()` / `ConnectionFactoryBase.close()` pattern is the template — follow it for every new singleton that manages external resources.
+**Singleton cleanup rule**: Any singleton service that holds a long-lived resource (HTTP client, connection pool, socket) that is not automatically released must implement a `close()` method on its base class and call it in the `lifespan` shutdown block in `main.py`. The `ConnectionFactoryBase.close()` pattern is the template — follow it for every new singleton that manages external resources.
 
-**Settings**: Add connection string to `src/config/settings.py` (loaded from env var automatically):
-```python
-blob_storage_connection_string: str = ""
-```
+**Settings**: Add any required config to `src/config/settings.py` (loaded from env var automatically).
 
 ---
 
@@ -906,8 +888,8 @@ API converter → GreetingWithAuthorResponse
 - **Don't create instances manually** — let the injector resolve the dependency chain
 - **Don't forget to bind in AppModule** — every new base/implementation pair needs `binder.bind()`
 - **Don't forget `attach_injector(app, injector)`** — must be called before including routers
-- **Don't use `singleton` for repositories/use cases** — only `ConnectionFactory` and external service clients (e.g. `BlobStorageService`) should be singleton
-- **Don't forget to close singleton resources** — every singleton that holds an external connection (DB pool, HTTP client, blob storage client) must have a `close()` method on its base class and be closed in the `lifespan` shutdown block in `main.py`
+- **Don't use `singleton` for repositories/use cases** — only `ConnectionFactory` and external service clients (e.g. HTTP clients, connection pools) should be singleton
+- **Don't forget to close singleton resources** — every singleton that holds an external connection (DB pool, HTTP client) must have a `close()` method on its base class and be closed in the `lifespan` shutdown block in `main.py`
 - **Don't scatter entity files into flat shared directories** — follow the `src/{layer}/{type}/{entity}/` pattern
 
 ## Configuration
@@ -941,31 +923,31 @@ tests/
 │   ├── __init__.py
 │   └── routers/
 │       ├── __init__.py
-│       └── user/                              ← mirrors src/api/routers/user/
+│       └── <entity>/                          ← mirrors src/api/routers/<entity>/
 │           ├── __init__.py
-│           ├── test_user_converter.py         # schema → DTO mapper tests
-│           └── test_user_routes.py            # route/endpoint tests
+│           ├── test_<entity>_converter.py     # schema → DTO mapper tests
+│           └── test_<entity>_routes.py        # route/endpoint tests
 └── application/
     ├── __init__.py
     └── use_cases/
         ├── __init__.py
-        └── user/                              ← mirrors src/application/use_cases/user/
+        └── <entity>/                          ← mirrors src/application/use_cases/<entity>/
             ├── __init__.py
-            ├── test_user_converter.py         # entity ↔ DTO mapper tests
-            └── test_user_use_case.py          # use case logic tests
+            ├── test_<entity>_converter.py     # entity ↔ DTO mapper tests
+            └── test_<entity>_use_case.py      # use case logic tests
 ```
 
-**Rule**: When adding a new entity (e.g., `Order`), create parallel test folders `tests/application/use_cases/order/` and `tests/api/routers/order/` — one test file per source file being tested.
+**Rule**: For each entity, create parallel test folders `tests/application/use_cases/<entity>/` and `tests/api/routers/<entity>/` — one test file per source file being tested.
 
 ### What to Test (and What Not To)
 
 | Layer | File | Test? | Reason |
 |-------|------|-------|--------|
-| Application | `user_use_case.py` | Yes | Core business logic, mock the repository |
-| Application | `user_converter.py` | Yes | Entity ↔ DTO mapping correctness |
-| API | `user_converter.py` | Yes | Schema ↔ DTO mapping correctness |
-| API | `user_routes.py` | Yes | HTTP contract — status codes, request validation |
-| Infrastructure | `user_repository.py` | **No** | Requires a live DB; covered by integration tests |
+| Application | `<entity>_use_case.py` | Yes | Core business logic, mock the repository |
+| Application | `<entity>_converter.py` | Yes | Entity ↔ DTO mapping correctness |
+| API | `<entity>_converter.py` | Yes | Schema ↔ DTO mapping correctness |
+| API | `<entity>_routes.py` | Yes | HTTP contract — status codes, request validation |
+| Infrastructure | `<entity>_repository.py` | **No** | Requires a live DB; covered by integration tests |
 
 ### Running Tests
 
@@ -1080,26 +1062,30 @@ class TestCreateUserRoute:
 
 ## File References
 
-- [User entity](src/domain/entities/user/user.py)
-- [User enums](src/domain/enums/user_enum.py)
+**Shared infrastructure (present in every project)**
 - [Operation result enums (shared)](src/domain/enums/operation_results.py)
 - [Operation response schemas (shared)](src/api/schemas/operation_schema.py)
 - [Response helpers and status maps (shared)](src/api/result_status_maps.py)
-- [Repository Base](src/domain/repositories/user/user_repository_base.py)
-- [Repository implementation](src/infrastructure/repositories/user/user_repository.py)
 - [DB Base](src/infrastructure/database/db.py)
 - [DB models](src/infrastructure/database/models.py)
 - [Connection factory Base](src/infrastructure/database/connection_factory_base.py)
 - [Connection factory](src/infrastructure/database/connection_factory.py)
-- [Blob storage service Base](src/application/services/blob_storage_service_base.py)
-- [Blob storage service](src/infrastructure/blob_storage/blob_storage_service.py)
-- [DTOs](src/application/use_cases/user/user_dto.py)
-- [Entity converter](src/application/use_cases/user/user_converter.py)
-- [Use case Base](src/application/use_cases/user/user_use_case_base.py)
-- [Use case implementation](src/application/use_cases/user/user_use_case.py)
-- [API schemas](src/api/routers/user/user_schema.py)
-- [API converter](src/api/routers/user/user_converter.py)
-- [Routes](src/api/routers/user/user_routes.py)
 - [DI Container](src/container.py)
 - [Settings](src/config/settings.py)
 - [Main app](src/main.py)
+
+**Per-entity file locations** (substitute `<entity>` with your entity name)
+
+| Purpose | Path |
+|---------|------|
+| Entity dataclass | `src/domain/entities/<entity>/<entity>.py` |
+| Entity enums | `src/domain/enums/<entity>_enum.py` |
+| Repository Base | `src/domain/repositories/<entity>/<entity>_repository_base.py` |
+| Repository implementation | `src/infrastructure/repositories/<entity>/<entity>_repository.py` |
+| DTOs | `src/application/use_cases/<entity>/<entity>_dto.py` |
+| Entity converter | `src/application/use_cases/<entity>/<entity>_converter.py` |
+| Use case Base | `src/application/use_cases/<entity>/<entity>_use_case_base.py` |
+| Use case implementation | `src/application/use_cases/<entity>/<entity>_use_case.py` |
+| API schemas | `src/api/routers/<entity>/<entity>_schema.py` |
+| API converter | `src/api/routers/<entity>/<entity>_converter.py` |
+| Routes | `src/api/routers/<entity>/<entity>_routes.py` |
