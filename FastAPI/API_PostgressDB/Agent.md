@@ -28,30 +28,30 @@ Within each layer, files are organised by **type** first, then **entity name**. 
 src/
 ├── domain/
 │   ├── entities/
-│   │   └── greeting/                    ← entity folder
-│   │       └── greeting.py              # entity
+│   │   └── user/                        ← entity folder
+│   │       └── user.py                  # entity
 │   ├── repositories/
-│   │   └── greeting/                    ← entity folder
-│   │       ├── greeting_repository_base.py  # repository ABC
-│   │       └── greeting_query_row.py    # query row (when needed)
+│   │   └── user/                        ← entity folder
+│   │       ├── user_repository_base.py  # repository ABC
+│   │       └── user_query_row.py        # query row (when needed)
 │   └── enums/                           ← shared across all entities
-│       ├── greeting_enum.py
+│       ├── user_enum.py
 │       └── operation_results.py
 │
 ├── application/
 │   ├── use_cases/
-│   │   └── greeting/                    ← entity folder
-│   │       ├── greeting_dto.py
-│   │       ├── greeting_converter.py
-│   │       ├── greeting_use_case_base.py
-│   │       └── greeting_use_case.py
+│   │   └── user/                        ← entity folder
+│   │       ├── user_dto.py
+│   │       ├── user_converter.py
+│   │       ├── user_use_case_base.py
+│   │       └── user_use_case.py
 │   └── services/                        ← shared external service interfaces
 │       └── blob_storage_service_base.py
 │
 ├── infrastructure/
 │   ├── repositories/
-│   │   └── greeting/                    ← entity folder
-│   │       └── greeting_repository.py
+│   │   └── user/                        ← entity folder
+│   │       └── user_repository.py
 │   ├── database/                        ← shared DB infrastructure
 │   │   ├── db.py
 │   │   ├── models.py
@@ -62,16 +62,16 @@ src/
 │
 └── api/
     ├── routers/
-    │   └── greeting/                    ← entity folder
-    │       ├── greeting_schema.py
-    │       ├── greeting_converter.py
-    │       └── greeting_routes.py
+    │   └── user/                        ← entity folder
+    │       ├── user_schema.py
+    │       ├── user_converter.py
+    │       └── user_routes.py
     ├── schemas/                         ← shared operation response schemas
     │   └── operation_schema.py
     └── result_status_maps.py            ← shared response helpers
 ```
 
-**Rule**: When adding a new entity (e.g., `User`), create `src/domain/entities/user/`, `src/domain/repositories/user/`, `src/application/use_cases/user/`, `src/infrastructure/repositories/user/`, and `src/api/routers/user/`. Never scatter entity files into flat shared directories.
+**Rule**: When adding a new entity (e.g., `Order`), create `src/domain/entities/order/`, `src/domain/repositories/order/`, `src/application/use_cases/order/`, `src/infrastructure/repositories/order/`, and `src/api/routers/order/`. Never scatter entity files into flat shared directories.
 
 ## Key Architectural Patterns
 
@@ -176,8 +176,8 @@ Uses `fastapi-injector` which integrates the `injector` library with FastAPI mid
 class AppModule(Module):
     def configure(self, binder: Binder) -> None:
         binder.bind(ConnectionFactoryBase, to=ConnectionFactory, scope=singleton)
-        binder.bind(GreetingRepositoryBase, to=GreetingRepository)
-        binder.bind(GreetingUseCaseBase, to=GreetingUseCase)
+        binder.bind(UserRepositoryBase, to=UserRepository)
+        binder.bind(UserUseCaseBase, to=UserUseCase)
 
 injector = Injector([AppModule()])
 ```
@@ -187,16 +187,16 @@ injector = Injector([AppModule()])
 attach_injector(app, injector)
 ```
 
-**Route Injection** ([greeting_routes.py](src/api/routers/greeting/greeting_routes.py)):
+**Route Injection** ([user_routes.py](src/api/routers/user/user_routes.py)):
 ```python
-@router.post("/greetings")
-async def create_greeting(
-    greeting_data: GreetingCreateRequest,
-    use_case: GreetingUseCaseBase = Injected(GreetingUseCaseBase),
-) -> GreetingResponse:
-    create_greeting_dto = GreetingConverter.to_create_dto(greeting_data)
-    created_greeting_dto = await use_case.create_greeting(create_greeting_dto)
-    return GreetingConverter.to_response(created_greeting_dto)
+@router.post("/users", response_model=CreateOperationResponse)
+async def create_user(
+    user_data: UserCreateRequest,
+    use_case: UserUseCaseBase = Injected(UserUseCaseBase),
+) -> JSONResponse:
+    create_user_dto = UserConverter.to_create_dto(user_data)
+    result, entity_id = await use_case.create_user(create_user_dto)
+    return create_response(result, entity_id)
 ```
 
 **Critical Rules**:
@@ -393,30 +393,30 @@ app.include_router(user_router)
 5. **Enums flow through all layers unchanged** — entity → DTO → API schema all use the same enum type directly; no conversion needed
 
 ```python
-# src/domain/enums/greeting_enum.py
+# src/domain/enums/user_enum.py
 from enum import StrEnum
 
-class GreetingStatus(StrEnum):
-    """Represents the lifecycle status of a greeting."""
+class UserStatus(StrEnum):
+    """Represents the lifecycle status of a user."""
     ACTIVE = "active"
-    ARCHIVED = "archived"
+    INACTIVE = "inactive"
 
 # src/infrastructure/database/models.py — define a shared type object at module level, reuse across models
 from sqlalchemy import Enum as SQLAlchemyEnum
 from sqlalchemy.orm import Mapped, mapped_column
 
-greeting_status_enum = SQLAlchemyEnum(GreetingStatus, name="greeting_status")
-status: Mapped[GreetingStatus] = mapped_column(greeting_status_enum, nullable=False, default=GreetingStatus.ACTIVE)
+user_status_enum = SQLAlchemyEnum(UserStatus, name="user_status")
+status: Mapped[UserStatus] = mapped_column(user_status_enum, nullable=False, default=UserStatus.ACTIVE)
 
-# src/domain/entities/greeting/greeting.py — used directly on the entity
+# src/domain/entities/user/user.py — used directly on the entity
 from dataclasses import field
-status: GreetingStatus = field(default=GreetingStatus.ACTIVE)
+status: UserStatus = field(default=UserStatus.ACTIVE)
 
-# src/application/use_cases/greeting/greeting_dto.py — carried through as-is
-status: GreetingStatus
+# src/application/use_cases/user/user_dto.py — carried through as-is
+status: UserStatus
 
-# src/api/routers/greeting/greeting_schema.py — Pydantic handles StrEnum natively
-status: GreetingStatus = Field(default=GreetingStatus.ACTIVE)
+# src/api/routers/user/user_schema.py — Pydantic handles StrEnum natively
+status: UserStatus = Field(default=UserStatus.ACTIVE)
 ```
 
 ### Variable and Property Naming Conventions
@@ -942,26 +942,26 @@ async def test_create_user():
 
 ## File References
 
-- [Greeting entity](src/domain/entities/greeting/greeting.py)
-- [Greeting status enum](src/domain/enums/greeting_enum.py)
+- [User entity](src/domain/entities/user/user.py)
+- [User enums](src/domain/enums/user_enum.py)
 - [Operation result enums (shared)](src/domain/enums/operation_results.py)
 - [Operation response schemas (shared)](src/api/schemas/operation_schema.py)
 - [Response helpers and status maps (shared)](src/api/result_status_maps.py)
-- [Repository Base](src/domain/repositories/greeting/greeting_repository_base.py)
-- [Repository implementation](src/infrastructure/repositories/greeting/greeting_repository.py)
+- [Repository Base](src/domain/repositories/user/user_repository_base.py)
+- [Repository implementation](src/infrastructure/repositories/user/user_repository.py)
 - [DB Base](src/infrastructure/database/db.py)
 - [DB models](src/infrastructure/database/models.py)
 - [Connection factory Base](src/infrastructure/database/connection_factory_base.py)
 - [Connection factory](src/infrastructure/database/connection_factory.py)
 - [Blob storage service Base](src/application/services/blob_storage_service_base.py)
 - [Blob storage service](src/infrastructure/blob_storage/blob_storage_service.py)
-- [DTOs](src/application/use_cases/greeting/greeting_dto.py)
-- [Entity converter](src/application/use_cases/greeting/greeting_converter.py)
-- [Use case Base](src/application/use_cases/greeting/greeting_use_case_base.py)
-- [Use case implementation](src/application/use_cases/greeting/greeting_use_case.py)
-- [API schemas](src/api/routers/greeting/greeting_schema.py)
-- [API converter](src/api/routers/greeting/greeting_converter.py)
-- [Routes](src/api/routers/greeting/greeting_routes.py)
+- [DTOs](src/application/use_cases/user/user_dto.py)
+- [Entity converter](src/application/use_cases/user/user_converter.py)
+- [Use case Base](src/application/use_cases/user/user_use_case_base.py)
+- [Use case implementation](src/application/use_cases/user/user_use_case.py)
+- [API schemas](src/api/routers/user/user_schema.py)
+- [API converter](src/api/routers/user/user_converter.py)
+- [Routes](src/api/routers/user/user_routes.py)
 - [DI Container](src/container.py)
 - [Settings](src/config/settings.py)
 - [Main app](src/main.py)

@@ -3,15 +3,15 @@ from injector import Binder, Injector, Module, singleton
 
 from src.application.services.blob_storage_service_base import BlobStorageServiceBase
 from src.application.services.custom_logger_base import CustomLoggerBase
-from src.application.use_cases.greeting.greeting_use_case import GreetingUseCase
-from src.application.use_cases.greeting.greeting_use_case_base import GreetingUseCaseBase
+from src.application.use_cases.user.user_use_case import UserUseCase
+from src.application.use_cases.user.user_use_case_base import UserUseCaseBase
 from src.config.settings import Settings
-from src.domain.repositories.greeting.greeting_repository_base import GreetingRepositoryBase
+from src.domain.repositories.user.user_repository_base import UserRepositoryBase
 from src.infrastructure.blob_storage.blob_storage_service import BlobStorageService
 from src.infrastructure.database.connection_factory import ConnectionFactory
 from src.infrastructure.database.connection_factory_base import ConnectionFactoryBase
 from src.infrastructure.logging.custom_logger import CustomLogger
-from src.infrastructure.repositories.greeting.greeting_repository import GreetingRepository
+from src.infrastructure.repositories.user.user_repository import UserRepository
 
 
 class AppModule(Module):
@@ -36,8 +36,8 @@ class AppModule(Module):
         )
 
         binder.bind(
-            GreetingRepositoryBase,
-            to=GreetingRepository,
+            UserRepositoryBase,
+            to=UserRepository,
         )
 
         binder.bind(
@@ -53,8 +53,8 @@ class AppModule(Module):
         )
 
         binder.bind(
-            GreetingUseCaseBase,
-            to=GreetingUseCase,
+            UserUseCaseBase,
+            to=UserUseCase,
         )
 
 
