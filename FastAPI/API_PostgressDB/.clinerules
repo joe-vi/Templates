@@ -1,9 +1,9 @@
 # Cline / Roo Cline — Codebase Instructions
 
-## Mandatory: Read Agent.md Before Every Task
+## Mandatory: Read AGENT.md Before Every Task
 
 Before writing, editing, or reviewing any code in this repository, read the full contents of
-Agent.md. It is the single source of truth for all architecture rules, naming conventions,
+AGENT.md. It is the single source of truth for all architecture rules, naming conventions,
 patterns, and anti-patterns. **These rules override any general defaults.**
 
 ## Architecture (Clean Architecture — 4 Layers)
