@@ -96,29 +96,29 @@ Invoke-WebRequest -Uri "https://github.com/joe-vi/Templates/archive/refs/heads/m
 1. Clone the repository
 
 2. Install uv (if not already installed):
+
+**macOS / Linux**
 ```bash
 curl -LsSf https://astral.sh/uv/install.sh | sh
 ```
 
-3. Create virtual environment and install dependencies:
-```bash
-uv venv
-source .venv/bin/activate  # On Windows: .venv\Scripts\activate
-uv pip install -e .
+**Windows (PowerShell)**
+```powershell
+powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"
 ```
 
-4. For development dependencies:
+3. Install dependencies (creates the virtual environment automatically):
 ```bash
-uv pip install -e ".[dev]"
+uv sync
 ```
 
-5. Configure environment variables:
+4. Configure environment variables:
 ```bash
 cp .env.example .env
 # Edit .env with your database credentials
 ```
 
-6. Ensure PostgreSQL is running and create the database:
+5. Ensure PostgreSQL is running and create the database:
 ```bash
 createdb fastapi_db
 ```
@@ -176,7 +176,7 @@ A `.vscode/launch.json` is included for one-click debugging. Press `F5` or open 
 #### Option B: Command Line
 
 ```bash
-uvicorn src.main:app --reload --host 0.0.0.0 --port 8000
+uv run uvicorn src.main:app --reload --host 0.0.0.0 --port 8000
 ```
 
 The API will be available at:
@@ -350,22 +350,22 @@ Benefits:
 
 ### Running Tests
 ```bash
-pytest
+uv run pytest
 ```
 
 ### Code Formatting
 ```bash
-ruff format .
+uv run ruff format src/
 ```
 
 ### Linting
 ```bash
-ruff check .
+uv run ruff check src/
 ```
 
 ### Type Checking
 ```bash
-mypy src/
+uv run mypy src/
 ```
 
 ## Environment Variables
