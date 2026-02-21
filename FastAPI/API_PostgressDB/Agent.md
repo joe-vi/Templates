@@ -52,8 +52,10 @@ src/
 │   │   └── <entity>/                    ← one folder per entity
 │   │       └── <entity>_repository.py
 │   └── database/                        ← shared DB infrastructure
-│       ├── db.py
-│       ├── models.py
+│       ├── base.py                      # DeclarativeBase
+│       ├── models/                      ← one file per entity
+│       │   ├── __init__.py              # re-exports all models
+│       │   └── <entity>_model.py
 │       ├── connection_factory_base.py
 │       └── connection_factory.py
 │
@@ -246,15 +248,19 @@ class UserRepositoryBase(ABC):  # Must end with Base
 #### 2. Infrastructure Layer
 
 ```python
-# src/infrastructure/database/models.py (add to existing models.py)
+# src/infrastructure/database/models/user_model.py (new file per entity)
 from sqlalchemy.orm import Mapped, mapped_column
-from src.infrastructure.database.db import Base  # Base lives in db.py
+from src.infrastructure.database.base import Base
 
 class UserModel(Base):
     __tablename__ = "users"
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
     name: Mapped[str] = mapped_column(nullable=False)
     email: Mapped[str] = mapped_column(unique=True, nullable=False)
+
+# src/infrastructure/database/models/__init__.py (add re-export after creating model)
+from src.infrastructure.database.models.user_model import UserModel
+__all__ = ["UserModel"]
 
 # src/infrastructure/repositories/user/user_repository.py
 class UserRepository(UserRepositoryBase):
@@ -398,12 +404,14 @@ class UserStatus(StrEnum):
     ACTIVE = "active"
     INACTIVE = "inactive"
 
-# src/infrastructure/database/models.py — define a shared type object at module level, reuse across models
+# src/infrastructure/database/models/<entity>_model.py — define shared type objects at module level, reuse across the model
 from sqlalchemy import Enum as SQLAlchemyEnum
 from sqlalchemy.orm import Mapped, mapped_column
 
 user_status_enum = SQLAlchemyEnum(UserStatus, name="user_status")
 status: Mapped[UserStatus] = mapped_column(user_status_enum, nullable=False, default=UserStatus.ACTIVE)
+
+# src/infrastructure/database/models/user_model.py — define shared type objects at module level, reuse across the model
 
 # src/domain/entities/user/user.py — used directly on the entity
 from dataclasses import field
@@ -456,7 +464,7 @@ status: UserStatus = Field(default=UserStatus.ACTIVE)
 
 2. **`created_at` — use `server_default=func.now()`**: The DB generates this on insert. Never set it in Python code (no `datetime.now()`, no `__post_init__`, no default in the entity). Do not pass it to the model constructor.
    ```python
-   # models.py
+   # <entity>_model.py
    from sqlalchemy import func
    created_at: Mapped[datetime] = mapped_column(server_default=func.now(), nullable=False)
 
@@ -471,7 +479,7 @@ status: UserStatus = Field(default=UserStatus.ACTIVE)
 
 3. **`updated_at` — use `onupdate=func.now()`**: SQLAlchemy automatically includes this column in every UPDATE statement. Never set it manually in code. It remains `None` until the first update.
    ```python
-   # models.py
+   # <entity>_model.py
    updated_at: Mapped[datetime | None] = mapped_column(onupdate=func.now(), nullable=True)
 
    # entity
@@ -479,6 +487,41 @@ status: UserStatus = Field(default=UserStatus.ACTIVE)
    ```
 
 4. **Always call `session.refresh()` after insert/update** to populate DB-generated values back onto the model before mapping to the entity.
+
+### Database Constraints
+
+**Critical Rule**: All database constraints MUST have an explicit `name` parameter. This ensures migrations (e.g., Alembic) can reference and drop constraints by name, and prevents auto-generated names that differ across environments.
+
+This applies to every constraint type: `UniqueConstraint`, `ForeignKeyConstraint`, `CheckConstraint`, `Index`, and any other SQLAlchemy constraint.
+
+**Always use `__table_args__`** to declare constraints — never rely on column-level shorthand (e.g., `unique=True`) for anything beyond a primary key index.
+
+```python
+from sqlalchemy import ForeignKeyConstraint, Index, UniqueConstraint
+from sqlalchemy.orm import Mapped, mapped_column
+
+class OrderModel(Base):
+    __tablename__ = "orders"
+    __table_args__ = (
+        UniqueConstraint("reference_number", name="uq_orders_reference_number"),
+        ForeignKeyConstraint(["user_id"], ["users.id"], name="fk_orders_user_id"),
+        Index("ix_orders_status", "status"),  # Index name is its first positional arg
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    reference_number: Mapped[str] = mapped_column(String(50), nullable=False)
+    user_id: Mapped[int] = mapped_column(nullable=False)
+    status: Mapped[str] = mapped_column(nullable=False)
+```
+
+**Naming convention** — use lowercase with underscores, prefixed by constraint type and table name:
+
+| Constraint | Pattern | Example |
+|---|---|---|
+| Unique | `uq_{table}_{column(s)}` | `uq_users_username` |
+| Foreign key | `fk_{table}_{column}` | `fk_orders_user_id` |
+| Check | `ck_{table}_{description}` | `ck_orders_amount_positive` |
+| Index | `ix_{table}_{column(s)}` | `ix_orders_status` |
 
 ### Async/Await
 
@@ -1066,8 +1109,8 @@ class TestCreateUserRoute:
 - [Operation result enums (shared)](src/domain/enums/operation_results.py)
 - [Operation response schemas (shared)](src/api/schemas/operation_schema.py)
 - [Response helpers and status maps (shared)](src/api/result_status_maps.py)
-- [DB Base](src/infrastructure/database/db.py)
-- [DB models](src/infrastructure/database/models.py)
+- [DB Base](src/infrastructure/database/base.py)
+- [DB models](src/infrastructure/database/models/)
 - [Connection factory Base](src/infrastructure/database/connection_factory_base.py)
 - [Connection factory](src/infrastructure/database/connection_factory.py)
 - [DI Container](src/container.py)
