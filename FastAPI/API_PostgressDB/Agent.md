@@ -930,15 +930,153 @@ This template uses `create_all()` for simplicity. In production, use Alembic for
 
 ## Testing Strategy
 
-```python
-# Mock the repository, not the database
-@pytest.mark.asyncio
-async def test_create_user():
-    mock_repo = Mock(spec=UserRepositoryBase)
-    use_case = UserUseCase(repository=mock_repo)
-    result = await use_case.create_user(CreateUserDTO(name="John", email="john@example.com"))
-    mock_repo.create.assert_called_once()
+### Test Folder Structure
+
+Tests live in `tests/` at the project root and mirror the `src/` source tree exactly. This keeps each test file structurally co-located with the code it exercises.
+
 ```
+tests/
+├── __init__.py
+├── api/
+│   ├── __init__.py
+│   └── routers/
+│       ├── __init__.py
+│       └── user/                              ← mirrors src/api/routers/user/
+│           ├── __init__.py
+│           ├── test_user_converter.py         # schema → DTO mapper tests
+│           └── test_user_routes.py            # route/endpoint tests
+└── application/
+    ├── __init__.py
+    └── use_cases/
+        ├── __init__.py
+        └── user/                              ← mirrors src/application/use_cases/user/
+            ├── __init__.py
+            ├── test_user_converter.py         # entity ↔ DTO mapper tests
+            └── test_user_use_case.py          # use case logic tests
+```
+
+**Rule**: When adding a new entity (e.g., `Order`), create parallel test folders `tests/application/use_cases/order/` and `tests/api/routers/order/` — one test file per source file being tested.
+
+### What to Test (and What Not To)
+
+| Layer | File | Test? | Reason |
+|-------|------|-------|--------|
+| Application | `user_use_case.py` | Yes | Core business logic, mock the repository |
+| Application | `user_converter.py` | Yes | Entity ↔ DTO mapping correctness |
+| API | `user_converter.py` | Yes | Schema ↔ DTO mapping correctness |
+| API | `user_routes.py` | Yes | HTTP contract — status codes, request validation |
+| Infrastructure | `user_repository.py` | **No** | Requires a live DB; covered by integration tests |
+
+### Running Tests
+
+```bash
+pytest                          # run all tests
+pytest tests/application/       # run application-layer tests only
+pytest tests/api/               # run API-layer tests only
+pytest -v                       # verbose output
+```
+
+### Use Case Tests — Mock the Repository
+
+Use `AsyncMock(spec=RepositoryBase)` to isolate business logic from the database. `asyncio_mode = "auto"` in `pyproject.toml` handles async test functions automatically — no `@pytest.mark.asyncio` decorator needed.
+
+```python
+from unittest.mock import AsyncMock
+import pytest
+from src.application.use_cases.user.user_use_case import UserUseCase
+from src.domain.repositories.user.user_repository_base import UserRepositoryBase
+from src.domain.enums.operation_results import CreateResult
+
+@pytest.fixture
+def mock_repository() -> UserRepositoryBase:
+    return AsyncMock(spec=UserRepositoryBase)
+
+@pytest.fixture
+def use_case(mock_repository: UserRepositoryBase) -> UserUseCase:
+    return UserUseCase(repository=mock_repository)
+
+class TestCreateUser:
+    async def test_returns_success_result_and_new_id(self, use_case: UserUseCase, mock_repository: UserRepositoryBase):
+        mock_repository.create.return_value = (CreateResult.SUCCESS, 1)
+        create_user_dto = CreateUserDTO(email="alice@example.com", username="alice")
+
+        result, entity_id = await use_case.create_user(create_user_dto)
+
+        assert result == CreateResult.SUCCESS
+        assert entity_id == 1
+```
+
+**Fixture typing convention**: Annotate mock fixtures as `-> RepositoryBase` (not `-> AsyncMock`). This surfaces the repository's method names (`create`, `get_by_id`, etc.) in the IDE for all test parameters. The trade-off is that mock-specific attributes like `.return_value` and `.assert_called_once_with()` will not be type-hinted by the static analyser — they still work at runtime. `AsyncMock` remains in the import and the fixture body only as the instantiation mechanism.
+
+### Converter Tests — Pure Unit Tests
+
+Converter tests are synchronous and have no dependencies to mock — just construct inputs and assert outputs.
+
+```python
+from src.application.use_cases.user.user_converter import UserEntityConverter
+from src.domain.entities.user.user import User
+
+def test_to_entity_sets_id_to_none():
+    create_user_dto = CreateUserDTO(email="alice@example.com", username="alice")
+
+    user = UserEntityConverter.to_entity(create_user_dto)
+
+    assert user.id is None
+    assert user.email == "alice@example.com"
+```
+
+### Route Tests — Isolated FastAPI App with Test Injector
+
+Routes use `fastapi_injector`'s `Injected()` for DI. To override in tests, create a fresh `FastAPI` app with a `TestModule` that binds the mock use case via `InstanceProvider`, then use `httpx.AsyncClient` with `ASGITransport`.
+
+```python
+from unittest.mock import AsyncMock
+import pytest
+from fastapi import FastAPI
+from fastapi_injector import attach_injector
+from httpx import ASGITransport, AsyncClient
+from injector import Binder, Injector, InstanceProvider, Module
+
+from src.api.routers.user.user_routes import router
+from src.application.use_cases.user.user_use_case_base import UserUseCaseBase
+
+@pytest.fixture
+def mock_use_case() -> AsyncMock:
+    return AsyncMock(spec=UserUseCaseBase)
+
+@pytest.fixture
+def test_app(mock_use_case: AsyncMock) -> FastAPI:
+    app = FastAPI()
+
+    class TestModule(Module):
+        def configure(self, binder: Binder) -> None:
+            binder.bind(UserUseCaseBase, to=InstanceProvider(mock_use_case))
+
+    attach_injector(app, Injector([TestModule()]))
+    app.include_router(router)
+    return app
+
+@pytest.fixture
+async def client(test_app: FastAPI) -> AsyncClient:
+    async with AsyncClient(transport=ASGITransport(app=test_app), base_url="http://test") as async_client:
+        yield async_client
+
+class TestCreateUserRoute:
+    async def test_returns_201_with_result_and_id_on_success(self, client: AsyncClient, mock_use_case: AsyncMock):
+        mock_use_case.create_user.return_value = (CreateResult.SUCCESS, 1)
+
+        response = await client.post("/api/v1/users", json={"email": "alice@example.com", "username": "alice"})
+
+        assert response.status_code == 201
+        assert response.json()["id"] == 1
+```
+
+**Critical Rules:**
+- **Never import `src/main.py` or `src/container.py` in tests** — always create a minimal `FastAPI()` app with only the router under test and a `TestModule`
+- **Use `AsyncMock(spec=BaseClass)`** — the `spec` ensures mock methods match the real interface; async methods are automatically mocked as `AsyncMock`
+- **Mock at the boundary nearest to the test** — use case tests mock the repository; route tests mock the use case
+- **Repository tests are out of scope** — they require a live database and belong in integration tests, not unit tests
+- **Group tests by method under test** using inner classes (e.g., `class TestCreateUser`, `class TestGetUser`) to keep related assertions together
 
 ## File References
 
