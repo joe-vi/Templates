@@ -1,11 +1,12 @@
 from datetime import datetime
 
-from pydantic import BaseModel, EmailStr, Field
+from pydantic import ConfigDict, EmailStr, Field
 
+from src.api.schemas.base_schema import CamelCaseModel
 from src.domain.enums.user_enum import UserRole, UserStatus
 
 
-class UserCreateRequest(BaseModel):
+class UserCreateRequest(CamelCaseModel):
     """Request model for creating a user."""
 
     email: EmailStr = Field(..., description="User email address")
@@ -15,14 +16,16 @@ class UserCreateRequest(BaseModel):
     status: UserStatus = Field(default=UserStatus.ACTIVE, description="User status")
 
 
-class UserUpdateRoleRequest(BaseModel):
+class UserUpdateRoleRequest(CamelCaseModel):
     """Request model for updating a user's role."""
 
     role: UserRole = Field(..., description="The new role to assign to the user")
 
 
-class UserResponse(BaseModel):
+class UserResponse(CamelCaseModel):
     """Response model for a full user entity (used by GET endpoints)."""
+
+    model_config = ConfigDict(from_attributes=True)
 
     id: int
     email: str
@@ -30,6 +33,3 @@ class UserResponse(BaseModel):
     role: UserRole
     status: UserStatus
     created_at: datetime
-
-    class Config:
-        from_attributes = True
