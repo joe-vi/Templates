@@ -1,6 +1,6 @@
 # Code Templates
 
-A collection of production-ready templates for various frameworks and architectures. Each template is fully functional, opinionated, and ready to use as a starting point for real projects.
+A collection of templates for various frameworks and architectures. Each template is fully functional, opinionated, and ready to use as a starting point for real projects.
 
 ## Templates
 
