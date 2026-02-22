@@ -12,12 +12,11 @@ class TokenServiceBase(ABC):
     """
 
     @abstractmethod
-    def create_access_token(self, user_id: int, username: str, role: str) -> str:
+    def create_access_token(self, user_id: int, role: str) -> str:
         """Create a signed JWT access token.
 
         Args:
             user_id: The unique identifier of the user.
-            username: The username to embed in the token.
             role: The user role to embed in the token.
 
         Returns:
@@ -25,12 +24,11 @@ class TokenServiceBase(ABC):
         """
 
     @abstractmethod
-    def create_refresh_token(self, user_id: int, username: str, role: str) -> str:
+    def create_refresh_token(self, user_id: int, role: str) -> str:
         """Create a signed JWT refresh token.
 
         Args:
             user_id: The unique identifier of the user.
-            username: The username to embed in the token.
             role: The user role to embed in the token.
 
         Returns:

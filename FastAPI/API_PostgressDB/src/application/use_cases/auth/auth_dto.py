@@ -25,5 +25,4 @@ class TokenClaimsDTO:
     """DTO representing the decoded claims from a JWT token."""
 
     user_id: int
-    username: str
     role: UserRole

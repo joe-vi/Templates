@@ -16,13 +16,13 @@ class UserContextBase(ABC):
 
     @property
     @abstractmethod
-    def user_id(self) -> int:
-        """The unique identifier of the authenticated user."""
+    def is_populated(self) -> bool:
+        """Whether the context has been populated with authenticated user data."""
 
     @property
     @abstractmethod
-    def username(self) -> str:
-        """The username of the authenticated user."""
+    def user_id(self) -> int:
+        """The unique identifier of the authenticated user."""
 
     @property
     @abstractmethod
@@ -30,13 +30,12 @@ class UserContextBase(ABC):
         """The role of the authenticated user."""
 
     @abstractmethod
-    def populate(self, user_id: int, username: str, role: UserRole) -> None:
+    def populate(self, user_id: int, role: UserRole) -> None:
         """Populate the context with decoded JWT claims.
 
         Called exactly once per request by the JWT validation dependency.
 
         Args:
             user_id: The authenticated user's unique identifier.
-            username: The authenticated user's username.
             role: The authenticated user's role.
         """

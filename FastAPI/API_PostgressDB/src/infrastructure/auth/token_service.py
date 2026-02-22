@@ -32,22 +32,20 @@ class TokenService(TokenServiceBase):
         self._access_expire_minutes = settings.access_token_expire_minutes
         self._refresh_expire_days = settings.refresh_token_expire_days
 
-    def create_access_token(self, user_id: int, username: str, role: str) -> str:
+    def create_access_token(self, user_id: int, role: str) -> str:
         expire = datetime.now(UTC) + timedelta(minutes=self._access_expire_minutes)
         payload = {
             "sub": str(user_id),
-            "username": username,
             "role": role,
             "type": _ACCESS_TOKEN_TYPE,
             "exp": expire,
         }
         return jwt.encode(payload, self._secret_key, algorithm=self._algorithm)
 
-    def create_refresh_token(self, user_id: int, username: str, role: str) -> str:
+    def create_refresh_token(self, user_id: int, role: str) -> str:
         expire = datetime.now(UTC) + timedelta(days=self._refresh_expire_days)
         payload = {
             "sub": str(user_id),
-            "username": username,
             "role": role,
             "type": _REFRESH_TOKEN_TYPE,
             "exp": expire,
@@ -67,7 +65,6 @@ class TokenService(TokenServiceBase):
                 return None
             return TokenClaimsDTO(
                 user_id=int(payload["sub"]),
-                username=str(payload["username"]),
                 role=UserRole(payload["role"]),
             )
         except (InvalidTokenError, KeyError, ValueError):

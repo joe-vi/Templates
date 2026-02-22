@@ -23,9 +23,12 @@ class UserContext(UserContextBase):
 
     def __init__(self) -> None:
         self._user_id: int | None = None
-        self._username: str | None = None
         self._role: UserRole | None = None
-        self._populated: bool = False
+        self._is_populated: bool = False
+
+    @property
+    def is_populated(self) -> bool:
+        return self._is_populated
 
     @property
     def user_id(self) -> int:
@@ -34,21 +37,14 @@ class UserContext(UserContextBase):
         return self._user_id
 
     @property
-    def username(self) -> str:
-        if self._username is None:
-            raise RuntimeError(_NOT_POPULATED)
-        return self._username
-
-    @property
     def role(self) -> UserRole:
         if self._role is None:
             raise RuntimeError(_NOT_POPULATED)
         return self._role
 
-    def populate(self, user_id: int, username: str, role: UserRole) -> None:
-        if self._populated:
+    def populate(self, user_id: int, role: UserRole) -> None:
+        if self._is_populated:
             raise RuntimeError(_ALREADY_POPULATED)
         self._user_id = user_id
-        self._username = username
         self._role = role
-        self._populated = True
+        self._is_populated = True

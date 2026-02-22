@@ -27,7 +27,7 @@ async def get_current_user(
         user_context: The request-scoped context populated with the decoded claims.
 
     Returns:
-        A TokenClaimsDTO containing the authenticated user's id, username, and role.
+        A TokenClaimsDTO containing the authenticated user's id and role.
 
     Raises:
         HTTPException: 401 Unauthorized if the token is invalid or expired.
@@ -41,6 +41,6 @@ async def get_current_user(
             headers={"WWW-Authenticate": "Bearer"},
         )
 
-    user_context.populate(token_claims.user_id, token_claims.username, token_claims.role)
+    user_context.populate(token_claims.user_id, token_claims.role)
 
     return token_claims
