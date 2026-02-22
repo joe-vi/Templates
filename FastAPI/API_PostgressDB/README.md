@@ -1,6 +1,6 @@
 # FastAPI Clean Architecture Template
 
-A production-ready FastAPI application template built with Clean Architecture principles, async SQLAlchemy, JWT authentication, and dependency injection.
+A production-ready FastAPI application template built with Clean Architecture principles, PostgreSQL (via Docker), async SQLAlchemy, JWT authentication, and dependency injection.
 
 ## Get This Template
 
@@ -245,6 +245,8 @@ uv run mypy src/
 ```
 
 ### Database — Docker
+
+PostgreSQL 18 is the storage layer for this template. A `docker-compose.yml` is included so no local Postgres installation is required — Docker is the only prerequisite.
 
 ```bash
 docker compose up -d       # Start PostgreSQL
