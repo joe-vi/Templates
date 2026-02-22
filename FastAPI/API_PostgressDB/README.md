@@ -93,6 +93,7 @@ Invoke-WebRequest -Uri "https://github.com/joe-vi/Templates/archive/refs/heads/m
 │   │   │       ├── user_routes.py
 │   │   │       └── user_schema.py
 │   │   ├── schemas/
+│   │   │   ├── base_schema.py              # APIModelBase — camelCase JSON base for all schemas
 │   │   │   └── operation_schema.py         # Shared response envelope
 │   │   └── result_status_maps.py           # Operation result → HTTP status + message
 │   ├── container.py                        # DI bindings (imports all layers)
@@ -139,7 +140,7 @@ Invoke-WebRequest -Uri "https://github.com/joe-vi/Templates/archive/refs/heads/m
 ### 4. API Layer (`src/api/`)
 - **Routes**: FastAPI endpoints using `Injected[BaseClass]` for use case injection
 - **Dependencies**: `jwt_dependency.py` — JWT guard using `Depends()` (the only permitted use of `Depends()` for auth guards)
-- **Schemas**: Pydantic request/response models
+- **Schemas**: Pydantic request/response models; all inherit `APIModelBase` which serialises to camelCase JSON while keeping snake_case Python attributes
 - **Rule**: Imports Application ABCs only; never calls repositories directly
 
 ## Installation
@@ -267,7 +268,7 @@ uv run alembic downgrade -1                              # Roll back one step
 1. **Domain**: Add entity in `src/domain/entities/<name>/` and repository ABC in `src/domain/repositories/<name>/` (class name ending with `Base`)
 2. **Application**: Add DTO, use case ABC and implementation, and a converter in `src/application/use_cases/<name>/`
 3. **Infrastructure**: Add ORM model in `src/infrastructure/database/models/` and repository implementation in `src/infrastructure/repositories/<name>/`
-4. **API**: Add Pydantic schemas, a converter, and routes in `src/api/routers/<name>/` using `Injected[UseCaseBase]`
+4. **API**: Add Pydantic schemas (inheriting `APIModelBase`), a converter, and routes in `src/api/routers/<name>/` using `Injected[UseCaseBase]`
 5. **Container**: Register bindings in `src/container.py`:
    ```python
    binder.bind(NewRepositoryBase, to=NewRepository)

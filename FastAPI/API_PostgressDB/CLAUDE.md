@@ -28,6 +28,8 @@ Dependencies point **inward only**. Domain never imports from any other layer.
 - All ABC/interface classes **must** end with `Base` (`UserRepositoryBase`, `UserUseCaseBase`)
 - Operation result enums are generic and shared: `CreateResult`, `UpdateResult`, `DeleteResult` — never entity-specific
 - DTOs: frozen dataclasses with `DTO` suffix; use `list[UserDTO]` directly, never a wrapper DTO class
+- API schemas: `Request` suffix for inputs, `Response` suffix for outputs; all inherit from `APIModelBase` (`src/api/schemas/base_schema.py`)
+- `APIModelBase`: camelCase JSON serialisation, accepts snake_case or camelCase on input
 - Booleans read like questions: `is_active`, `has_items` — never bare nouns
 - No abbreviations: `repository` not `repo`, `connection` not `conn`
 

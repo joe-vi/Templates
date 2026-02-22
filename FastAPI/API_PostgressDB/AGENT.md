@@ -59,6 +59,7 @@ src/
     │   ├── <entity>_schema.py
     │   ├── <entity>_converter.py
     │   └── <entity>_routes.py
+    ├── schemas/base_schema.py             # APIModelBase — camelCase base for all schemas
     ├── schemas/operation_schema.py        # shared response schemas
     └── result_status_maps.py             # shared response helpers
 ```
@@ -75,7 +76,8 @@ src/
 - Status Enums: singular noun describing the concept with `StrEnum` (e.g., `GreetingStatus`, `OrderState`)
 - Operation result enums: generic and shared — `CreateResult`, `UpdateResult`, `DeleteResult`. Never entity-specific (e.g., `CreateUserResult` is forbidden)
 - DTOs: frozen dataclasses with `DTO` suffix. Use `list[UserDTO]` directly as return types; never create a wrapper collection DTO (e.g., `UserListDTO` is forbidden)
-- API schemas: `Request` suffix for inputs, `Response` suffix for outputs
+- API schemas: `Request` suffix for inputs, `Response` suffix for outputs; all must inherit from `APIModelBase` (`src/api/schemas/base_schema.py`)
+- `APIModelBase`: Pydantic base for all API schemas — serialises to camelCase JSON, accepts both camelCase and snake_case on input, lives in `src/api/schemas/base_schema.py`
 - Use Cases: `UserUseCaseBase` (ABC) → `UserUseCase` (implementation)
 
 ### Variables & Properties
@@ -366,6 +368,7 @@ These files each contain a condensed quick-reference summary that mirrors the cr
 
 **Shared infrastructure (present in every project)**
 - [Operation result enums](src/domain/enums/operation_results.py)
+- [API schema base model](src/api/schemas/base_schema.py)
 - [Operation response schemas](src/api/schemas/operation_schema.py)
 - [Response helpers and status maps](src/api/result_status_maps.py)
 - [DB Base](src/infrastructure/database/base.py)
