@@ -1,26 +1,31 @@
+"""Abstract base class for the user use case."""
+
 from abc import ABC, abstractmethod
 
-from src.application.use_cases.user.user_dto import CreateUserDTO, UpdateUserRoleDTO, UserDTO
-from src.domain.enums.operation_results import CreateResult, DeleteResult, UpdateResult
+from src.application.use_cases.user import user_dto
+from src.domain.enums import operation_results
 
 
 class UserUseCaseBase(ABC):
     """Abstract base class for user use case."""
 
     @abstractmethod
-    async def create_user(self, create_user_dto: CreateUserDTO) -> tuple[CreateResult, int | None]:
+    async def create_user(
+        self, create_user_dto: user_dto.CreateUserDTO
+    ) -> tuple[operation_results.CreateResult, int | None]:
         """Create a new user.
 
         Args:
             create_user_dto: The DTO containing the user data to create.
 
         Returns:
-            A tuple of (result, entity_id). entity_id is the newly created user id on success, None otherwise.
+            A tuple of (result, entity_id). entity_id is the newly created
+            user id on success, None otherwise.
         """
         pass
 
     @abstractmethod
-    async def get_user(self, user_id: int) -> UserDTO | None:
+    async def get_user(self, user_id: int) -> user_dto.UserDTO | None:
         """Get a user by its unique identifier.
 
         Args:
@@ -32,7 +37,7 @@ class UserUseCaseBase(ABC):
         pass
 
     @abstractmethod
-    async def get_all_users(self) -> list[UserDTO]:
+    async def get_all_users(self) -> list[user_dto.UserDTO]:
         """Get all users.
 
         Returns:
@@ -41,11 +46,13 @@ class UserUseCaseBase(ABC):
         pass
 
     @abstractmethod
-    async def update_user_role(self, update_user_role_dto: UpdateUserRoleDTO) -> UpdateResult:
+    async def update_user_role(
+        self, update_user_role_dto: user_dto.UpdateUserRoleDTO
+    ) -> operation_results.UpdateResult:
         """Update the role of an existing user.
 
         Args:
-            update_user_role_dto: The DTO containing the user id and the new role.
+            update_user_role_dto: The DTO containing the user id and new role.
 
         Returns:
             An UpdateResult enum indicating the outcome of the update.
@@ -53,7 +60,7 @@ class UserUseCaseBase(ABC):
         pass
 
     @abstractmethod
-    async def delete_user(self, user_id: int) -> DeleteResult:
+    async def delete_user(self, user_id: int) -> operation_results.DeleteResult:
         """Delete a user by its unique identifier.
 
         Args:

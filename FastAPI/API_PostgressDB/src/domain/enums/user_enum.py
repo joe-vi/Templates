@@ -1,3 +1,5 @@
+"""User-related domain enumerations."""
+
 from enum import StrEnum
 
 

@@ -1,12 +1,15 @@
+"""Abstract base class for password hashing operations."""
+
 from abc import ABC, abstractmethod
 
 
 class PasswordHasherBase(ABC):
     """Abstract base class for password hashing operations.
 
-    Implement this interface with a provider-specific class (e.g. bcrypt, argon2) and
-    bind it in the DI container. Use cases depend only on this interface, so switching
-    providers requires no changes outside the infrastructure layer.
+    Implement this interface with a provider-specific class (e.g. bcrypt,
+    argon2) and bind it in the DI container. Use cases depend only on this
+    interface, so switching providers requires no changes outside the
+    infrastructure layer.
     """
 
     @abstractmethod

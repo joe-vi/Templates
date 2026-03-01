@@ -1,19 +1,24 @@
+"""FastAPI dependency for JWT Bearer token validation."""
+
 from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from fastapi_injector import Injected
 
-from src.application.services.token_service_base import TokenServiceBase
-from src.application.services.user_context_base import UserContextBase
-from src.application.use_cases.auth.auth_dto import TokenClaimsDTO
+from src.application.services import token_service_base, user_context_base
+from src.application.use_cases.auth import auth_dto
 
 _security = HTTPBearer()
 
 
 async def get_current_user(
     credentials: HTTPAuthorizationCredentials = Depends(_security),
-    token_service: TokenServiceBase = Injected(TokenServiceBase),
-    user_context: UserContextBase = Injected(UserContextBase),
-) -> TokenClaimsDTO:
+    token_service: token_service_base.TokenServiceBase = Injected(
+        token_service_base.TokenServiceBase
+    ),
+    user_context: user_context_base.UserContextBase = Injected(
+        user_context_base.UserContextBase
+    ),
+) -> auth_dto.TokenClaimsDTO:
     """FastAPI dependency that validates the Bearer JWT access token.
 
     Decodes the token, raises 401 on any failure, then populates the
@@ -23,8 +28,8 @@ async def get_current_user(
 
     Args:
         credentials: The HTTP Bearer credentials from the Authorization header.
-        token_service: The injected token service used to decode and verify the JWT.
-        user_context: The request-scoped context populated with the decoded claims.
+        token_service: The injected token service used to decode the JWT.
+        user_context: The request-scoped context populated with the claims.
 
     Returns:
         A TokenClaimsDTO containing the authenticated user's id and role.

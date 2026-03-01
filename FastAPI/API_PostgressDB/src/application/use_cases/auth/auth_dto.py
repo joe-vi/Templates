@@ -1,6 +1,8 @@
+"""Data Transfer Objects for authentication operations."""
+
 from dataclasses import dataclass
 
-from src.domain.enums.user_enum import UserRole
+from src.domain.enums import user_enum
 
 
 @dataclass(frozen=True)
@@ -25,4 +27,4 @@ class TokenClaimsDTO:
     """DTO representing the decoded claims from a JWT token."""
 
     user_id: int
-    role: UserRole
+    role: user_enum.UserRole

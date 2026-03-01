@@ -235,6 +235,7 @@ Use when a repository query returns more data than a single domain entity holds 
 
 ## 9. Documentation
 
+- **Module docstring**: every `.py` file must start with a one-line module-level docstring (Google style). Example: `"""User domain entity."""`
 - **Class-level docstring**: always required (one-line purpose statement).
 - **`__init__` docstring**: always required; document all parameters in an `Args` section.
 - **Public abstract methods on ABCs**: Google-style docstrings with Args, Returns, Raises, Yields as applicable.
@@ -246,13 +247,14 @@ Use when a repository query returns more data than a single domain entity holds 
 
 ## 10. Code Style
 
-- Max line length: **140 characters**.
-- Use `ruff` for linting and formatting (configured in `pyproject.toml`). After every code change: `ruff check src/ --fix && ruff format src/`.
+- Max line length: **80 characters**.
+- Use `ruff` for linting and formatting (configured in `pyproject.toml`). After every code change: `uv run ruff check src/ tests/ --fix && uv run ruff format src/ tests/`.
+- For dict-literal entries where the key + value genuinely cannot fit on 80 chars (e.g., long enum member names), add `# noqa: E501` to that specific line. Do not use it to hide laziness — only when the identifier names themselves are the cause.
 - Always use `uv run`; never access `.venv` directly.
 - Modern type annotations: `list[X]` not `List[X]`, `X | None` not `Optional[X]`.
 - All DB operations are async; use `async def` and `await`.
 - API prefix: `/api/v1`.
-- **Never add `#` inline comments.** Code must be self-explanatory through clear naming — descriptive variable names, explicit function names, and well-structured logic eliminate the need for inline narration. If a line needs a comment to be understood, rename or restructure until it does not.
+- **Add `#` comments only for genuinely complex logic** — non-trivial algorithms, subtle ordering constraints, or counter-intuitive branches. Do not comment code that is self-explanatory through clear naming alone.
 
 ---
 
@@ -326,7 +328,7 @@ pytest -v                 # verbose
 - Don't use `singleton` scope for repositories or use cases
 - Don't forget to close singleton resources — implement `close()` on base class and call in `lifespan` shutdown
 - Don't scatter entity files into flat shared directories
-- Don't add `#` inline comments — use clear naming and structure to make code self-explanatory
+- Don't add `#` comments to self-explanatory code — reserve comments for genuinely complex logic only
 - Don't create entity-specific result enums — use `CreateResult`, `UpdateResult`, `DeleteResult`
 - Don't create a wrapper DTO for collections — return `list[EntityDTO]` directly
 - Don't define guard functions inside route files — they belong in `src/api/dependencies/`

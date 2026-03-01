@@ -1,12 +1,15 @@
+"""Abstract base class for structured application logging."""
+
 from abc import ABC, abstractmethod
 
 
 class CustomLoggerBase(ABC):
     """Abstract base class for structured application logging.
 
-    Implement this interface with a provider-specific class (e.g. built-in logging,
-    structlog, Datadog) and bind it in the DI container. Use cases depend only on
-    this interface, so switching providers requires no changes outside the infrastructure layer.
+    Implement this interface with a provider-specific class (e.g. built-in
+    logging, structlog, Datadog) and bind it in the DI container. Use cases
+    depend only on this interface, so switching providers requires no changes
+    outside the infrastructure layer.
     """
 
     @abstractmethod
@@ -15,7 +18,8 @@ class CustomLoggerBase(ABC):
 
         Args:
             message: The log message.
-            **extra: Additional key-value pairs to include in the log entry (e.g. user_id=123, request_id="abc").
+            **extra: Additional key-value pairs to include in the log entry
+                (e.g. user_id=123, request_id="abc").
         """
 
     @abstractmethod
@@ -28,11 +32,14 @@ class CustomLoggerBase(ABC):
         """
 
     @abstractmethod
-    def error(self, message: str, exception: Exception | None = None, **extra: object) -> None:
+    def error(
+        self, message: str, exception: Exception | None = None, **extra: object
+    ) -> None:
         """Log an error message.
 
         Args:
             message: The log message.
-            exception: An optional exception whose traceback is included in the log entry.
+            exception: An optional exception whose traceback is included in
+                the log entry.
             **extra: Additional key-value pairs to include in the log entry.
         """

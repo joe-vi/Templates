@@ -1,12 +1,14 @@
-from src.application.use_cases.user.user_dto import CreateUserDTO, UserDTO
-from src.domain.entities.user.user import User
+"""Converter between user domain entities and application DTOs."""
+
+from src.application.use_cases.user import user_dto as user_dto_module
+from src.domain.entities.user import user as user_module
 
 
 class UserEntityConverter:
     """Converts between domain entities and DTOs."""
 
     @staticmethod
-    def to_dto(user: User) -> UserDTO:
+    def to_dto(user: user_module.User) -> user_dto_module.UserDTO:
         """Convert a domain user entity to a DTO.
 
         Args:
@@ -15,7 +17,7 @@ class UserEntityConverter:
         Returns:
             A UserDTO populated with the entity's data.
         """
-        return UserDTO(
+        return user_dto_module.UserDTO(
             id=user.id,  # type: ignore
             email=user.email,
             username=user.username,
@@ -25,7 +27,9 @@ class UserEntityConverter:
         )
 
     @staticmethod
-    def to_dto_list(users: list[User]) -> list[UserDTO]:
+    def to_dto_list(
+        users: list[user_module.User],
+    ) -> list[user_dto_module.UserDTO]:
         """Convert a list of domain user entities to a list of DTOs.
 
         Args:
@@ -37,7 +41,9 @@ class UserEntityConverter:
         return [UserEntityConverter.to_dto(user) for user in users]
 
     @staticmethod
-    def to_entity(create_user_dto: CreateUserDTO, hashed_password: str) -> User:
+    def to_entity(
+        create_user_dto: user_dto_module.CreateUserDTO, hashed_password: str
+    ) -> user_module.User:
         """Convert a creation DTO to a domain user entity.
 
         Args:
@@ -47,7 +53,7 @@ class UserEntityConverter:
         Returns:
             A new User entity with id set to None.
         """
-        return User(
+        return user_module.User(
             id=None,
             email=create_user_dto.email,
             username=create_user_dto.username,
