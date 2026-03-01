@@ -1,3 +1,5 @@
+"""Operation result enumerations for CRUD and auth operations."""
+
 from enum import StrEnum
 
 

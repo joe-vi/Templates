@@ -1,6 +1,8 @@
+"""Abstract base class for the request-scoped user context."""
+
 from abc import ABC, abstractmethod
 
-from src.domain.enums.user_enum import UserRole
+from src.domain.enums import user_enum
 
 
 class UserContextBase(ABC):
@@ -17,7 +19,7 @@ class UserContextBase(ABC):
     @property
     @abstractmethod
     def is_populated(self) -> bool:
-        """Whether the context has been populated with authenticated user data."""
+        """Whether the context has been populated with user data."""
 
     @property
     @abstractmethod
@@ -26,11 +28,11 @@ class UserContextBase(ABC):
 
     @property
     @abstractmethod
-    def role(self) -> UserRole:
+    def role(self) -> user_enum.UserRole:
         """The role of the authenticated user."""
 
     @abstractmethod
-    def populate(self, user_id: int, role: UserRole) -> None:
+    def populate(self, user_id: int, role: user_enum.UserRole) -> None:
         """Populate the context with decoded JWT claims.
 
         Called exactly once per request by the JWT validation dependency.

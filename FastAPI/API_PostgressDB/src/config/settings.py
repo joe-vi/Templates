@@ -1,10 +1,16 @@
+"""Application configuration loaded from environment variables."""
+
 from pydantic import computed_field
-from pydantic_settings import BaseSettings
+from pydantic_settings import BaseSettings, SettingsConfigDict
 from sqlalchemy.engine import URL
 
 
 class Settings(BaseSettings):
     """Application settings loaded from environment variables."""
+
+    model_config = SettingsConfigDict(
+        env_file=".env", env_file_encoding="utf-8"
+    )
 
     db_driver: str = "postgresql+asyncpg"
     db_user: str = "postgres"
@@ -19,7 +25,7 @@ class Settings(BaseSettings):
     @computed_field
     @property
     def database_url(self) -> URL:
-        """Build the SQLAlchemy database URL from individual connection components."""
+        """Build the SQLAlchemy database URL from connection components."""
         return URL.create(
             drivername=self.db_driver,
             username=self.db_user,
@@ -35,7 +41,3 @@ class Settings(BaseSettings):
     jwt_algorithm: str = "HS256"
     access_token_expire_minutes: int = 30
     refresh_token_expire_days: int = 7
-
-    class Config:
-        env_file = ".env"
-        env_file_encoding = "utf-8"

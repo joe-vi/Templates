@@ -1,3 +1,3 @@
-from src.infrastructure.database.models.user_model import UserModel
+from src.infrastructure.database.models import user_model
 
-__all__ = ["UserModel"]
+__all__ = ["user_model"]

@@ -1,14 +1,17 @@
+"""Abstract base class for the JWT token service."""
+
 from abc import ABC, abstractmethod
 
-from src.application.use_cases.auth.auth_dto import TokenClaimsDTO
+from src.application.use_cases.auth import auth_dto
 
 
 class TokenServiceBase(ABC):
     """Abstract base class for JWT token operations.
 
-    Implement this interface with a provider-specific class (e.g. PyJWT, python-jose) and
-    bind it in the DI container. Use cases depend only on this interface, so switching
-    providers requires no changes outside the infrastructure layer.
+    Implement this interface with a provider-specific class (e.g. PyJWT,
+    python-jose) and bind it in the DI container. Use cases depend only on
+    this interface, so switching providers requires no changes outside the
+    infrastructure layer.
     """
 
     @abstractmethod
@@ -36,23 +39,27 @@ class TokenServiceBase(ABC):
         """
 
     @abstractmethod
-    def decode_access_token(self, token: str) -> TokenClaimsDTO | None:
+    def decode_access_token(self, token: str) -> auth_dto.TokenClaimsDTO | None:
         """Decode and validate a JWT access token.
 
         Args:
             token: The JWT access token string to decode.
 
         Returns:
-            A TokenClaimsDTO with the decoded claims, or None if the token is invalid or expired.
+            A TokenClaimsDTO with the decoded claims, or None if the token
+            is invalid or expired.
         """
 
     @abstractmethod
-    def decode_refresh_token(self, token: str) -> TokenClaimsDTO | None:
+    def decode_refresh_token(
+        self, token: str
+    ) -> auth_dto.TokenClaimsDTO | None:
         """Decode and validate a JWT refresh token.
 
         Args:
             token: The JWT refresh token string to decode.
 
         Returns:
-            A TokenClaimsDTO with the decoded claims, or None if the token is invalid or expired.
+            A TokenClaimsDTO with the decoded claims, or None if the token
+            is invalid or expired.
         """
