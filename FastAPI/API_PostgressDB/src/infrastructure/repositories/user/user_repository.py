@@ -48,7 +48,7 @@ class UserRepository(UserRepositoryBase):
             return (CreateResult.FAILURE, None)
 
     async def get_by_id(self, user_id: int) -> User | None:
-        async with self._connection_factory.get_session() as session:
+        async with self._connection_factory.get_session(is_readonly=True) as session:
             query_result = await session.execute(select(UserModel).where(UserModel.id == user_id))
             user_model = query_result.scalar_one_or_none()
 
@@ -66,7 +66,7 @@ class UserRepository(UserRepositoryBase):
             )
 
     async def get_all(self) -> list[User]:
-        async with self._connection_factory.get_session() as session:
+        async with self._connection_factory.get_session(is_readonly=True) as session:
             query_result = await session.execute(select(UserModel))
             user_models = query_result.scalars().all()
 
@@ -84,7 +84,7 @@ class UserRepository(UserRepositoryBase):
             ]
 
     async def get_by_username(self, username: str) -> User | None:
-        async with self._connection_factory.get_session() as session:
+        async with self._connection_factory.get_session(is_readonly=True) as session:
             query_result = await session.execute(select(UserModel).where(UserModel.username == username))
             user_model = query_result.scalar_one_or_none()
 

@@ -39,41 +39,43 @@ class ConnectionFactory(ConnectionFactoryBase):
         )
 
     @asynccontextmanager
-    async def get_session(self) -> AsyncIterator[AsyncSession]:
-        active = _active_session.get()
-        if active is not None:
-            yield active
+    async def get_session(self, is_readonly: bool = False) -> AsyncIterator[AsyncSession]:
+        active_session = _active_session.get()
+        if active_session is not None:
+            yield active_session
+
+            if not is_readonly:
+                await active_session.flush()
+
             return
 
         async with self._session_factory() as session:
-            try:
+            if is_readonly:
                 yield session
-                await session.commit()
-            except Exception:
-                await session.rollback()
-                raise
+            else:
+                async with session.begin():
+                    yield session
 
     @asynccontextmanager
     async def begin_transaction(self) -> AsyncIterator[Callable[[], Awaitable[None]]]:
         async with self._session_factory() as session:
-            token = _active_session.set(session)
-            should_rollback = False
+            async with session.begin():
+                token = _active_session.set(session)
+                should_rollback = False
 
-            async def rollback() -> None:
-                nonlocal should_rollback
-                should_rollback = True
+                async def rollback() -> None:
+                    nonlocal should_rollback
+                    should_rollback = True
 
-            try:
-                yield rollback
-                if should_rollback:
+                try:
+                    yield rollback
+                    if should_rollback:
+                        await session.rollback()
+                except Exception:
                     await session.rollback()
-                else:
-                    await session.commit()
-            except Exception:
-                await session.rollback()
-                raise
-            finally:
-                _active_session.reset(token)
+                    raise
+                finally:
+                    _active_session.reset(token)
 
     async def close(self) -> None:
         await self._engine.dispose()

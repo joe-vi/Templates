@@ -1,3 +1,4 @@
+from collections.abc import AsyncGenerator
 from datetime import datetime
 from unittest.mock import AsyncMock
 
@@ -17,7 +18,7 @@ from src.domain.enums.user_enum import UserRole, UserStatus
 
 
 def _mock_current_user() -> TokenClaimsDTO:
-    return TokenClaimsDTO(user_id=1, username="admin", role=UserRole.ADMIN)
+    return TokenClaimsDTO(user_id=1, role=UserRole.ADMIN)
 
 
 def _make_user_dto(user_id: int = 1) -> UserDTO:
@@ -52,7 +53,7 @@ def test_app(mock_use_case: AsyncMock) -> FastAPI:
 
 
 @pytest.fixture
-async def client(test_app: FastAPI) -> AsyncClient:
+async def client(test_app: FastAPI) -> AsyncGenerator[AsyncClient, None]:
     async with AsyncClient(transport=ASGITransport(app=test_app), base_url="http://test") as async_client:
         yield async_client
 

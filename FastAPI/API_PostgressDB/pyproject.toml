@@ -3,7 +3,7 @@ name = "fastapi-clean-architecture"
 version = "1.0.0"
 description = "FastAPI application using Clean Architecture with async SQLAlchemy"
 readme = "README.md"
-requires-python = ">=3.11"
+requires-python = ">=3.13"
 dependencies = [
     "fastapi>=0.115.0",
     "uvicorn[standard]>=0.32.0",
@@ -48,14 +48,14 @@ dev = [
 
 [tool.ruff]
 line-length = 140
-target-version = "py311"
+target-version = "py313"
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "N", "W", "UP"]
 ignore = []
 
 [tool.mypy]
-python_version = "3.11"
+python_version = "3.13"
 warn_return_any = true
 warn_unused_configs = true
 disallow_untyped_defs = true

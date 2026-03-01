@@ -9,11 +9,16 @@ class ConnectionFactoryBase(ABC):
     """Abstract base class for database connection factory."""
 
     @abstractmethod
-    def get_session(self) -> AbstractAsyncContextManager[AsyncSession]:
+    def get_session(self, is_readonly: bool = False) -> AbstractAsyncContextManager[AsyncSession]:
         """Get an async database session as a context manager.
 
+        Args:
+            is_readonly: When True, skips the commit on clean exit. Use for read-only
+                         operations that do not need to persist any changes.
+
         Yields:
-            AsyncSession: A session that commits on clean exit and rolls back on exception.
+            AsyncSession: A session that rolls back on exception. Commits on clean exit
+                          only when is_readonly is False.
 
         Usage:
             async with connection_factory.get_session() as session:
