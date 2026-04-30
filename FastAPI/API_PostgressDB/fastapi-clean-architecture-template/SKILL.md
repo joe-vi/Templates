@@ -2,9 +2,9 @@
 name: fastapi-clean-architecture-template
 description: Scaffold a new project following Clean Architecture principles on FastAPI — strict 4-layer structure (Domain, Application, Infrastructure, API) with unidirectional dependencies, repository pattern, result-enum error handling, and fastapi-injector DI. Supports PostgreSQL, MongoDB, SQLite; JWT, OAuth2, API key auth; optional Redis cache.
 argument-hint: "<project-name> [--db postgres|mongodb|sqlite] [--auth jwt|oauth2|apikey] [--cache none|redis] [--no-docker]"
-when_to_use: When starting a new FastAPI service that must follow Clean Architecture — enforced layer boundaries, dependency inversion, repository pattern with result enums, and a fully wired DI container from day one.
 disable-model-invocation: true
-version: "1.0.0"
+metadata:
+  version: "1.1.0"
 ---
 
 # FastAPI Clean Architecture — Scaffold Skill
