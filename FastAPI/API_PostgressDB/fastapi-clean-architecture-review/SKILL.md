@@ -2,9 +2,9 @@
 name: fastapi-clean-architecture-review
 description: Audit an existing FastAPI project for Clean Architecture compliance — verifies unidirectional layer dependencies, correct abstraction boundaries, repository pattern correctness, DI wiring, naming conventions, DB constraint rules, and documentation standards. Reports every violation with file and line number.
 argument-hint: "[--fix]"
-when_to_use: When you want to verify that a FastAPI project correctly follows Clean Architecture principles — correct layer boundaries, dependency inversion, repository pattern with result enums, proper DI setup — or after making significant changes to ensure nothing violates the architecture.
 disable-model-invocation: true
-version: "1.0.0"
+metadata:
+  version: "1.1.0"
 ---
 
 # FastAPI Clean Architecture — Review Skill
