@@ -1,8 +1,9 @@
 ---
 name: fastapi-template
-description: Scaffold a new FastAPI Clean Architecture project or audit an existing one for architecture compliance. Supports PostgreSQL, MongoDB, and SQLite; JWT, OAuth2, and API key auth; optional Redis cache.
-argument-hint: "scaffold <project-name> [--db postgres|mongodb|sqlite] [--auth jwt|oauth2|apikey] [--cache none|redis] [--no-docker] | review [--fix]"
-when_to_use: When starting a new FastAPI service from scratch, or when auditing an existing FastAPI project for clean architecture violations.
+description: Scaffold a new FastAPI Clean Architecture project, audit an existing one for architecture compliance, or activate architecture rules for the current session. Supports PostgreSQL, MongoDB, and SQLite; JWT, OAuth2, and API key auth; optional Redis cache.
+argument-hint: "scaffold <project-name> [--db postgres|mongodb|sqlite] [--auth jwt|oauth2|apikey] [--cache none|redis] [--no-docker] | review [--fix] | mode"
+when_to_use: When starting a new FastAPI service from scratch, auditing an existing FastAPI project for clean architecture violations, or working in a project that lacks CLAUDE.md and needs architecture rules active for the session.
+mode: true
 version: "1.0.0"
 ---
 
@@ -12,6 +13,7 @@ version: "1.0.0"
 
 - `scaffold <project-name> [options]` — generate a new project (see Scaffold Workflow)
 - `review [--fix]` — audit the current project for architecture violations (see Review Workflow)
+- `mode` — activate architecture rules for the current session without scaffolding or reviewing (see Mode Workflow)
 
 ### Scaffold options
 
@@ -76,6 +78,32 @@ Dependencies flow **inward only**: API → Infrastructure → Application → Do
 - Route tests: minimal `FastAPI()` + `TestModule` — never import `src/main.py` or `src/container.py`
 - `asyncio_mode = "auto"` is configured — no `@pytest.mark.asyncio` needed
 - Never test infrastructure repositories in unit tests (requires live DB)
+
+---
+
+## Mode Workflow
+
+Activated when the argument is `mode`, or when no argument is provided and the project has no `CLAUDE.md`.
+
+**Purpose**: Load all architecture rules into the current session so every file you write or edit from this point on follows the FastAPI Clean Architecture conventions — without scaffolding a new project or running a full audit.
+
+### On activation
+
+1. Confirm to the user: "FastAPI Clean Architecture mode is active. All architecture rules from AGENT.md are now in effect for this session."
+2. Load and internalize all rules from the **Architecture Rules** section of this skill (import direction, naming, DI, repository pattern, DB constraints, enums, auth guards, code style, documentation).
+3. Read any existing `AGENT.md` in the current project if present — it takes precedence over the rules embedded here.
+4. For the remainder of the session:
+   - Before writing or editing any file, verify it conforms to the rules.
+   - Flag violations proactively before writing code, not after.
+   - Refuse anti-patterns listed in the Anti-Patterns section and explain the correct approach.
+   - When adding a new entity, follow the layer order from the **Adding a New Entity** sequence.
+   - Remind the user to run `uv run ruff check src/ --fix && uv run ruff format src/` after each change.
+
+### When to recommend scaffolding `CLAUDE.md` instead
+
+If the project directory has no `CLAUDE.md`, suggest at the end of activation:
+
+> "This project has no `CLAUDE.md`. To make these rules permanent across all future sessions (without needing to invoke `/fastapi-template mode` each time), run `/fastapi-template scaffold` or manually copy `CLAUDE.md` and `AGENT.md` from `FastAPI/API_PostgressDB/` in the `joe-vi/templates` repository."
 
 ---
 

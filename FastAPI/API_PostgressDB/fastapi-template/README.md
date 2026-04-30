@@ -30,6 +30,16 @@ With a custom tech stack:
 /fastapi-template review --fix
 ```
 
+### Activate rules for the current session
+
+```bash
+/fastapi-template mode
+```
+
+Use this in projects that don't have a `CLAUDE.md` yet. It loads all architecture rules into the current Claude session so every file written or edited follows the conventions — without scaffolding or running a full audit. Rules stay active until the session ends.
+
+> **Tip**: Projects scaffolded with this skill already include `CLAUDE.md`, which means rules are enforced automatically on every session start — no need to invoke `mode` manually.
+
 ---
 
 ## What gets generated
@@ -65,6 +75,17 @@ my-api/
 The **domain**, **application**, and **API** layers are identical regardless of stack. Only `src/infrastructure/` and `src/container.py` adapt to the chosen database and auth strategy.
 
 ---
+
+## Mode
+
+`/fastapi-template mode` activates all architecture rules for the current session. Claude will:
+
+- Enforce the rules on every file it writes or edits
+- Flag violations proactively before writing code
+- Follow the correct layer order when adding new entities
+- Remind you to run `ruff` after each change
+
+If the project has no `CLAUDE.md`, Claude will suggest adding one to make the rules permanent across all future sessions.
 
 ## Review mode
 
