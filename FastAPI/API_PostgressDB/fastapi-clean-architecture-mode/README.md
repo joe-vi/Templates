@@ -1,21 +1,21 @@
-# fastapi-mode
+# fastapi-clean-architecture-mode
 
 A Claude Code skill that activates **Clean Architecture** rules for the current FastAPI session. Every file Claude writes or edits will follow strict layer boundaries, dependency inversion, repository pattern with result enums, and DI discipline until the session ends.
 
 > **Related skills**
-> - [`fastapi-template`](../fastapi-template/) — scaffold a new project with Clean Architecture enforced from day one
-> - [`fastapi-review`](../fastapi-review/) — audit an existing project for architecture violations
+> - [`fastapi-clean-architecture-template`](../fastapi-clean-architecture-template/) — scaffold a new project with Clean Architecture enforced from day one
+> - [`fastapi-clean-architecture-review`](../fastapi-clean-architecture-review/) — audit an existing project for architecture violations
 
 ## Install
 
 ```bash
-npx skills add joe-vi/templates --skill fastapi-mode
+npx skills add joe-vi/templates --skill fastapi-clean-architecture-mode
 ```
 
 ## Usage
 
 ```bash
-/fastapi-mode
+/fastapi-clean-architecture-mode
 ```
 
 Rules are active for the rest of the session.
@@ -56,6 +56,6 @@ Domain → Infrastructure → Application → API → container wiring. Claude w
 
 ## When to use
 
-Use `fastapi-mode` when working in a project **without a `CLAUDE.md`**. When activated, Claude will also suggest adding `CLAUDE.md` + `AGENT.md` to make the rules permanent across all future sessions automatically.
+Use `fastapi-clean-architecture-mode` when working in a project **without a `CLAUDE.md`**. When activated, Claude will also suggest adding `CLAUDE.md` + `AGENT.md` to make the rules permanent across all future sessions automatically.
 
-Projects scaffolded with `/fastapi-template` already include `CLAUDE.md` — Clean Architecture rules are enforced without invoking this skill.
+Projects scaffolded with `/fastapi-clean-architecture-template` already include `CLAUDE.md` — Clean Architecture rules are enforced without invoking this skill.

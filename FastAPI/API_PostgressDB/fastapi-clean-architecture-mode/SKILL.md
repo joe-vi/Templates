@@ -1,5 +1,5 @@
 ---
-name: fastapi-mode
+name: fastapi-clean-architecture-mode
 description: Activate Clean Architecture rules for the current FastAPI session — enforces unidirectional layer dependencies, repository pattern with result enums, dependency inversion via fastapi-injector, and all naming conventions on every file written or edited until the session ends.
 when_to_use: When working in a FastAPI project that has no CLAUDE.md and you want Clean Architecture rules — strict layer boundaries, dependency inversion, repository pattern, DI discipline — enforced for this session without scaffolding or running a full audit.
 mode: true
@@ -11,7 +11,7 @@ version: "1.0.0"
 
 Activates all Clean Architecture rules for the current FastAPI session. Everything Claude writes or edits from this point will follow the 4-layer structure, dependency direction, repository pattern, and naming discipline defined in AGENT.md.
 
-For scaffolding a new project use `/fastapi-template`. To audit an existing project use `/fastapi-review`.
+For scaffolding a new project use `/fastapi-clean-architecture-template`. To audit an existing project use `/fastapi-clean-architecture-review`.
 
 ---
 

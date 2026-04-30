@@ -1,26 +1,26 @@
-# fastapi-template
+# fastapi-clean-architecture-template
 
 A Claude Code skill that scaffolds a **FastAPI + Clean Architecture** project. The tech stack is configurable; the architecture is not — strict 4-layer structure, unidirectional dependencies, repository pattern, and result-enum error handling are enforced on every scaffold.
 
 > **Related skills**
-> - [`fastapi-review`](../fastapi-review/) — audit an existing project for architecture violations
-> - [`fastapi-mode`](../fastapi-mode/) — activate architecture rules for the current session
+> - [`fastapi-clean-architecture-review`](../fastapi-clean-architecture-review/) — audit an existing project for architecture violations
+> - [`fastapi-clean-architecture-mode`](../fastapi-clean-architecture-mode/) — activate architecture rules for the current session
 
 ## Install
 
 ```bash
-npx skills add joe-vi/templates --skill fastapi-template
+npx skills add joe-vi/templates --skill fastapi-clean-architecture-template
 ```
 
 ## Usage
 
 ```bash
 # Default stack (PostgreSQL, JWT, no cache, Docker)
-/fastapi-template my-api
+/fastapi-clean-architecture-template my-api
 
 # Custom stack — architecture stays the same, only infrastructure changes
-/fastapi-template my-api --db mongodb --auth oauth2 --cache redis
-/fastapi-template my-api --db sqlite --auth apikey --no-docker
+/fastapi-clean-architecture-template my-api --db mongodb --auth oauth2 --cache redis
+/fastapi-clean-architecture-template my-api --db sqlite --auth apikey --no-docker
 ```
 
 ## Clean Architecture enforced

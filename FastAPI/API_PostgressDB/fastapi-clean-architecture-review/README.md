@@ -1,25 +1,25 @@
-# fastapi-review
+# fastapi-clean-architecture-review
 
 A Claude Code skill that audits an existing **FastAPI + Clean Architecture** project for compliance violations. Reads the project one layer at a time to keep token usage low and reports every violation with file path and line number.
 
 > **Related skills**
-> - [`fastapi-template`](../fastapi-template/) — scaffold a new project with Clean Architecture enforced
-> - [`fastapi-mode`](../fastapi-mode/) — activate architecture rules for the current session
+> - [`fastapi-clean-architecture-template`](../fastapi-clean-architecture-template/) — scaffold a new project with Clean Architecture enforced
+> - [`fastapi-clean-architecture-mode`](../fastapi-clean-architecture-mode/) — activate architecture rules for the current session
 
 ## Install
 
 ```bash
-npx skills add joe-vi/templates --skill fastapi-review
+npx skills add joe-vi/templates --skill fastapi-clean-architecture-review
 ```
 
 ## Usage
 
 ```bash
 # Report violations
-/fastapi-review
+/fastapi-clean-architecture-review
 
 # Report and auto-fix
-/fastapi-review --fix
+/fastapi-clean-architecture-review --fix
 ```
 
 ## What Clean Architecture rules get checked
