@@ -1,123 +1,34 @@
 ---
 name: fastapi-template
-description: Scaffold a new FastAPI Clean Architecture project, audit an existing one for architecture compliance, or activate architecture rules for the current session. Supports PostgreSQL, MongoDB, and SQLite; JWT, OAuth2, and API key auth; optional Redis cache.
-argument-hint: "scaffold <project-name> [--db postgres|mongodb|sqlite] [--auth jwt|oauth2|apikey] [--cache none|redis] [--no-docker] | review [--fix] | mode"
-when_to_use: When starting a new FastAPI service from scratch, auditing an existing FastAPI project for clean architecture violations, or working in a project that lacks CLAUDE.md and needs architecture rules active for the session.
-mode: true
+description: Scaffold a new FastAPI Clean Architecture project with your choice of database, auth strategy, and cache layer. Generates the full 4-layer structure wired with fastapi-injector.
+argument-hint: "<project-name> [--db postgres|mongodb|sqlite] [--auth jwt|oauth2|apikey] [--cache none|redis] [--no-docker]"
+when_to_use: When starting a new FastAPI service from scratch.
+disable-model-invocation: true
 version: "1.0.0"
 ---
 
-# FastAPI Clean Architecture Skill
+# FastAPI Scaffold Skill
 
-## Arguments
+Generates a production-ready FastAPI Clean Architecture project. For auditing an existing project use `/fastapi-review`. To activate rules in an existing session use `/fastapi-mode`.
 
-- `scaffold <project-name> [options]` — generate a new project (see Scaffold Workflow)
-- `review [--fix]` — audit the current project for architecture violations (see Review Workflow)
-- `mode` — activate architecture rules for the current session without scaffolding or reviewing (see Mode Workflow)
+## Tech stack flags
 
-### Scaffold options
-
-| Flag | Values | Default | Effect |
-|------|--------|---------|--------|
-| `--db` | `postgres`, `mongodb`, `sqlite` | `postgres` | Database + ORM layer |
-| `--auth` | `jwt`, `oauth2`, `apikey` | `jwt` | Authentication strategy |
-| `--cache` | `none`, `redis` | `none` | Cache layer |
-| `--no-docker` | — | docker on | Skip Dockerfile + docker-compose |
+| Flag | Values | Default |
+|------|--------|---------|
+| `--db` | `postgres`, `mongodb`, `sqlite` | `postgres` |
+| `--auth` | `jwt`, `oauth2`, `apikey` | `jwt` |
+| `--cache` | `none`, `redis` | `none` |
+| `--no-docker` | flag | docker enabled |
 
 ---
 
-## Architecture Rules (applies to both modes)
-
-Dependencies flow **inward only**: API → Infrastructure → Application → Domain.
-
-| Layer | Location | Contains | Imports from |
-|-------|----------|----------|--------------|
-| Domain | `src/domain/` | Entities, Repository ABCs, result enums | Nothing |
-| Application | `src/application/` | Use cases, DTOs, converters, service ABCs | Domain only |
-| Infrastructure | `src/infrastructure/` | DB models, repository impls, auth impls | Domain + Application |
-| API | `src/api/` | Routes, schemas, API converters | Application (ABCs only) |
-| DI Container | `src/container.py` | `Binder.bind()` wiring | All layers |
-
-### Naming
-
-- ABCs **must** end with `Base`: `UserRepositoryBase`, `UserUseCaseBase`
-- DTOs: frozen dataclasses, `DTO` suffix. Return `list[UserDTO]` directly — no wrapper DTO
-- API schemas: `Request` (input) / `Response` (output) suffix; all inherit `APIModelBase`
-- Enums: `StrEnum`, lowercase values; all in `src/domain/enums/`
-- Operation result enums are generic and shared: `CreateResult`, `UpdateResult`, `DeleteResult` — never entity-specific
-- Booleans read as questions: `is_active`, `has_items` — never bare nouns
-- No abbreviations: `repository` not `repo`, `connection` not `conn`
-- No single-letter names, no numbered variants (`greeting1`), no vague names (`dto`, `result`)
-
-### Dependency Injection (`fastapi-injector`)
-
-- Every injectable `__init__` **must** have `@inject` from `injector` — omitting causes `TypeError` at startup
-- In `main.py`: add `InjectorMiddleware` **before** `attach_injector()`, then include routers after `attach_injector()`
-- Routes use `Injected(BaseClass)` for use cases/services — **never** `Depends()` for these
-- `Depends()` only in `src/api/dependencies/` for cross-cutting guards and `dependencies=[...]` on `APIRouter`
-- `singleton` scope only for `ConnectionFactory` and external service clients — never for repos or use cases
-
-### Repository Pattern
-
-- One CRUD operation per method — no combined read+write
-- Mutation methods catch all DB exceptions internally and return result enums — nothing propagates to use cases
-- Exception mapping: `IntegrityError` → `UNIQUE_CONSTRAINT_ERROR`; `DeadlockDetectedError` → `CONCURRENCY_ERROR`; all others → `FAILURE`
-- Repos inject `ConnectionFactoryBase`; each method opens its own session with `async with self._connection_factory.get_session()`
-- Never pass sessions to repository constructors
-
-### Database (PostgreSQL / SQLite)
-
-- `id`, `created_at`, `updated_at` are DB-generated — never set in Python
-- Call `session.refresh()` after every insert/update
-- All constraints need an explicit `name`: `uq_{table}_{col}`, `fk_{table}_{col}`, `ck_{table}_{desc}`, `ix_{table}_{col}`
-- Declare constraints in `__table_args__`, not as column-level shorthand (except primary key)
-
-### Testing
-
-- Use case tests: `AsyncMock(spec=RepositoryBase)` to mock the repo; annotate fixture as `-> RepositoryBase`
-- Route tests: minimal `FastAPI()` + `TestModule` — never import `src/main.py` or `src/container.py`
-- `asyncio_mode = "auto"` is configured — no `@pytest.mark.asyncio` needed
-- Never test infrastructure repositories in unit tests (requires live DB)
-
----
-
-## Mode Workflow
-
-Activated when the argument is `mode`, or when no argument is provided and the project has no `CLAUDE.md`.
-
-**Purpose**: Load all architecture rules into the current session so every file you write or edit from this point on follows the FastAPI Clean Architecture conventions — without scaffolding a new project or running a full audit.
-
-### On activation
-
-1. Confirm to the user: "FastAPI Clean Architecture mode is active. All architecture rules from AGENT.md are now in effect for this session."
-2. Load and internalize all rules from the **Architecture Rules** section of this skill (import direction, naming, DI, repository pattern, DB constraints, enums, auth guards, code style, documentation).
-3. Read any existing `AGENT.md` in the current project if present — it takes precedence over the rules embedded here.
-4. For the remainder of the session:
-   - Before writing or editing any file, verify it conforms to the rules.
-   - Flag violations proactively before writing code, not after.
-   - Refuse anti-patterns listed in the Anti-Patterns section and explain the correct approach.
-   - When adding a new entity, follow the layer order from the **Adding a New Entity** sequence.
-   - Remind the user to run `uv run ruff check src/ --fix && uv run ruff format src/` after each change.
-
-### When to recommend scaffolding `CLAUDE.md` instead
-
-If the project directory has no `CLAUDE.md`, suggest at the end of activation:
-
-> "This project has no `CLAUDE.md`. To make these rules permanent across all future sessions (without needing to invoke `/fastapi-template mode` each time), run `/fastapi-template scaffold` or manually copy `CLAUDE.md` and `AGENT.md` from `FastAPI/API_PostgressDB/` in the `joe-vi/templates` repository."
-
----
-
-## Scaffold Workflow
+## Workflow
 
 Make a todo list and work through each step sequentially.
 
 ### Step 1 — Resolve tech stack
 
-Parse all flags from the arguments. Use these defaults if a flag is absent:
-- `--db` → `postgres`
-- `--auth` → `jwt`
-- `--cache` → `none`
-- docker → enabled unless `--no-docker` is present
+Parse all flags. Apply defaults for any flag not provided.
 
 ### Step 2 — Create directory structure
 
@@ -127,24 +38,18 @@ Parse all flags from the arguments. Use these defaults if a flag is absent:
 │   ├── __init__.py
 │   ├── main.py
 │   ├── container.py
-│   ├── config/
-│   │   └── settings.py
+│   ├── config/settings.py
 │   ├── domain/
 │   │   ├── entities/
-│   │   ├── enums/
-│   │   │   └── operation_results.py
+│   │   ├── enums/operation_results.py
 │   │   └── repositories/
 │   ├── application/
 │   │   ├── services/
-│   │   │   ├── transaction_manager_base.py   # postgres/sqlite only
-│   │   │   └── user_context_base.py          # jwt/oauth2 only
 │   │   └── use_cases/
-│   │       └── auth/                          # jwt/oauth2 only
 │   ├── infrastructure/
-│   │   ├── auth/                              # jwt/oauth2/apikey
+│   │   ├── auth/
 │   │   ├── database/
-│   │   │   └── models/
-│   │   │       └── __init__.py
+│   │   │   └── models/__init__.py
 │   │   └── repositories/
 │   └── api/
 │       ├── dependencies/
@@ -153,440 +58,132 @@ Parse all flags from the arguments. Use these defaults if a flag is absent:
 │           ├── base_schema.py
 │           └── operation_schema.py
 ├── tests/
-│   ├── application/
-│   │   └── use_cases/
-│   └── api/
-│       └── routers/
+│   ├── application/use_cases/
+│   └── api/routers/
 ├── pyproject.toml
 ├── .env.example
 ├── CLAUDE.md
 └── AGENT.md
 ```
 
-Add `alembic/` + `alembic.ini` for `--db postgres` and `--db sqlite`.
-Add `Dockerfile` + `docker-compose.yml` unless `--no-docker`.
+Add `alembic/` + `alembic.ini` for `postgres` or `sqlite`. Add `Dockerfile` + `docker-compose.yml` unless `--no-docker`.
 
-### Step 3 — Generate shared infrastructure files
+### Step 3 — Generate shared files
 
-Generate these files identically regardless of tech stack:
+Generate these regardless of stack. Use concise, idiomatic Python — no unnecessary comments.
 
-**`src/domain/enums/operation_results.py`**
-```python
-"""Shared operation result enums."""
+- **`operation_results.py`**: Three `StrEnum` classes — `CreateResult`, `UpdateResult`, `DeleteResult`. Values: `success`, `failure`, `concurrency_error`, `unique_constraint_error` on all three; add `not_found` to `UpdateResult` and `DeleteResult`.
+- **`base_schema.py`**: Pydantic `BaseModel` subclass `APIModelBase` with `alias_generator=to_camel` and `populate_by_name=True`.
+- **`operation_schema.py`**: Three `APIModelBase` subclasses — `CreateOperationResponse(id: int | None)`, `UpdateOperationResponse(message: str)`, `DeleteOperationResponse(message: str)`.
+- **`result_status_maps.py`**: Three functions — `create_response`, `update_response`, `delete_response` — each mapping the corresponding result enum to a `JSONResponse` with the correct HTTP status code (201 success-create, 200 success-update/delete, 404 not-found, 409 conflict, 500 failure).
 
-from enum import StrEnum
+### Step 4 — Generate database layer
 
+#### `postgres` or `sqlite`
 
-class CreateResult(StrEnum):
-    SUCCESS = "success"
-    FAILURE = "failure"
-    CONCURRENCY_ERROR = "concurrency_error"
-    UNIQUE_CONSTRAINT_ERROR = "unique_constraint_error"
+Four files following the SQLAlchemy 2.0 async session pattern:
 
+- **`connection_factory_base.py`** (application layer): abstract `get_session()` async context manager and `close()`.
+- **`connection_factory.py`** (infrastructure): creates `AsyncEngine` + `async_sessionmaker`. `get_session()` checks a `ContextVar[AsyncSession | None]` called `_active_session` — yields the active session if set, otherwise opens a new one with its own commit/rollback.
+- **`transaction_manager_base.py`** (application layer): abstract `begin_transaction()` async context manager.
+- **`transaction_manager.py`** (infrastructure): injects `ConnectionFactoryBase`; `begin_transaction()` sets `_active_session` ContextVar, delegates to the connection factory, handles commit/rollback.
+- **`base.py`**: SQLAlchemy `DeclarativeBase` subclass.
 
-class UpdateResult(StrEnum):
-    SUCCESS = "success"
-    FAILURE = "failure"
-    CONCURRENCY_ERROR = "concurrency_error"
-    UNIQUE_CONSTRAINT_ERROR = "unique_constraint_error"
-    NOT_FOUND = "not_found"
+Driver: `asyncpg` for postgres (`postgresql+asyncpg://`), `aiosqlite` for sqlite (`sqlite+aiosqlite:///`).
 
+#### `mongodb`
 
-class DeleteResult(StrEnum):
-    SUCCESS = "success"
-    FAILURE = "failure"
-    CONCURRENCY_ERROR = "concurrency_error"
-    NOT_FOUND = "not_found"
-```
+- **`mongo_client_base.py`** (application layer): abstract `get_database()`.
+- **`mongo_client.py`** (infrastructure): wraps `motor.motor_asyncio.AsyncIOMotorClient`. No session or transaction manager needed.
 
-**`src/api/schemas/base_schema.py`**
-```python
-"""Base Pydantic schema for all API models."""
+No Alembic for MongoDB.
 
-from pydantic import BaseModel, ConfigDict
-from pydantic.alias_generators import to_camel
+### Step 5 — Generate auth layer
 
+#### `jwt`
 
-class APIModelBase(BaseModel):
-    """Base for all API request/response schemas — camelCase JSON serialisation."""
+- `PasswordHasherBase` / `PasswordHasher` — bcrypt via passlib.
+- `TokenServiceBase` / `TokenService` — python-jose; issues access + refresh JWTs from settings.
+- `UserContextBase` / `UserContext` — request-scoped; `populate()` raises `RuntimeError` on second call; scalar properties only (`user_id`, `role`).
+- `jwt_dependency.py` — decodes JWT, calls `user_context.populate()`, returns `TokenClaimsDTO`.
+- Auth use case + DTO + routes under `src/application/use_cases/auth/` and `src/api/routers/auth/`.
 
-    model_config = ConfigDict(
-        alias_generator=to_camel,
-        populate_by_name=True,
-    )
-```
+#### `oauth2`
 
-**`src/api/schemas/operation_schema.py`**
-```python
-"""Shared operation response schemas."""
+- `OAuthServiceBase` / `OAuthService` — exchanges provider token via `httpx`.
+- Keep `UserContextBase` / `UserContext` and JWT guard for internal session tokens issued after OAuth exchange.
+- No `PasswordHasher`.
 
-from src.api.schemas.base_schema import APIModelBase
+#### `apikey`
 
+- `APIKeyServiceBase` / `APIKeyService` — validates key against DB.
+- Guard in `src/api/dependencies/api_key_dependency.py`.
+- No `UserContextBase` unless user identity is needed.
 
-class CreateOperationResponse(APIModelBase):
-    """Response envelope for create operations."""
+### Step 6 — Generate cache layer (redis only)
 
-    id: int | None
+- `CacheServiceBase` (application layer): abstract `get()`, `set()`, `delete()`.
+- `RedisService` (infrastructure): `redis.asyncio` client, singleton scope, `close()` method.
+- Bind as singleton in `container.py`; call `close()` in `lifespan` shutdown.
 
+### Step 7 — Generate `settings.py`
 
-class UpdateOperationResponse(APIModelBase):
-    """Response envelope for update operations."""
+`pydantic-settings` `BaseSettings`. Include only fields for the resolved stack:
 
-    message: str
+- Always: `APP_NAME`, `DEBUG`
+- postgres/sqlite: `DATABASE_URL`, `IS_SQL_ECHO_ENABLED: bool = False`
+- mongodb: `MONGODB_URL`, `MONGODB_DB_NAME`
+- jwt/oauth2: `SECRET_KEY`, `ACCESS_TOKEN_EXPIRE_MINUTES = 30`, `REFRESH_TOKEN_EXPIRE_DAYS = 7`
+- redis: `REDIS_URL`
 
+### Step 8 — Generate `main.py`
 
-class DeleteOperationResponse(APIModelBase):
-    """Response envelope for delete operations."""
+Key ordering requirement — strictly in this order:
+1. Create `Injector([AppModule()])`
+2. Create `FastAPI(lifespan=lifespan)`
+3. `app.add_middleware(InjectorMiddleware, injector=injector)`
+4. `attach_injector(app, injector)`
+5. `app.include_router(...)` for each router
 
-    message: str
-```
+`lifespan` shutdown block closes all singletons that have a `close()` method.
 
-**`src/api/result_status_maps.py`**
-```python
-"""Helpers mapping operation results to HTTP responses."""
+### Step 9 — Generate `container.py`
 
-from fastapi import Response
-from fastapi.responses import JSONResponse
-
-from src.domain.enums.operation_results import CreateResult, DeleteResult, UpdateResult
-
-
-def create_response(result: CreateResult, entity_id: int | None) -> Response:
-    """Return a JSONResponse with the correct HTTP status for a create operation."""
-    status_map = {
-        CreateResult.SUCCESS: 201,
-        CreateResult.UNIQUE_CONSTRAINT_ERROR: 409,
-        CreateResult.CONCURRENCY_ERROR: 409,
-        CreateResult.FAILURE: 500,
-    }
-    return JSONResponse(
-        content={"id": entity_id},
-        status_code=status_map[result],
-    )
-
-
-def update_response(result: UpdateResult) -> Response:
-    """Return a JSONResponse with the correct HTTP status for an update operation."""
-    status_map = {
-        UpdateResult.SUCCESS: 200,
-        UpdateResult.NOT_FOUND: 404,
-        UpdateResult.UNIQUE_CONSTRAINT_ERROR: 409,
-        UpdateResult.CONCURRENCY_ERROR: 409,
-        UpdateResult.FAILURE: 500,
-    }
-    return JSONResponse(
-        content={"message": result.value},
-        status_code=status_map[result],
-    )
-
-
-def delete_response(result: DeleteResult) -> Response:
-    """Return a JSONResponse with the correct HTTP status for a delete operation."""
-    status_map = {
-        DeleteResult.SUCCESS: 200,
-        DeleteResult.NOT_FOUND: 404,
-        DeleteResult.CONCURRENCY_ERROR: 409,
-        DeleteResult.FAILURE: 500,
-    }
-    return JSONResponse(
-        content={"message": result.value},
-        status_code=status_map[result],
-    )
-```
-
-### Step 4 — Generate database layer (varies by --db)
-
-#### `--db postgres` or `--db sqlite`
-
-Generate `src/infrastructure/database/base.py`, `connection_factory_base.py`, `connection_factory.py`, and `transaction_manager.py` following the SQLAlchemy 2.0 async session pattern:
-
-- `ConnectionFactoryBase` (application layer): abstract `get_session()` and `close()`
-- `ConnectionFactory` (infrastructure): creates `AsyncEngine` + `async_sessionmaker`; `get_session()` yields `AsyncSession`; checks `_active_session` ContextVar before opening a new session
-- `TransactionManagerBase` (application layer): abstract `begin_transaction()` async context manager
-- `TransactionManager` (infrastructure): injects `ConnectionFactoryBase`; sets `_active_session` ContextVar inside `begin_transaction()`
-
-For `--db postgres`: use `asyncpg` driver (`postgresql+asyncpg://`)
-For `--db sqlite`: use `aiosqlite` driver (`sqlite+aiosqlite:///`)
-
-#### `--db mongodb`
-
-Generate `src/infrastructure/database/mongo_client_base.py` (application layer ABC) and `src/infrastructure/database/mongo_client.py` using `motor.motor_asyncio.AsyncIOMotorClient`.
-
-No Alembic, no session pattern. Repository methods use `self._client.get_database().get_collection()`.
-
-Exception mapping for MongoDB:
-- `DuplicateKeyError` → `UNIQUE_CONSTRAINT_ERROR`
-- All others → `FAILURE`
-
-### Step 5 — Generate auth layer (varies by --auth)
-
-#### `--auth jwt`
-
-Generate (application layer ABCs + infrastructure implementations):
-- `PasswordHasherBase` / `PasswordHasher` (bcrypt)
-- `TokenServiceBase` / `TokenService` (python-jose; issues access + refresh JWT)
-- `UserContextBase` / `UserContext` (request-scoped; `populate()` raises on second call)
-- `JWTDependency` guard in `src/api/dependencies/jwt_dependency.py`
-- Auth use case + DTO in `src/application/use_cases/auth/`
-- Auth router in `src/api/routers/auth/`
-
-#### `--auth oauth2`
-
-Generate an `OAuthServiceBase` / `OAuthService` that exchanges provider tokens. No password hasher needed. Keep `UserContextBase` / `UserContext` and JWT guard for internal session tokens issued after OAuth exchange.
-
-#### `--auth apikey`
-
-Generate an `APIKeyServiceBase` / `APIKeyService` that validates keys against the DB. Guard lives in `src/api/dependencies/api_key_dependency.py`. No `UserContextBase` unless user identity is needed.
-
-### Step 6 — Generate cache layer (only if --cache redis)
-
-Generate:
-- `CacheServiceBase` in `src/application/services/cache_service_base.py` with abstract `get()`, `set()`, `delete()`
-- `RedisService` in `src/infrastructure/cache/redis_service.py` using `redis.asyncio`
-- Bind in `container.py` as singleton
-- Add `close()` to `RedisService` and call in `lifespan` shutdown
-
-### Step 7 — Generate `src/config/settings.py`
-
-Use `pydantic-settings` (`BaseSettings`). Include only the fields needed for the resolved stack:
-
-```python
-# Always present
-APP_NAME: str = "<project-name>"
-DEBUG: bool = False
-
-# --db postgres / sqlite
-DATABASE_URL: str
-
-# --db mongodb
-MONGODB_URL: str
-MONGODB_DB_NAME: str
-
-# --auth jwt / oauth2
-SECRET_KEY: str
-ACCESS_TOKEN_EXPIRE_MINUTES: int = 30
-REFRESH_TOKEN_EXPIRE_DAYS: int = 7
-
-# --cache redis
-REDIS_URL: str
-
-# debugging
-IS_SQL_ECHO_ENABLED: bool = False   # postgres/sqlite only
-```
-
-### Step 8 — Generate `src/main.py`
-
-```python
-"""FastAPI application entry point."""
-
-from contextlib import asynccontextmanager
-
-from fastapi import FastAPI
-from fastapi_injector import attach_injector, InjectorMiddleware
-from injector import Injector
-
-from src.container import AppModule
-
-
-@asynccontextmanager
-async def lifespan(app: FastAPI):
-    """Manage startup and shutdown of singleton resources."""
-    yield
-    # close connection factory (and redis if present)
-    injector.get(ConnectionFactoryBase).close()  # adapt to resolved stack
-
-
-injector = Injector([AppModule()])
-
-app = FastAPI(lifespan=lifespan)
-
-app.add_middleware(InjectorMiddleware, injector=injector)  # BEFORE attach_injector
-attach_injector(app, injector)
-
-# include routers AFTER attach_injector
-app.include_router(...)
-```
-
-Adapt the lifespan block to close whichever singletons exist in the resolved stack.
-
-### Step 9 — Generate `src/container.py`
-
-```python
-"""Dependency injection bindings."""
-
-from injector import Module, Binder, singleton
-
-# import all base classes and implementations for the resolved stack
-
-
-class AppModule(Module):
-    """Wires all base classes to their concrete implementations."""
-
-    def configure(self, binder: Binder) -> None:
-        """Bind all base/implementation pairs."""
-        binder.bind(ConnectionFactoryBase, to=ConnectionFactory, scope=singleton)
-        # add remaining bindings for auth, cache, use cases, repos
-```
+`injector.Module` subclass `AppModule` with a `configure(binder)` method. Bind every Base/implementation pair. Use `singleton` scope only for `ConnectionFactory`, external service clients, and `RedisService`.
 
 ### Step 10 — Generate `pyproject.toml`
 
-Use these base dependencies, then add stack-specific ones:
+Base dependencies: `fastapi>=0.115`, `fastapi-injector>=0.6`, `injector>=0.22`, `pydantic>=2.0`, `pydantic-settings>=2.0`, `uvicorn[standard]>=0.30`.
 
-```toml
-[project]
-name = "<project-name>"
-version = "0.1.0"
-requires-python = ">=3.11"
-dependencies = [
-    "fastapi>=0.115",
-    "fastapi-injector>=0.6",
-    "injector>=0.22",
-    "pydantic>=2.0",
-    "pydantic-settings>=2.0",
-    "uvicorn[standard]>=0.30",
-]
+Stack additions:
 
-[tool.ruff]
-line-length = 80
-```
+| Stack | Extra |
+|-------|-------|
+| postgres | `sqlalchemy[asyncio]>=2.0`, `asyncpg>=0.29`, `alembic>=1.13` |
+| sqlite | `sqlalchemy[asyncio]>=2.0`, `aiosqlite>=0.20`, `alembic>=1.13` |
+| mongodb | `motor>=3.4` |
+| jwt | `python-jose[cryptography]>=3.3`, `passlib[bcrypt]>=1.7` |
+| oauth2 | `httpx>=0.27`, `python-jose[cryptography]>=3.3` |
+| redis | `redis[asyncio]>=5.0` |
 
-Stack-specific additions:
+Dev: `pytest>=8.0`, `pytest-asyncio>=0.23`, `httpx>=0.27`, `ruff>=0.4`.
 
-| Stack | Extra dependencies |
-|---|---|
-| `--db postgres` | `sqlalchemy[asyncio]>=2.0`, `asyncpg>=0.29`, `alembic>=1.13` |
-| `--db sqlite` | `sqlalchemy[asyncio]>=2.0`, `aiosqlite>=0.20`, `alembic>=1.13` |
-| `--db mongodb` | `motor>=3.4`, `beanie>=1.25` (optional ODM) |
-| `--auth jwt` | `python-jose[cryptography]>=3.3`, `bcrypt>=4.0`, `passlib[bcrypt]>=1.7` |
-| `--auth oauth2` | `httpx>=0.27`, `python-jose[cryptography]>=3.3` |
-| `--cache redis` | `redis[asyncio]>=5.0` |
-
-Dev dependencies (always):
-```toml
-[dependency-groups]
-dev = [
-    "pytest>=8.0",
-    "pytest-asyncio>=0.23",
-    "httpx>=0.27",
-    "ruff>=0.4",
-]
-```
+`[tool.ruff]` with `line-length = 80`. `[tool.pytest.ini_options]` with `asyncio_mode = "auto"`.
 
 ### Step 11 — Copy architecture docs
 
-Copy `CLAUDE.md` and `AGENT.md` verbatim from `FastAPI/API_PostgressDB/` into the new project root. These files ensure future Claude sessions in the new project follow the same rules.
+Copy `CLAUDE.md` and `AGENT.md` verbatim from `FastAPI/API_PostgressDB/` into the new project root.
 
 ### Step 12 — Generate `.env.example`
 
-Include only variables relevant to the resolved stack with placeholder values. Never include real secrets.
+Only variables for the resolved stack with placeholder values. No real secrets.
 
 ### Step 13 — Validate
 
-Run:
 ```bash
 uv run ruff check src/ --fix && uv run ruff format src/
 ```
 
-If `uv` is not available, note it in the summary and skip.
-
 ### Step 14 — Summary
 
-Report:
-- Project name and location
-- Tech stack resolved (db, auth, cache, docker)
-- Files created (count by layer)
-- Ruff result
-- Next steps (install deps, copy `.env.example` to `.env`, run migrations if applicable, start with `uvicorn src.main:app --reload`)
-
----
-
-## Review Workflow
-
-Make a todo list. Audit the project in the current working directory against every rule below. Report all violations as a table with `file:line`, rule violated, and a fix description. If `--fix` is passed, apply fixes automatically after reporting.
-
-### Check 1 — Import direction
-
-Scan all `import` statements. Flag any:
-- `src/domain/` importing from `src/application/`, `src/infrastructure/`, or `src/api/`
-- `src/application/` importing from `src/infrastructure/` or `src/api/`
-- `src/api/` importing from `src/infrastructure/`
-
-### Check 2 — Naming conventions
-
-- ABCs not ending with `Base`
-- DTOs not ending with `DTO` or defined as non-frozen dataclass
-- API schemas not ending with `Request` or `Response`
-- API schemas not inheriting from `APIModelBase`
-- Boolean fields/variables not prefixed with `is_`, `has_`, or `can_`
-- Abbreviations: `repo`, `conn`, `svc`, `mgr`, `cfg`
-- Entity-specific result enums (e.g., `CreateUserResult`)
-- Wrapper collection DTOs (e.g., `UserListDTO`)
-
-### Check 3 — Dependency injection
-
-- Injectable `__init__` missing `@inject`
-- `Depends()` used for use case or service injection in route signatures (outside `src/api/dependencies/`)
-- `InjectorMiddleware` added after `attach_injector()` in `main.py`
-- `attach_injector()` called before adding `InjectorMiddleware`
-- Routers included before `attach_injector()`
-- `singleton` scope on repositories or use cases
-
-### Check 4 — Repository pattern
-
-- Repository method performs more than one CRUD operation
-- Mutation method propagates DB exceptions (raises instead of returning result enum)
-- Repository method accepts a session parameter
-- Use case directly calls a repository without going through a use case method
-- Route bypasses the use case and calls a repository directly
-
-### Check 5 — Database constraints (SQLAlchemy only)
-
-- `UniqueConstraint`, `ForeignKeyConstraint`, `CheckConstraint`, or `Index` missing an explicit `name`
-- Constraint names not following the `uq_`, `fk_`, `ck_`, `ix_` prefix conventions
-- `id`, `created_at`, or `updated_at` set in Python code
-- Missing `session.refresh()` after insert/update
-
-### Check 6 — Enums
-
-- Enums not using `StrEnum`
-- Enum values not lowercase
-- Enums defined outside `src/domain/enums/`
-- `SQLAlchemyEnum` type object defined inline rather than at module level
-
-### Check 7 — Authentication guards
-
-- Guard functions defined inside route files instead of `src/api/dependencies/`
-- `Depends(get_current_user)` scattered in individual route function signatures instead of on `APIRouter`
-
-### Check 8 — Code style
-
-- Lines exceeding 80 characters (excluding `# noqa: E501`)
-- Use of `List[X]`, `Optional[X]`, `Dict[K, V]` instead of modern `list[X]`, `X | None`, `dict[K, V]`
-- Synchronous DB operations (missing `async def` / `await`)
-
-### Check 9 — Documentation
-
-- `.py` files missing module-level docstring
-- Classes missing class-level docstring
-- `__init__` missing docstring
-- Public abstract methods on ABCs missing Google-style docstring
-
-### Final report format
-
-```
-## Architecture Review — <project-name>
-
-### Violations found: <N>
-
-| # | File | Line | Rule | Fix |
-|---|------|------|------|-----|
-| 1 | src/domain/entities/user.py | 3 | Domain imports from Infrastructure | Remove import of `UserRepository` |
-...
-
-### Passed checks
-- Import direction: ✅
-- Naming conventions: ✅
-...
-```
-
-If `--fix` was passed, list the changes made after the table.
+Report: project name and path, resolved stack, file count by layer, ruff result, and next steps (install deps, copy `.env`, run migrations if applicable, start with `uvicorn src.main:app --reload`).
