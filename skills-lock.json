@@ -1,0 +1,23 @@
+{
+  "version": 1,
+  "skills": {
+    "fastapi-clean-architecture-mode": {
+      "source": "joe-vi/templates",
+      "sourceType": "github",
+      "skillPath": "FastAPI/API_PostgressDB/fastapi-clean-architecture-mode/SKILL.md",
+      "computedHash": "ddd2a96c490f9b96dd0a2cadec57257cfff74c786d42bfa5d0e8a6a15aca5f7a"
+    },
+    "fastapi-clean-architecture-review": {
+      "source": "joe-vi/templates",
+      "sourceType": "github",
+      "skillPath": "FastAPI/API_PostgressDB/fastapi-clean-architecture-review/SKILL.md",
+      "computedHash": "1ed255bb53a4c4a8f05a7720efc5143f01ab358868248b3590930517d26370cc"
+    },
+    "fastapi-clean-architecture-template": {
+      "source": "joe-vi/templates",
+      "sourceType": "github",
+      "skillPath": "FastAPI/API_PostgressDB/fastapi-clean-architecture-template/SKILL.md",
+      "computedHash": "d2c54ceb505ee1a69034145fc889f1270bad370cd5ac2348a2f686c66194a5ea"
+    }
+  }
+}
