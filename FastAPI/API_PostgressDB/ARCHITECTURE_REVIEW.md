@@ -1,294 +1,301 @@
-# Critical Review — FastAPI Clean Architecture Template
+# Structural & Infrastructure Critique — FastAPI Clean Architecture Template
 
-Scope: `FastAPI/API_PostgressDB/`. Findings are ordered by severity. Each item
-states the problem, where it lives, why it matters, and what to do about it.
-This is a critique, not a celebration — the things that work are not listed.
+This review ignores feature/placeholder concerns (auth policy, pagination,
+validation, secret handling) and logic bugs. It targets only **structure**,
+**infrastructure components** (ConnectionFactory, DI, session/transaction
+management), and **whether the patterns are idiomatic for Python and FastAPI**.
+
+The short version: the template is a faithful port of a C#/Java/Guice
+"Clean Architecture + IoC container" layout into Python. Most of the friction
+comes from importing idioms that Python and FastAPI already solve natively, and
+then having to build scaffolding to make the imported idioms work.
 
 ---
 
-## CRITICAL
+## 1. Two dependency-injection systems running in parallel
 
-### C1. No authorization — any authenticated user is effectively an admin
-`src/api/routers/user/user_routes.py:13-17`, `src/api/dependencies/jwt_dependency.py`
+`src/container.py`, `src/main.py:40-41`, `src/api/dependencies/jwt_dependency.py`
 
-The entire user router is guarded only by `get_current_user`, which performs
-**authentication** (is the token valid?) and never **authorization** (is this
-user allowed to do this?). The decoded `role` is pushed into `UserContext` and
-then *never read by anything*.
+FastAPI ships a first-class DI system (`Depends`) with request-scoped caching,
+`yield` setup/teardown, sub-dependencies, and `dependency_overrides` for tests.
+This template bolts a **second** container on top — `injector` +
+`fastapi-injector` — and then forbids the native one (AGENT.md §3: "never use
+`Depends()` for use cases, use `Injected()`").
 
-Consequences for a freshly-copied template:
-- A user with `role=user` can `POST /users`, `DELETE /users/{id}` for anyone,
-  and — worst — `PATCH /users/{id}/role` to set their own role to `admin`.
-- That is a textbook privilege-escalation / IDOR hole shipped as the default.
+Why this is a structural problem, not just a taste call:
 
-A "clean architecture" template that builds an entire request-scoped
-`UserContext` + role plumbing and then enforces nothing is misleading: it looks
-secure without being secure. Provide a role/permission dependency
-(`require_role(UserRole.ADMIN)`) and apply it, or drop the role plumbing
-entirely so nobody assumes it does something.
+- **`Injected()` is itself implemented on top of `Depends`.** So the rule
+  "don't use Depends, use Injected" is illusory — you're using `Depends`
+  underneath, plus a whole extra container above it. You now maintain two
+  mental models and two resolution mechanisms for one job. The JWT guard proves
+  it: `get_current_user` mixes `Depends(_security)` *and*
+  `Injected(TokenServiceBase)` in the same signature.
+- **`injector` is a Guice clone — constructor injection with explicit
+  binding.** That is a Java idiom. In Python you rarely need a container: duck
+  typing + `Depends` + module-level singletons cover the same ground without a
+  binding registry.
+- **Every `__init__` must be decorated `@inject` or the app dies at startup.**
+  The docs list this as a top "anti-pattern / debugging tip"
+  (`AGENT.md:106,325,345`). A framework that requires boilerplate on every
+  class, where forgetting it is a documented recurring failure mode, is adding
+  fragility, not removing it.
+- **`request_scope` only works if `InjectorMiddleware` is added before
+  `attach_injector`, which must run before routers are included.** Three
+  ordering constraints on global setup, each documented as a `LookupError`
+  source (`AGENT.md:107,326-327`). That is exactly the kind of order-dependent
+  global wiring FastAPI's native DI avoids.
+- **You lose FastAPI-native testing.** The route test has to construct a second
+  `Injector`, a `TestModule`, `InstanceProvider`, *and* still fall back to
+  `app.dependency_overrides` for the guard
+  (`tests/api/routers/user/test_user_routes.py:42-58`) — i.e. it uses both DI
+  systems to test one endpoint.
 
-### C2. The advertised camelCase contract is silently violated; `response_model` is decorative
-`src/api/result_status_maps.py:67-72,85-90,103-108`, `src/api/routers/auth/auth_routes.py:44-48,96-100`, `src/api/schemas/base_schema.py`
+Net: the container earns its keep only if you have deep graphs that are painful
+to wire by hand. For a CRUD service, `Depends` providers (`get_user_use_case`,
+`get_session`) would be shorter, idiomatic, and fully framework-integrated.
 
-`APIModelBase` is sold (AGENT.md §2) as "serialises to camelCase JSON". But
-every mutating endpoint and both auth endpoints build the body with
-`JSONResponse(content=SomeModel(...).model_dump())`.
+---
 
-Verified behaviour (Pydantic v2):
-- `model_dump()` with no args emits **snake_case** (`{'access_token': ...}`,
-  `{'created_at': ...}`), because `by_alias` defaults to `False`.
-- Returning a `Response` object **bypasses** FastAPI's `response_model`
-  entirely — no serialization, no alias application, no validation.
+## 2. ConnectionFactory: session state lives in a module global
 
-Meanwhile the read endpoints (`GET /users`, `GET /users/{id}`) return the model
-*object*, so FastAPI serializes it with `by_alias=True` → **camelCase**
-(`createdAt`).
-
-Net result: the same API emits `createdAt` on GET and `created_at` /
-`access_token` on everything else. The `response_model=` declarations are
-purely cosmetic (OpenAPI only) and cannot catch response-shape drift. Either
-return models directly (let FastAPI serialize) or pass
-`model_dump(by_alias=True)` — and stop declaring `response_model` while
-returning raw `JSONResponse`, because it gives a false sense of a typed
-contract.
-
-### C3. Insecure defaults baked into settings
-`src/config/settings.py:40`, `:17`
+`src/infrastructure/database/connection_factory.py:18,47-94`
 
 ```python
-jwt_secret_key: str = "changeme-use-a-strong-random-secret-in-production"
-db_password: str = "postgres"
+_active_session: ContextVar[AsyncSession | None] = ContextVar("_active_session", default=None)
 ```
 
-A template is *designed to be copied*. A defaulted JWT signing key means any
-deployment that forgets `.env` boots with a **publicly known secret**, so
-anyone can forge admin tokens. Secrets must have **no default** and fail fast
-at startup (`jwt_secret_key: str` with no value → `ValidationError` if unset).
-Defaulting them trains every downstream user into an insecure habit.
+The "current session" is a **module-level `ContextVar`**, while
+`ConnectionFactory` is a **singleton**. So the object that is supposed to own
+session lifecycle doesn't actually hold the session — the session hangs off
+global module state that any code in the async context can observe. That is
+"action at a distance": a repository method's transactional behaviour is
+decided by invisible ambient state set by something else entirely.
 
-### C4. Refresh tokens never re-validate the user
-`src/application/use_cases/auth/auth_use_case.py:80-99`
+Concrete structural consequences:
 
-`refresh_token()` decodes the token and immediately mints a new access+refresh
-pair. It never checks that the user still exists, is still `ACTIVE`, or still
-has the role embedded in the token. Combined with no revocation list and
-rotating refresh tokens that don't invalidate their predecessor:
-- A deleted or deactivated account keeps minting valid access tokens until the
-  refresh token's natural expiry (default 7 days).
-- A demoted admin keeps an admin-roled token for the access-token lifetime, and
-  can refresh the stale role indefinitely.
+- **`get_session()` is overloaded to mean three different things** depending on
+  hidden state: (a) standalone autocommit write session, (b) standalone
+  read-only session, (c) silently enlist in an ambient transaction. One method,
+  one signature, three behaviours selected by a global flag and a boolean. That
+  is hard to read and harder to test.
+- **Concurrency hazard baked into the design.** `AsyncSession` is not safe for
+  concurrent use. Because the session is shared via `ContextVar`, the moment a
+  use case does `asyncio.gather(repo_a.x(), repo_b.y())` inside
+  `begin_transaction`, both calls grab the *same* session on the *same*
+  connection concurrently → corruption. The pattern invites the bug.
+- **Nesting silently breaks atomicity.** A nested `begin_transaction`
+  overwrites the ContextVar with a new session/connection, runs, commits
+  independently, then `reset()`s back to the outer token. The inner work
+  committed on a different connection than the outer — "atomic" in name only.
 
-At minimum, re-load the user on refresh and re-embed current role/status.
+The idiomatic FastAPI approach is a single request-scoped session yielded by a
+`Depends(get_session)` dependency (or an explicit Unit-of-Work object passed as
+a parameter). Both make the session visible and owned, instead of ambient.
 
 ---
 
-## HIGH (architecture & correctness)
+## 3. `begin_transaction` uses a non-idiomatic "rollback callable" + a redundant wrapper
 
-### H1. `begin_transaction` and "repositories swallow exceptions" are mutually incompatible
-`src/infrastructure/database/connection_factory.py:47-94`, `src/infrastructure/repositories/user/user_repository.py:50-64,149-180`
+`src/infrastructure/database/connection_factory.py:69-94`, `src/infrastructure/database/transaction_manager.py`, `src/application/services/transaction_manager_base.py`
 
-The repository contract (AGENT.md §3) says mutations **catch all DB exceptions
-and return result enums** — nothing propagates. Separately, `begin_transaction`
-shares one session across repos via a `ContextVar` and commits on clean exit.
+Two separate problems here.
 
-These two rules collide. Inside a `begin_transaction` block, if a repo's
-`flush()` raises `IntegrityError`, the repo swallows it and returns
-`UNIQUE_CONSTRAINT_ERROR`. The shared session is now in an **aborted**
-transaction state, but no exception propagated — so the outer
-`async with session.begin()` exits "cleanly" and issues a **COMMIT on an
-aborted transaction**, which raises (`PendingRollbackError` / driver error).
-The "all-or-nothing atomic" feature is therefore unsafe by construction: a
-failure in any step corrupts the commit instead of producing a clean rollback.
+**(a) The rollback-flag-via-yielded-coroutine is convoluted.**
+```python
+async def rollback() -> None:
+    nonlocal should_rollback
+    should_rollback = True
+yield rollback
+```
+The context manager yields an `async` callable whose only effect is to set a
+`bool`. It does nothing awaitable — making it a coroutine is misleading.
+Callers must remember to `await rb()` to abort. The idiomatic context-manager
+contract is "commit on clean exit, roll back on exception"; bolting on a manual
+abort flag re-invents control flow that `raise`/`except` already expresses.
 
-Compounding it: **nothing in the codebase ever calls `begin_transaction`.** The
-`TransactionManager` (`src/infrastructure/database/transaction_manager.py`) is a
-do-nothing delegate, untested, and unused. The template ships a complex,
-latent-broken feature that has never been exercised. Either make the
-swallow-vs-propagate model coherent (e.g. repos *don't* swallow inside a UoW)
-and add a real test, or delete the transaction machinery until it's needed.
+**(b) `TransactionManager` is pure indirection that exists only to satisfy a
+rule.** `ConnectionFactoryBase` already exposes `begin_transaction()`.
+`TransactionManagerBase` declares the *identical* signature, and
+`TransactionManager` implements it by… calling `ConnectionFactory.begin_transaction()`:
+```python
+def begin_transaction(self):
+    return self._connection_factory.begin_transaction()
+```
+No behaviour is added. The class exists solely because the layering rule says
+use cases may not see `ConnectionFactoryBase`. The contract docstring is
+copy-pasted across both ABCs (`connection_factory_base.py:34-58` vs
+`transaction_manager_base.py:11-41`). An abstraction whose only job is to
+forward one call to another abstraction with the same shape is a layer tax, not
+a design.
 
-### H2. Implicit session sharing through a module-global `ContextVar` is spooky-action-at-a-distance
-`src/infrastructure/database/connection_factory.py:18,51-60`
+(And note the whole transaction subsystem is never invoked anywhere in the
+template — it is untested scaffolding.)
 
-`get_session()` silently changes behaviour based on `_active_session`, a global
-set somewhere else entirely. A repository method's transactional semantics now
-depend on invisible ambient state rather than its inputs. This is hard to
-reason about, hard to test in isolation, and breaks under nesting: a nested
-`begin_transaction` overwrites the ContextVar, so the "inner" work commits on a
-*different* connection than the "outer" — silently non-atomic despite the
-abstraction promising atomicity. An explicit Unit-of-Work passed as a parameter
-is more verbose but honest; hidden globals are exactly what clean architecture
-is supposed to avoid.
+---
 
-### H3. Over-abstraction: pass-through layers and a 6-model user for plain CRUD
-`src/application/use_cases/user/user_use_case.py`, `user_dto.py`, `user_converter.py`, `src/domain/entities/user/user.py`
+## 4. ABCs used as interfaces where `Protocol` is the Pythonic tool
 
-The use cases contain **no business logic**. `delete_user` → `repository.delete`;
-`update_user_role` → `repository.update_role`; `get_all_users` → fetch + map.
-They are indirection, not behaviour. Meanwhile a single user is represented six
-ways — `UserModel`, `User` (entity), `CreateUserDTO`, `UserDTO`,
-`UserCreateRequest`, `UserResponse` — wired together by **two** converter
-classes (`UserEntityConverter`, `UserConverter`) doing field-for-field copies.
+`src/domain/repositories/user/user_repository_base.py`, every `*_base.py`
 
-This is the classic anemic-domain-model + converter-explosion anti-pattern.
-Clean Architecture's layering pays off when there is domain logic to protect;
-applied to trivial CRUD it produces "lasagna code" — many thin layers, high
-boilerplate-to-value ratio, every new field touched in ~6 files. The template
-should either (a) include a non-trivial use case that justifies the structure,
-or (b) be honest that this much ceremony is overkill for CRUD.
+Every port is an `abc.ABC` with all methods `@abstractmethod` and zero shared
+behaviour: repository, use case, connection factory, transaction manager,
+password hasher, token service, logger, user context. That is precisely the
+"interface" use case `typing.Protocol` was added for.
 
-### H4. Repositories swallow *every* exception with zero logging
-`src/infrastructure/repositories/user/user_repository.py:63-64,156-157,179-180`
+Using `ABC` here means:
+- Implementations must **nominally subclass** and therefore **import** the port
+  (`class UserRepository(UserRepositoryBase)`). With `Protocol` (structural
+  typing) the implementation needs no import of and no inheritance from the
+  port — looser coupling, which is the entire point of "dependency inversion."
+- You can't satisfy a port with a pre-existing/third-party class without writing
+  an adapter subclass.
+
+ABCs aren't *wrong*, but a "clean architecture" template that's all interfaces
+and no shared base behaviour is the canonical argument *for* `Protocol`. Shipping
+`ABC` everywhere reads as a C#/Java transliteration.
+
+---
+
+## 5. Naming: the interface is `...Base`, the implementation gets the clean name
+
+`UserRepositoryBase` (port) → `UserRepository` (impl); `ConnectionFactoryBase` →
+`ConnectionFactory`; etc.
+
+In idiomatic Python the *abstraction* usually owns the clean, central name
+(`UserRepository`, or a `UserRepository` Protocol) and the *implementation* is
+qualified by its mechanism (`SqlAlchemyUserRepository`, `PostgresUserRepository`,
+`BcryptPasswordHasher`). This template inverts that: the abstraction is tagged
+with a `Base` suffix (an inheritance-mechanics word, not a domain word) and the
+concrete SQLAlchemy class claims the unqualified name — which also means the
+name gives no hint that it's the Postgres/SQLAlchemy variant. When a second
+implementation appears, the naming scheme has nowhere to go.
+
+---
+
+## 6. Converters are static-method classes (Java utility-class idiom)
+
+`src/application/use_cases/user/user_converter.py`, `src/api/routers/user/user_converter.py`, `src/api/routers/auth/auth_converter.py`
 
 ```python
-except Exception:
-    return operation_results.CreateResult.FAILURE
+class UserConverter:
+    @staticmethod
+    def to_create_dto(...): ...
+    @staticmethod
+    def to_response(...): ...
 ```
 
-A blanket `except Exception` catches `AttributeError`, `TypeError`, mapping
-bugs, connection exhaustion — everything — and collapses them to an opaque
-`FAILURE` → HTTP 500 with no log line, no stack trace, no correlation id. The
-project has a structured logger but the repository never uses it. In production
-this is undebuggable: real bugs masquerade as generic failures and disappear.
-Catch the specific DB exceptions you map; let unexpected ones propagate to a
-global handler that logs them.
+These classes are never instantiated and hold only `@staticmethod`s. In Python
+a class that is purely a namespace for stateless functions is an anti-pattern —
+**the module is the namespace**. `user_converter.to_create_dto(...)` (plain
+module functions) is the idiomatic form; the wrapping class adds a level of
+indirection and a meaningless `self`-less type for no benefit.
+
+Structurally this also fragments mapping logic across **three** sites that
+aren't unified: schema↔DTO (`api/.../user_converter.py`), entity↔DTO
+(`application/.../user_converter.py`), and model↔entity done *inline and
+duplicated* inside the repository (`user_repository.py:80-88,124-132`). Two of
+the three conversions are formalised as classes; the third is copy-pasted. The
+boundaries multiply the mapping rather than containing it.
 
 ---
 
-## MEDIUM (smells & gaps)
+## 7. Package layout: deep, sparse, single-item packages + module-alias imports
 
-### M1. No pagination
-`src/infrastructure/repositories/user/user_repository.py:90-108`, `get_all` / `GET /users`
+`src/domain/entities/user/user.py`, `src/domain/repositories/user/user_repository_base.py`, …
 
-`get_all()` does `SELECT * FROM users` and materializes everything. In a
-template people copy verbatim, an unbounded list endpoint is a built-in
-performance/DoS footgun. Ship limit/offset (or keyset) pagination as the
-default pattern.
+"Organise by type, then by entity" (AGENT.md §1) produces a very deep tree where
+most directories hold exactly one file for one entity: `entities/user/user.py`,
+`repositories/user/user_repository_base.py`,
+`use_cases/user/user_use_case.py`, and so on. A single `User` entity spans
+~20 directories and a swarm of `__init__.py` files. For one entity that's a lot
+of near-empty packages to navigate; the structure scales in directory count
+faster than in actual code.
 
-### M2. Duplicated entity-mapping
-`src/infrastructure/repositories/user/user_repository.py:80-88,124-132`
-
-`get_by_id` and `get_by_username` contain identical `User(...)` construction
-blocks; `get_all` repeats it a third time. Extract a private
-`_to_entity(model) -> User`. Right now adding a column means editing three
-copies.
-
-### M3. Redundant database indexes (verified against the migration)
-`src/infrastructure/database/models/user_model.py:25-28`, `alembic/versions/4d9f6f49ad6f_*.py:36-37`
-
-- `email`: `index=True` **and** `UniqueConstraint("email", ...)`. In Postgres a
-  unique constraint already creates a unique index, so this produces **two**
-  indexes on `email` (`ix_users_email` + the unique index).
-- `id`: `index=True` **and** `primary_key=True`. The PK is already indexed, so
-  `ix_users_id` is a second redundant index.
-
-Both redundant indexes are real — they're in the generated migration. Drop the
-`index=True` flags; they only add write overhead.
-
-### M4. `passlib` is unmaintained and forces a bcrypt pin; no 72-byte guard
-`pyproject.toml:19-20`, `src/infrastructure/auth/password_hasher.py`
-
-`passlib` 1.7.4 is effectively abandoned and is incompatible with `bcrypt>=4`
-(the well-known `module 'bcrypt' has no attribute '__about__'` issue), which is
-why `bcrypt>=3.2.0,<4.0` is pinned — you're stuck on an old bcrypt to keep a
-dead library working. bcrypt also silently truncates passwords beyond 72 bytes,
-which isn't guarded. Prefer the `bcrypt` package directly, or
-`argon2-cffi`/`pwdlib`.
-
-### M5. Over-engineered concurrency handling
-`src/infrastructure/repositories/user/user_repository.py:55-62,149-155,172-178`, `src/domain/enums/operation_results.py`
-
-Every mutation inspects `exc.__cause__` for `DeadlockDetectedError` and maps to
-`CONCURRENCY_ERROR`. For a single-row `INSERT`/`UPDATE`/`DELETE`, deadlocks are
-essentially never produced, so `CreateResult.CONCURRENCY_ERROR` is dead weight
-copied into every method. `LoginResult.FAILURE` is similarly never produced by
-the auth use case. Don't model error states the code can't actually reach.
-
-### M6. No global error handling, CORS, security headers, or login rate-limiting
-`src/main.py`
-
-No `app.add_exception_handler`, no CORS middleware, no rate limit on
-`POST /auth/login` (open to credential brute-force). For a template positioned
-as production-shaped, these omissions are notable — at least the global
-exception handler is needed to make H4 survivable.
-
-### M7. Type model fights itself (`# type: ignore` smell)
-`src/application/use_cases/user/user_converter.py:21,26`, `src/application/use_cases/auth/auth_use_case.py:66-71`
-
-`User.id` / `User.created_at` are `… | None` (unpersisted state) but `UserDTO`
-requires non-optional, so the converter is littered with `# type: ignore`. The
-"persisted vs not-yet-persisted" states are conflated into one dataclass.
-Strict typing is configured (`disallow_untyped_defs = true`) yet routinely
-suppressed — that defeats the point. Model the two states distinctly (e.g. a
-`NewUser` input vs a persisted `User`) and the ignores disappear.
+It also forces the codebase's pervasive **module-aliasing import style**:
+```python
+from src.domain.entities.user import user as user_module
+... user_module.User
+from src.application.use_cases.user import user_dto as user_dto_module
+```
+Because the module is named `user` and the class `User` (and the path is deep),
+every file imports the *module* and aliases it, then dotted-accesses the class.
+This is unusual Python — the common form is `from ....user import User`. The
+alias-everything convention adds noise to every file and is a direct symptom of
+the `entity/entity.py` nesting. (`# type: ignore` markers in the converters are
+a secondary symptom of the same over-structuring.)
 
 ---
 
-## LOW (documentation, consistency, hygiene)
+## 8. Global singletons and a composition root that reaches into them
 
-### L1. Documentation contradicts the code
-- **Line length:** `pyproject.toml:50` sets `line-length = 80`; `CLAUDE.md:58`
-  says "Max line length: **140 characters**" (AGENT.md correctly says 80, so
-  CLAUDE.md is simply wrong).
-- **`create_all`:** `AGENT.md:349` claims "This template uses `create_all()`
-  for simplicity." There is **no `create_all` anywhere** in the codebase
-  (verified) — it uses Alembic. Stale, misleading guidance.
-- **`updated_at`:** `AGENT.md:166-167` documents `updated_at` with
-  `onupdate=func.now()` as a core DB pattern. No `updated_at` column exists in
-  the model or migration, and the entity has no such field. The docs describe a
-  column that isn't there.
-- **Login docstring:** `auth_routes.py:31` says tokens "embed the user's id,
-  username, and role." The token embeds `sub` and `role` only — no username
-  (`token_service.py:42-47`).
+`src/container.py:89`, `src/main.py:27-30,40-41`
 
-### L2. Seven overlapping agent-instruction files with a manual sync mandate
-`.cursorrules`, `.clinerules`, `.windsurfrules`, `AGENT.md`, `AGENTS.md`, `CLAUDE.md`, `.github/copilot-instructions.md`, `.antigravity/rules.md`
-
-`AGENT.md:353-365` instructs maintainers to hand-sync rules across all of these.
-L1 already shows the drift this guarantees. Keep one source of truth and have
-the rest be thin symlinks/includes, not parallel copies.
-
-### L3. `from_attributes=True` on `UserResponse` is dead config
-`src/api/routers/user/user_schema.py:42`
-
-`UserResponse` is always constructed via the explicit converter from a DTO,
-never with `model_validate(orm_obj)`, so `from_attributes=True` does nothing.
-Remove it or stop using the converter.
-
-### L4. `test_api.py` is misplaced and brittle
-`test_api.py` (repo root)
-
-It lives outside `tests/`, spawns a real uvicorn process, and requires a live
-Postgres plus the seeded admin. It duplicates the route coverage already in
-`tests/api/` and won't run in CI without infrastructure. It's an integration
-smoke script masquerading as a test — name and locate it as such, or fold it
-into a proper integration suite gated behind a DB fixture.
-
-### L5. Bootstrap depends on a hardcoded bcrypt hash in a migration; no signup path
-`alembic/versions/4d9f6f49ad6f_*.py:40-52`
-
-The only way to get the first usable account is a bcrypt hash embedded in the
-initial migration (and there is no public signup endpoint, by design). Rotating
-that bootstrap password means writing a new migration. Fine for a demo; call it
-out explicitly, and never let that default hash reach a real environment.
-
-### L6. The user default is defined in three places
-`src/domain/entities/user/user.py:17-18`, `src/application/use_cases/user/user_dto.py:24-25`, `src/infrastructure/database/models/user_model.py:33-37`
-
-`role`/`status` defaults are declared on the entity, on the create DTO, and as
-SQLAlchemy column defaults — and `create()` passes them explicitly anyway, so
-the column default never fires. Three sources of truth for one rule; they will
-drift.
+`injector = Injector([AppModule()])` is a module-level, import-time singleton.
+`main.py` then both attaches it to the app *and* reaches back into the global
+(`container.injector.get(ConnectionFactoryBase)`) inside `lifespan`. So shutdown
+is coupled to a module global rather than to app state. The cleaner shape is to
+build the injector in the lifespan / app factory and hang it on `app.state`,
+keeping a single ownership path. As written, anything that imports `container`
+triggers container construction as a side effect of import.
 
 ---
 
-## Summary
+## 9. Scope mixing is fragile across NoScope intermediaries
 
-The template is internally consistent and the layer boundaries are mechanically
-respected, but it has **two genuinely dangerous defaults** (no authorization,
-defaulted secrets), **a broken-and-unused transaction feature**, an
-**inconsistent serialization contract that its own docs promise**, and a
-**boilerplate-to-value ratio that's hard to justify for CRUD**. The supporting
-documentation also contradicts the code in several places. Address C1–C4 before
-anyone ships from this; treat H1–H4 as required cleanup before calling the
-architecture "clean."
+`src/container.py:58-86`, `src/infrastructure/logging/custom_logger.py`
+
+`CustomLogger` and `UserContext` are `request_scope`; use cases and repositories
+are unscoped (`injector` default `NoScope` = new instance per resolution);
+`ConnectionFactory`/hashers/token service are `singleton`. An unscoped
+`AuthUseCase` depends on a request-scoped `CustomLogger`, which depends on a
+request-scoped `UserContext`. This only resolves correctly *inside* a live
+request (the `InjectorMiddleware` window).
+
+The trap: resolve any of these outside that window — a `BackgroundTasks`
+callback (which runs *after* the middleware/response), a startup hook, a CLI
+script — and the request-scoped leaf raises `LookupError` or yields a stale
+instance. Threading request scope through unscoped objects means the safe
+resolution context is implicit and easy to violate. FastAPI's own request scope
+(plain `Depends`) is bounded by the endpoint and doesn't leak this way.
+
+---
+
+## 10. Fighting FastAPI's response model instead of using it
+
+`src/api/result_status_maps.py:67-72`, `src/api/routers/auth/auth_routes.py:44-48,96-100`
+
+Endpoints declare `response_model=...` but then return
+`JSONResponse(content=Model(...).model_dump())`. Returning a `Response` object
+**bypasses** `response_model` entirely — FastAPI does no serialization,
+filtering, or alias application. So `response_model` here is dead decoration
+(OpenAPI only), and the hand-built `model_dump()` (snake_case, no `by_alias`)
+silently diverges from the camelCase that `APIModelBase` was created to
+guarantee — while the read endpoints, which *do* return the model object, get
+FastAPI's camelCase serialization. Same API, two serialization paths, because
+the framework's serializer is bypassed on half the routes.
+
+This is a structural mismatch: the whole `APIModelBase` + `response_model`
+apparatus is set up and then routed around. Either return the model and let
+FastAPI serialize (set status via the route decorator / `response.status_code`),
+or don't declare `response_model` on routes that return raw `JSONResponse`.
+
+---
+
+## Bottom line
+
+None of these are bugs in the "it crashes" sense; they're the cost of mapping a
+container-centric, interface-everywhere, layer-per-concern architecture onto a
+stack (Python + FastAPI) that provides lighter native answers for most of it. In
+rough priority for a template that others will copy:
+
+1. **Drop the second DI container** (§1) or justify it with a graph that
+   actually needs it; lean on `Depends`.
+2. **Make session ownership explicit** (§2) — request-scoped `Depends(get_session)`
+   or an explicit UoW — instead of a module-global `ContextVar`, and rework the
+   `begin_transaction` rollback-callable (§3).
+3. **Prefer `Protocol` over `ABC`** for the ports (§4) and rename so the
+   abstraction owns the clean name (§5).
+4. **Convert the static-method converter classes to module functions** (§6) and
+   stop bypassing `response_model` (§10).
+5. The deep single-item packages + alias imports (§7) and global composition
+   root (§8) are lower-stakes but compound the daily friction.
