@@ -1,9 +1,12 @@
-"""Shared helpers mapping operation result enums to HTTP responses."""
+"""Maps from operation result enums to HTTP status codes and messages.
+
+Routes look these up, set ``response.status_code``, and return the operation
+response *model* — letting FastAPI serialise it (consistently camelCase via
+``APIModelBase``) instead of hand-building a ``JSONResponse``.
+"""
 
 from fastapi import status
-from fastapi.responses import JSONResponse
 
-from src.api.schemas import operation_schema
 from src.domain.enums import operation_results
 
 CREATE_STATUS_MAP: dict[operation_results.CreateResult, int] = {
@@ -49,60 +52,3 @@ DELETE_MESSAGE_MAP: dict[operation_results.DeleteResult, str] = {
     operation_results.DeleteResult.CONCURRENCY_ERROR: "Conflict: concurrent modification detected",  # noqa: E501
     operation_results.DeleteResult.FAILURE: "Operation failed",
 }
-
-
-def create_response(
-    result: operation_results.CreateResult, entity_id: int | None
-) -> JSONResponse:
-    """Build a JSONResponse for a create operation result.
-
-    Args:
-        result: The CreateResult enum value from the use case.
-        entity_id: The newly created entity id; None when the operation failed.
-
-    Returns:
-        A JSONResponse with a CreateOperationResponse body and the
-        corresponding HTTP status code.
-    """
-    return JSONResponse(
-        content=operation_schema.CreateOperationResponse(
-            result=result, message=CREATE_MESSAGE_MAP[result], id=entity_id
-        ).model_dump(),
-        status_code=CREATE_STATUS_MAP[result],
-    )
-
-
-def update_response(result: operation_results.UpdateResult) -> JSONResponse:
-    """Build a JSONResponse for an update operation result.
-
-    Args:
-        result: The UpdateResult enum value from the use case.
-
-    Returns:
-        A JSONResponse with an UpdateOperationResponse body and the
-        corresponding HTTP status code.
-    """
-    return JSONResponse(
-        content=operation_schema.UpdateOperationResponse(
-            result=result, message=UPDATE_MESSAGE_MAP[result]
-        ).model_dump(),
-        status_code=UPDATE_STATUS_MAP[result],
-    )
-
-
-def delete_response(result: operation_results.DeleteResult) -> JSONResponse:
-    """Build a JSONResponse for a delete operation result.
-
-    Args:
-        result: The DeleteResult enum value from the use case.
-
-    Returns:
-        A JSONResponse with a DeleteOperationResponse body and the
-        corresponding HTTP status code.
-    """
-    return JSONResponse(
-        content=operation_schema.DeleteOperationResponse(
-            result=result, message=DELETE_MESSAGE_MAP[result]
-        ).model_dump(),
-        status_code=DELETE_STATUS_MAP[result],
-    )

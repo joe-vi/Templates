@@ -1,4 +1,4 @@
-"""Unit tests for UserConverter (API layer)."""
+"""Unit tests for the user API schema/DTO converter functions."""
 
 from datetime import datetime
 
@@ -28,7 +28,7 @@ class TestToCreateDto:
             status=user_enum.UserStatus.INACTIVE,
         )
 
-        create_dto = user_converter.UserConverter.to_create_dto(request)
+        create_dto = user_converter.to_create_dto(request)
 
         assert isinstance(create_dto, user_dto_module.CreateUserDTO)
         assert create_dto.email == "alice@example.com"
@@ -42,7 +42,7 @@ class TestToCreateDto:
             email="bob@example.com", username="bob", password="TestPass123"
         )
 
-        create_dto = user_converter.UserConverter.to_create_dto(request)
+        create_dto = user_converter.to_create_dto(request)
 
         assert create_dto.role == user_enum.UserRole.USER
 
@@ -51,7 +51,7 @@ class TestToCreateDto:
             email="bob@example.com", username="bob", password="TestPass123"
         )
 
-        create_dto = user_converter.UserConverter.to_create_dto(request)
+        create_dto = user_converter.to_create_dto(request)
 
         assert create_dto.status == user_enum.UserStatus.ACTIVE
 
@@ -62,7 +62,7 @@ class TestToUpdateRoleDto:
             role=user_enum.UserRole.ADMIN
         )
 
-        update_dto = user_converter.UserConverter.to_update_role_dto(
+        update_dto = user_converter.to_update_role_dto(
             user_id=5, request=request
         )
 
@@ -75,7 +75,7 @@ class TestToUpdateRoleDto:
             role=user_enum.UserRole.USER
         )
 
-        update_dto = user_converter.UserConverter.to_update_role_dto(
+        update_dto = user_converter.to_update_role_dto(
             user_id=1, request=request
         )
 
@@ -94,7 +94,7 @@ class TestToResponse:
             created_at=created_at,
         )
 
-        response = user_converter.UserConverter.to_response(user_dto)
+        response = user_converter.to_response(user_dto)
 
         assert isinstance(response, user_schema.UserResponse)
         assert response.id == 1
@@ -107,7 +107,7 @@ class TestToResponse:
     def test_preserves_enum_values(self):
         user_dto = _make_user_dto()
 
-        response = user_converter.UserConverter.to_response(user_dto)
+        response = user_converter.to_response(user_dto)
 
         assert response.role == user_enum.UserRole.USER
         assert response.status == user_enum.UserStatus.ACTIVE
@@ -135,7 +135,7 @@ class TestToResponseList:
             ),
         ]
 
-        responses = user_converter.UserConverter.to_response_list(user_dtos)
+        responses = user_converter.to_response_list(user_dtos)
 
         assert len(responses) == 2
         assert responses[0].id == 1
@@ -144,7 +144,7 @@ class TestToResponseList:
         assert responses[1].email == "bob@example.com"
 
     def test_returns_empty_list_when_given_no_dtos(self):
-        responses = user_converter.UserConverter.to_response_list([])
+        responses = user_converter.to_response_list([])
 
         assert responses == []
 
@@ -162,6 +162,6 @@ class TestToResponseList:
             for id in [3, 1, 2]
         ]
 
-        responses = user_converter.UserConverter.to_response_list(user_dtos)
+        responses = user_converter.to_response_list(user_dtos)
 
         assert [r.id for r in responses] == [3, 1, 2]

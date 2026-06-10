@@ -6,11 +6,12 @@ Dependencies flow **inward only**: API → Infrastructure → Application → Do
 
 | Layer | Location | Contains | Depends On |
 |-------|----------|----------|------------|
-| Domain | `src/domain/` | Entities, Repository ABCs, QueryRows, result enums | Nothing |
-| Application | `src/application/` | Use case ABCs/impls, DTOs, converters, service ABCs | Domain only |
-| Infrastructure | `src/infrastructure/` | DB models, repository impls, auth impls | Domain + Application |
-| API | `src/api/` | Routes, request/response schemas, API converters | Application (Base classes) |
-| DI Container | `src/container.py` | `injector.Module` with `Binder.bind()` wiring | All layers |
+| Domain | `src/domain/` | Entities, repository ports (Protocols), enums | Nothing |
+| Application | `src/application/` | Use cases, DTOs, converters, service ports (Protocols) | Domain only |
+| Infrastructure | `src/infrastructure/` | DB models, repository adapters, auth/logging adapters, engine/session | Domain + Application |
+| API | `src/api/` | Routes, request/response schemas, API converters, **dependency providers** | Application + Infrastructure (only in `dependencies/`) |
+
+There is **no IoC container**. The composition root is FastAPI's own dependency system: provider functions in `src/api/dependencies/providers.py` build the graph, and FastAPI resolves and caches it per request.
 
 ### File Organisation
 
@@ -20,48 +21,28 @@ Files are organised by **type** first, then **entity name** within each layer.
 src/
 ├── domain/
 │   ├── entities/<entity>/<entity>.py
-│   ├── repositories/<entity>/
-│   │   ├── <entity>_repository_base.py
-│   │   └── <entity>_query_row.py          # when needed
-│   └── enums/
-│       ├── <entity>_enum.py
-│       └── operation_results.py
-│
+│   ├── repositories/<entity>/<entity>_repository.py   # Protocol port (clean name)
+│   └── enums/{<entity>_enum.py, operation_results.py}
 ├── application/
 │   ├── use_cases/<entity>/
 │   │   ├── <entity>_dto.py
-│   │   ├── <entity>_converter.py
-│   │   ├── <entity>_use_case_base.py
-│   │   └── <entity>_use_case.py
-│   └── services/
-│       ├── transaction_manager_base.py
-│       ├── user_context_base.py
-│       └── <service>_base.py
-│
+│   │   ├── <entity>_converter.py       # module functions, not a class
+│   │   └── <entity>_use_case.py        # concrete class, no separate ABC
+│   └── services/<service>.py           # Protocol ports (password_hasher, token_service, logger)
 ├── infrastructure/
-│   ├── repositories/<entity>/<entity>_repository.py
-│   ├── auth/
-│   │   ├── password_hasher.py
-│   │   ├── token_service.py
-│   │   └── user_context.py
-│   └── database/
-│       ├── base.py
-│       ├── models/
-│       │   ├── __init__.py                # re-exports all models
-│       │   └── <entity>_model.py
-│       ├── connection_factory_base.py
-│       ├── connection_factory.py
-│       └── transaction_manager.py
-│
+│   ├── repositories/<entity>/sqlalchemy_<entity>_repository.py   # adapter (mechanism-qualified name)
+│   ├── auth/{bcrypt_password_hasher.py, jwt_token_service.py}
+│   ├── logging/{json_logger.py, log_context.py}
+│   └── database/{base.py, session.py, models/<entity>_model.py}
 └── api/
-    ├── dependencies/jwt_dependency.py     # cross-cutting guards only
-    ├── routers/<entity>/
-    │   ├── <entity>_schema.py
-    │   ├── <entity>_converter.py
-    │   └── <entity>_routes.py
-    ├── schemas/base_schema.py             # APIModelBase — camelCase base for all schemas
-    ├── schemas/operation_schema.py        # shared response schemas
-    └── result_status_maps.py             # shared response helpers
+    ├── dependencies/
+    │   ├── database.py        # get_session (request-scoped AsyncSession)
+    │   ├── providers.py       # composition root: ports -> adapters, use-case builders
+    │   └── jwt_dependency.py  # get_current_user guard
+    ├── routers/<entity>/{<entity>_schema.py, <entity>_converter.py, <entity>_routes.py}
+    ├── schemas/{base_schema.py, operation_schema.py}
+    └── result_status_maps.py  # result enum -> HTTP status + message maps
+└── main.py                    # app, lifespan (engine), request-id middleware, routers
 ```
 
 **Rule**: For every new entity, create `src/{layer}/{type}/{entity}/` folders across all layers. Never scatter entity files into flat shared directories.
@@ -71,107 +52,88 @@ src/
 ## 2. Naming Conventions
 
 ### Classes
-- ABCs/interfaces **must** end with `Base` — `UserRepositoryBase`, `UserUseCaseBase`
-- Entities: singular nouns — `User`, `Order`
-- Status Enums: singular noun describing the concept with `StrEnum` (e.g., `GreetingStatus`, `OrderState`)
-- Operation result enums: generic and shared — `CreateResult`, `UpdateResult`, `DeleteResult`. Never entity-specific (e.g., `CreateUserResult` is forbidden)
-- DTOs: frozen dataclasses with `DTO` suffix. Use `list[UserDTO]` directly as return types; never create a wrapper collection DTO (e.g., `UserListDTO` is forbidden)
-- API schemas: `Request` suffix for inputs, `Response` suffix for outputs; all must inherit from `APIModelBase` (`src/api/schemas/base_schema.py`)
-- `APIModelBase`: Pydantic base for all API schemas — serialises to camelCase JSON, accepts both camelCase and snake_case on input, lives in `src/api/schemas/base_schema.py`
-- Use Cases: `UserUseCaseBase` (ABC) → `UserUseCase` (implementation)
+- **Ports are `typing.Protocol`s with the clean, central name** — `UserRepository`, `PasswordHasher`, `TokenService`, `Logger`. No `Base` suffix.
+- **Adapters (implementations) are qualified by their mechanism** — `SqlAlchemyUserRepository`, `BcryptPasswordHasher`, `JwtTokenService`, `JsonLogger`.
+- Use cases are plain concrete classes (`UserUseCase`, `AuthUseCase`) — no separate interface; there is only ever one implementation and routes/tests depend on the concrete class.
+- Entities: singular nouns — `User`, `Order`.
+- Status enums: singular `StrEnum` (`UserRole`, `UserStatus`).
+- Operation result enums: generic and shared — `CreateResult`, `UpdateResult`, `DeleteResult`. Never entity-specific. `LoginResult` is the one permitted auth-specific enum.
+- DTOs: frozen dataclasses with `DTO` suffix. Return `list[UserDTO]` directly; never a wrapper collection DTO.
+- API schemas: `Request` suffix for inputs, `Response` suffix for outputs; all inherit from `APIModelBase` (`src/api/schemas/base_schema.py`).
+- `APIModelBase`: serialises to camelCase JSON, accepts both camelCase and snake_case on input.
 
 ### Variables & Properties
-- Collections: plural names; sets: `_set` suffix; dicts: `_map` suffix
-- Internal class members: `_` prefix; never access from outside the class
-- Booleans must read like questions: `is_active`, `has_items`, `can_update` — never bare nouns (`success` → `is_successful`)
-- No abbreviations: `repository` not `repo`, `connection` not `conn`
-- No single-letter or vague names: `greeting` not `g`, `create_greeting_dto` not `dto`, `query_result` not `result`
-- No numbered variants: use contextual names (`existing_greeting`, `created_greeting`) — not `greeting1`/`greeting2`
+- Collections: plural; sets: `_set` suffix; dicts: `_map` suffix.
+- Internal class members: `_` prefix; never access from outside the class.
+- Booleans read like questions: `is_active`, `has_items`. No abbreviations (`repository` not `repo`).
 
 ---
 
 ## 3. Core Patterns
 
-### Repository Pattern
-- **One CRUD operation per method** — never combine read+write in a single repository method. If a use case needs to read then write, it calls two separate methods. Orchestration belongs in the use case.
-- **Mutation methods catch all DB exceptions internally** and return the appropriate result enum. Nothing propagates to use cases. Exception mapping:
+### Ports & Adapters (dependency inversion via Protocol)
+- A **port** is a `typing.Protocol` defining the methods a collaborator must provide. It lives where it is *consumed*: repository ports in `src/domain/`, service ports in `src/application/services/`.
+- An **adapter** is a plain class that structurally satisfies the port. It does **not** import or subclass the port — structural typing keeps the adapter decoupled from the abstraction.
+- Use cases depend on ports (constructor parameters typed as the Protocol). Providers supply the concrete adapter.
+
+### Dependency Injection (FastAPI `Depends`)
+- The composition root is `src/api/dependencies/providers.py`. Each provider is a plain function; collaborators are declared with `Annotated[Port, Depends(provider)]`.
+- Stateless singletons (`PasswordHasher`, `TokenService`, `Logger`) use `@lru_cache` on their provider. Per-request objects (repositories, use cases) are built fresh by their provider each request; FastAPI caches each dependency once per request.
+- Routes depend on the **concrete use case** via `Annotated[UserUseCase, Depends(get_user_use_case)]`.
+- Tests override any provider with `app.dependency_overrides[provider] = ...` — no second container, no `@inject`, no middleware ordering.
+
+### Database session & transactions
+- The engine and `async_sessionmaker` are created once in `main.lifespan` and stored on `app.state.session_factory`.
+- `api.dependencies.database.get_session` yields a **request-scoped `AsyncSession`**. Because FastAPI caches it per request, every adapter in one request shares the same session — a natural unit of work. There is **no module-global session state**.
+- Repository **adapters receive the `AsyncSession`** by constructor injection. Never pass sessions to use cases; never keep session state in a `ContextVar`.
+- **Mutation methods own their commit** and map DB errors to result enums (so the route can map the result to a status before responding). Read methods just query.
   - `IntegrityError` → `UNIQUE_CONSTRAINT_ERROR`
-  - `DBAPIError` where `isinstance(exc.__cause__, asyncpg.exceptions.DeadlockDetectedError)` → `CONCURRENCY_ERROR`; otherwise → `FAILURE`
-  - `Exception` → `FAILURE`
-- **ABC methods have Google-style docstrings** (Args + Returns). Overriding implementations do NOT repeat docstrings.
-- Repositories inject `ConnectionFactoryBase`; each method opens its own session with `async with self._connection_factory.get_session()`.
-- Never pass sessions to repository constructors.
+  - `DBAPIError` whose `__cause__` is `asyncpg…DeadlockDetectedError` → `CONCURRENCY_ERROR`; otherwise `FAILURE`
+  - any other `Exception` → `FAILURE` (after `rollback()`)
+- For an operation spanning multiple repositories that must be atomic, manage a single transaction in the use case over the shared session (repositories would not self-commit in that flow). The template ships the non-atomic default; it does not include a transaction-manager abstraction.
 
-### Dependency Injection (fastapi-injector)
-- Every injectable class `__init__` **must** have `@inject` from `injector`. Omitting it causes `TypeError` at startup because the injector calls `__init__()` with no arguments.
-- In `main.py`: call `app.add_middleware(InjectorMiddleware, injector=injector)` **before** `attach_injector(app, injector)`. Missing `InjectorMiddleware` causes `LookupError` for any request-scoped service. `attach_injector` must be called before including routers.
-- Routes inject use cases/services with `Injected(BaseClass)` — never `Depends()` for this purpose.
-- `Depends()` is only permitted in `src/api/dependencies/` for cross-cutting guards, and in `dependencies=[...]` on an `APIRouter`.
-- `singleton` scope only for `ConnectionFactory` and external service clients (HTTP clients, connection pools). Never singleton for repositories or use cases.
-- The injector resolves the full dependency chain automatically from constructor signatures.
+### Converters
+- Converters are **module-level functions**, not classes of static methods. `user_converter.to_dto(...)`, `to_entity(...)`, etc.
 
-### Authentication Guards
-- Guard functions live exclusively in `src/api/dependencies/` — never inline in route files.
-- The guard decodes the JWT, calls `user_context.populate()` once, and returns `TokenClaimsDTO`.
-- Protect an entire router by declaring `dependencies=[Depends(get_current_user)]` on the `APIRouter` — never scatter individual `Depends(get_current_user)` in route function signatures.
+### Authentication & current user
+- `get_current_user` (in `src/api/dependencies/jwt_dependency.py`) decodes the Bearer JWT, raises 401 on failure, records the user id in the logging context, and returns a `TokenClaimsDTO`.
+- Protect a whole router with `dependencies=[Depends(get_current_user)]` on the `APIRouter`. Components needing the caller's identity depend on `get_current_user`.
+- Request correlation for logs (`request_id`, `user_id`) is carried in context variables in `src/infrastructure/logging/log_context.py` — set by the request-id middleware and the guard. Context variables are appropriate here because they carry cross-cutting observability metadata, not control-flow or transactional state.
 
-### Request-Scoped User Context
-- `UserContextBase` is bound with `request_scope` (never `singleton`); one fresh instance per HTTP request.
-- `populate()` raises `RuntimeError` on a second call — prevents accidental identity overwrites.
-- Inject into use cases that need the caller's identity. Read scalar values (`user_context.user_id`) and pass those to repositories — never pass the context object to repos.
-- Only valid on routes protected by `get_current_user`. Accessing properties on unprotected routes raises `RuntimeError`.
-- Implementation lives in `src/infrastructure/auth/`.
+### Routes & responses
+- Routes return the **response model object**; FastAPI serialises it (camelCase, via `response_model`). **Never** return a hand-built `JSONResponse(model.model_dump())` — that bypasses `response_model` and the alias generator.
+- For operations whose status varies by result enum, inject `response: Response`, set `response.status_code = result_status_maps.<OP>_STATUS_MAP[result]`, and return the response model. Use `HTTPException` for read-not-found and auth failures.
 
 ---
 
 ## 4. Enums
 
-- Use `StrEnum` (Python 3.11+); values are lowercase strings matching DB storage (`ACTIVE = "active"`). Compatible with Pydantic and SQLAlchemy without extra configuration.
-- All enums live in `src/domain/enums/` and can be imported by any layer.
-- In SQLAlchemy models, define the `SQLAlchemyEnum` type object at module level (not inline) and reuse it across the model.
-- Enums flow unchanged through all layers — entity, DTO, and API schema all use the same enum type directly; no conversion needed.
-
-### Operation Result Enums
-- Three generic shared enums in `src/domain/enums/operation_results.py`: `CreateResult`, `UpdateResult`, `DeleteResult`.
-- Never create entity-specific variants (e.g., `CreateGreetingResult` is wrong).
-- `LoginResult` is the one permitted operation-specific enum (auth only), also in `operation_results.py`. It covers outcomes unique to auth (`INVALID_CREDENTIALS`, `USER_INACTIVE`).
-- `CreateResult` values: `SUCCESS`, `FAILURE`, `CONCURRENCY_ERROR`, `UNIQUE_CONSTRAINT_ERROR`.
-- `UpdateResult` values: above + `NOT_FOUND`.
-- `DeleteResult` values: `SUCCESS`, `FAILURE`, `CONCURRENCY_ERROR`, `NOT_FOUND`.
-- Create use cases return `tuple[CreateResult, int | None]` — id is `None` on failure. Update/delete return just the result enum.
-- Use cases contain no exception handling for mutations — they forward repository results as-is.
+- Use `StrEnum` (Python 3.11+); values are lowercase strings matching DB storage. All enums live in `src/domain/enums/`.
+- In SQLAlchemy models, define the `SQLAlchemyEnum` type object at module level and reuse it.
+- Operation result enums: `CreateResult` (`SUCCESS`, `FAILURE`, `CONCURRENCY_ERROR`, `UNIQUE_CONSTRAINT_ERROR`), `UpdateResult` (+`NOT_FOUND`), `DeleteResult` (`SUCCESS`, `FAILURE`, `CONCURRENCY_ERROR`, `NOT_FOUND`). Create use cases return `tuple[CreateResult, int | None]`.
 
 ### API Response Conventions
-- Shared schemas in `src/api/schemas/operation_schema.py`: `CreateOperationResponse`, `UpdateOperationResponse`, `DeleteOperationResponse`.
-- Shared helpers in `src/api/result_status_maps.py`: `create_response()`, `update_response()`, `delete_response()`. Routes call these to build the response and set the correct HTTP status code.
-
 | Result | HTTP Code |
 |--------|-----------|
 | SUCCESS (create) | 201 Created |
 | SUCCESS (update/delete) | 200 OK |
 | NOT_FOUND | 404 Not Found |
-| UNIQUE_CONSTRAINT_ERROR | 409 Conflict |
-| CONCURRENCY_ERROR | 409 Conflict |
+| UNIQUE_CONSTRAINT_ERROR / CONCURRENCY_ERROR | 409 Conflict |
 | FAILURE | 500 Internal Server Error |
 
-For read endpoints returning `None` from the use case: raise `HTTPException(status_code=404, detail="Resource not found")`.
+Status/message maps live in `src/api/result_status_maps.py`.
 
 ---
 
 ## 5. Database
 
 ### DB-Generated Values
-Never set these in Python code — the database generates them:
-- **`id`**: `autoincrement=True` on the model. Entity holds `id: int | None = None` before insert; populated after `session.refresh()`.
-- **`created_at`**: `server_default=func.now()` on the model. Never set in Python code (no `datetime.now()`, no `__post_init__`, no default in the entity). Entity field is `datetime | None = None`. Do not pass to the model constructor.
-- **`updated_at`**: `onupdate=func.now()` on the model. SQLAlchemy automatically includes it in every UPDATE. Never set manually. Stays `None` until first update.
-- **Always call `session.refresh()`** after every insert/update to populate DB-generated values back onto the model.
+Never set these in Python code:
+- **`id`**: `autoincrement=True`. Entity holds `id: int | None = None` before insert; populated after `session.refresh()`.
+- **`created_at`**: `server_default=func.now()`. Entity field is `datetime | None = None`. Call `session.refresh()` after insert to populate it.
 
 ### Database Constraints
-- Every constraint **must** have an explicit `name` parameter so Alembic can reference and drop it by name across environments.
-- Applies to: `UniqueConstraint`, `ForeignKeyConstraint`, `CheckConstraint`, `Index`, and any other SQLAlchemy constraint.
-- Declare all constraints in `__table_args__`, not as column-level shorthand (except primary key).
-- For `Index`, the name is the **first positional argument** (not a `name=` kwarg): `Index("ix_orders_status", "status")`.
+- Every constraint **must** have an explicit `name` so Alembic can manage it. Declare constraints in `__table_args__`.
 
 | Constraint | Naming pattern | Example |
 |---|---|---|
@@ -182,232 +144,74 @@ Never set these in Python code — the database generates them:
 
 ---
 
-## 6. Multi-Repository Operations
+## 6. External Services
 
-### Non-Atomic (independent operations)
-Inject each repository directly via constructor injection. Each method opens its own session. Use when failure in one operation does not need to roll back others.
-
-### Atomic (`begin_transaction`)
-Inject `TransactionManagerBase` (application layer) alongside repositories. Wrap the block with `async with self._transaction_manager.begin_transaction()`. `ConnectionFactory` maintains a `ContextVar[AsyncSession | None]` called `_active_session`; the active session is shared transparently across all repository calls within that block — repositories require zero changes.
-
-`TransactionManagerBase` lives in the application layer; use cases inject it. `ConnectionFactoryBase` lives in the infrastructure layer; repositories inject it. `TransactionManager` (infrastructure) implements `TransactionManagerBase` by injecting `ConnectionFactoryBase` and delegating `begin_transaction()` to it. The two abstractions are completely independent — no inheritance relationship.
-
-Session resolution inside `get_session()`:
-```
-_active_session set?
-  → yes: yield it (begin_transaction owns commit/rollback)
-  → no:  open new session, commit/rollback on exit
-```
-
-| Scenario | Pattern |
-|---|---|
-| Single or multiple repos, independent ops | Inject repos only |
-| Multiple repos (or single repo, multiple methods) that must all succeed or all fail | `TransactionManagerBase` + `begin_transaction()` |
-
-Do not use `begin_transaction` when operations are independent.
+- Port (`Protocol`) lives in `src/application/services/<service>.py`. Use cases depend only on the port.
+- Adapter lives in `src/infrastructure/<service>/`, mechanism-qualified name.
+- Wire it in `src/api/dependencies/providers.py`. Stateless singletons use `@lru_cache`; resources needing teardown are created in `main.lifespan` and disposed there (see the database engine).
+- To switch providers: write a new adapter and change the `return` in its provider. The use case is untouched.
 
 ---
 
-## 7. External Services
+## 7. Adding a New Entity
 
-- Interface (`<Service>Base`) lives in `src/application/services/` — use cases depend only on this abstraction. Keeps use cases framework-agnostic and the provider swappable with a single line change in `container.py`.
-- Implementation lives in `src/infrastructure/<service>/`.
-- Bound in `container.py`; typically `singleton` for shared client connections.
-- Any singleton holding a long-lived resource (HTTP client, connection pool, socket) **must** have a `close()` method on its base class; call it in the `lifespan` shutdown block in `main.py`. Follow the `ConnectionFactoryBase.close()` pattern for every new singleton that manages external resources.
-- Add required config to `src/config/settings.py` (loaded from `.env`). Never hardcode configuration values.
-- To switch providers: create the new implementation in `src/infrastructure/<service>/` and update `to=NewImpl` in `container.py`. The use case is untouched.
+1. **Domain**: enums in `src/domain/enums/<entity>_enum.py`; entity dataclass in `src/domain/entities/<entity>/`; repository **Protocol** in `src/domain/repositories/<entity>/<entity>_repository.py`.
+2. **Infrastructure**: ORM model in `src/infrastructure/database/models/<entity>_model.py` (re-export from `models/__init__.py`); adapter `sqlalchemy_<entity>_repository.py` taking an `AsyncSession`.
+3. **Application**: frozen DTOs, converter **functions**, concrete use case in `src/application/use_cases/<entity>/`.
+4. **API**: Pydantic schemas (inherit `APIModelBase`), converter functions, routes returning models; add providers in `src/api/dependencies/providers.py`; include the router in `main.py`.
 
 ---
 
-## 8. Query Row Pattern
+## 8. Testing
 
-Use when a repository query returns more data than a single domain entity holds — JOINs, aggregations, or projections with computed/nested values.
-
-- **Core idea**: Repo returns a `QueryRow` dataclass (flat projection), application converter maps it to a DTO, use case returns the DTO. Keeps the domain entity clean while surfacing richer data.
-- `QueryRow`: frozen dataclass, flat scalar fields (no nested objects; unfold joined data into scalar fields), read-only, never mutated or passed back to a repository.
-- Name: `{Entity}{Qualifier}QueryRow` — qualifier describes what the query adds (e.g., `GreetingWithAuthorQueryRow`, `OrderWithStatsQueryRow`).
-- Lives in `src/domain/repositories/{entity}/`, co-located with the repository base that declares it as a return type. Not an entity (no lifecycle, no identity) — exists solely to carry the result of a specific query.
-- One `QueryRow` per query shape; if two queries return different projections, create two classes.
-- Create a **dedicated DTO** in the application layer for the richer result; do not reuse a simpler entity DTO if the shape differs.
-- Data flow: Repo returns `QueryRow` → application converter maps to DTO → use case returns DTO → API layer never receives a `QueryRow` directly.
-
----
-
-## 9. Documentation
-
-- **Module docstring**: every `.py` file must start with a one-line module-level docstring (Google style). Example: `"""User domain entity."""`
-- **Class-level docstring**: always required (one-line purpose statement).
-- **`__init__` docstring**: always required; document all parameters in an `Args` section.
-- **Public abstract methods on ABCs**: Google-style docstrings with Args, Returns, Raises, Yields as applicable.
-- **Implementation overrides**: no docstring — the ABC already documents the contract.
-- **Private (`_`) methods**: no docstring needed.
-- Methods not used outside the class must be prefixed with `_`.
-
----
-
-## 10. Code Style
-
-- Max line length: **80 characters**.
-- Use `ruff` for linting and formatting (configured in `pyproject.toml`). After every code change: `uv run ruff check src/ tests/ --fix && uv run ruff format src/ tests/`.
-- For dict-literal entries where the key + value genuinely cannot fit on 80 chars (e.g., long enum member names), add `# noqa: E501` to that specific line. Do not use it to hide laziness — only when the identifier names themselves are the cause.
-- Always use `uv run`; never access `.venv` directly.
-- Modern type annotations: `list[X]` not `List[X]`, `X | None` not `Optional[X]`.
-- All DB operations are async; use `async def` and `await`.
-- API prefix: `/api/v1`.
-- **Add `#` comments only for genuinely complex logic** — non-trivial algorithms, subtle ordering constraints, or counter-intuitive branches. Do not comment code that is self-explanatory through clear naming alone.
-
----
-
-## 11. Adding a New Entity
-
-Follow this layer order. Create `src/{layer}/{type}/{entity}/` folders at each step.
-
-1. **Domain**: Define enums in `src/domain/enums/<entity>_enum.py`; entity dataclass in `src/domain/entities/<entity>/`; repository ABC in `src/domain/repositories/<entity>/`.
-2. **Infrastructure**: Create DB model in `src/infrastructure/database/models/<entity>_model.py` and re-export from `models/__init__.py`; create repository implementation in `src/infrastructure/repositories/<entity>/`.
-3. **Application**: Define frozen DTO dataclasses, entity converter with static methods, use case ABC and implementation in `src/application/use_cases/<entity>/`.
-4. **API**: Define Pydantic request/response schemas, API converter, and routes using `Injected(UseCaseBase)` in `src/api/routers/<entity>/`.
-5. **Wire up**: Add `binder.bind(BaseClass, to=Implementation)` pairs in `AppModule.configure()` in `container.py`; include the router in `main.py`. The injector automatically resolves the full dependency chain — no manual wiring beyond `binder.bind()`.
-
----
-
-## 12. Testing
-
-### Structure
-Tests live in `tests/` and mirror the `src/` tree exactly. Per entity: `tests/application/use_cases/<entity>/` and `tests/api/routers/<entity>/` — one test file per source file being tested.
-
-```bash
-pytest                    # run all tests
-pytest tests/application/ # application-layer only
-pytest tests/api/         # API-layer only
-pytest -v                 # verbose
-```
-
-### What to Test
-
-| Layer | File | Test? | Reason |
-|-------|------|-------|--------|
-| Application | `<entity>_use_case.py` | Yes | Core business logic, mock the repository |
-| Application | `<entity>_converter.py` | Yes | Entity ↔ DTO mapping correctness |
-| API | `<entity>_converter.py` | Yes | Schema ↔ DTO mapping correctness |
-| API | `<entity>_routes.py` | Yes | HTTP contract — status codes, request validation |
-| Infrastructure | `<entity>_repository.py` | No | Requires a live DB; covered by integration tests |
+Tests live in `tests/` and mirror `src/`.
 
 ### Use Case Tests
-- Mock with `AsyncMock(spec=RepositoryBase)`.
-- Annotate the fixture return type as `-> RepositoryBase` (not `-> AsyncMock`) — surfaces the repository's method names in the IDE. Mock-specific attributes like `.return_value` still work at runtime.
-- `asyncio_mode = "auto"` is configured in `pyproject.toml`; no `@pytest.mark.asyncio` decorator needed.
-- Group related assertions in inner test classes per method under test (e.g., `class TestCreateUser`, `class TestGetUser`).
+- Mock collaborators with `AsyncMock(spec=UserRepository)` / `MagicMock(spec=PasswordHasher)` — `spec` against the Protocol surfaces the real method names.
+- `asyncio_mode = "auto"` is configured; no `@pytest.mark.asyncio` needed.
 
 ### Route Tests
-- Create a minimal `FastAPI()` app with only the router under test. **Never import `src/main.py` or `src/container.py`**.
-- Use a `TestModule` that binds `AsyncMock(spec=UseCaseBase)` via `InstanceProvider`.
+- Create a minimal `FastAPI()`, include only the router under test. **Never import `src/main.py`.**
+- Override the use-case provider and the auth guard with `app.dependency_overrides`:
+  ```python
+  app.dependency_overrides[get_user_use_case] = lambda: AsyncMock(spec=UserUseCase)
+  app.dependency_overrides[get_current_user] = lambda: TokenClaimsDTO(user_id=1, role=UserRole.ADMIN)
+  ```
 - Use `httpx.AsyncClient` with `ASGITransport`.
-- `spec` on `AsyncMock` ensures mock methods match the real interface; async methods are automatically mocked correctly.
-- Mock at the boundary nearest to the test: route tests mock the use case; use case tests mock the repository.
 
-### Testing JWT-Protected Routes
-- In `TestModule`, bind a mock `TokenServiceBase` (always returns valid `TokenClaimsDTO`) and a mock `UserContextBase` (pre-populated properties, no-op `populate()`).
-- Send requests with a dummy `Authorization: Bearer <token>` header — the stub token service accepts any value.
-
----
-
-## 13. Anti-Patterns
-
-- Don't pass sessions to repository constructors — inject `ConnectionFactoryBase` instead
-- Don't inject `ConnectionFactoryBase` into use cases — use `TransactionManagerBase` for atomic ops; only repositories inject `ConnectionFactoryBase`
-- Don't use `Depends()` for use case or service injection in routes — use `Injected(BaseClass)`; `Depends()` is only for cross-cutting guards in `src/api/dependencies/` and `dependencies=[...]` on `APIRouter`
-- Don't bypass use cases — routes never call repositories directly
-- Don't let Domain import from Infrastructure or API layers
-- Don't omit `Base` suffix on ABC classes
-- Don't use concrete types in route signatures — always `Injected(UseCaseBase)`
-- Don't create instances manually — let the injector resolve the chain
-- Don't forget to add `binder.bind()` for new base/implementation pairs in `AppModule`
-- Don't omit `@inject` on `__init__` — causes `TypeError: __init__() missing required positional arguments` at startup
-- Don't omit `InjectorMiddleware` before `attach_injector()` — causes `LookupError` for request-scoped services
-- Don't forget `attach_injector(app, injector)` before including routers
-- Don't use `singleton` scope for repositories or use cases
-- Don't forget to close singleton resources — implement `close()` on base class and call in `lifespan` shutdown
-- Don't scatter entity files into flat shared directories
-- Don't add `#` comments to self-explanatory code — reserve comments for genuinely complex logic only
-- Don't create entity-specific result enums — use `CreateResult`, `UpdateResult`, `DeleteResult`
-- Don't create a wrapper DTO for collections — return `list[EntityDTO]` directly
-- Don't define guard functions inside route files — they belong in `src/api/dependencies/`
-- Don't scatter `Depends(get_current_user)` in route function signatures — declare once on `APIRouter`
-- Don't pass `UserContextBase` to repositories — extract scalar values and pass those
+| Layer | File | Test? |
+|-------|------|-------|
+| Application | `<entity>_use_case.py` | Yes — mock the repository port |
+| Application | `<entity>_converter.py` | Yes |
+| API | `<entity>_converter.py` | Yes |
+| API | `<entity>_routes.py` | Yes — override providers |
+| Infrastructure | repository adapter | No — needs a live DB (integration only) |
 
 ---
 
-## 14. Debugging Tips
+## 9. Documentation & Code Style
 
-1. **SQL logging**: set `IS_SQL_ECHO_ENABLED=true` in `.env`
-2. **Session issues**: ensure `async with self._connection_factory.get_session()` in every repo method
-3. **DI middleware order**: `InjectorMiddleware` must be added before `attach_injector()` in `main.py`
-4. **Missing `@inject`**: produces `TypeError: __init__() missing required positional arguments` at startup
-5. **Missing binding**: verify all base/implementation pairs in `AppModule.configure()`
-6. **Layer violations**: domain must never import from infrastructure or API
-
-**DB migrations**: This template uses `create_all()` for simplicity. In production, use Alembic for migrations.
+- Module, class, and `__init__`/public-method docstrings required (Google style). Port (Protocol) methods carry the documented contract; adapters don't repeat it.
+- Max line length: **80 characters**. Run `uv run ruff check src/ tests/ --fix && uv run ruff format src/ tests/` after every change.
+- Always use `uv run`. Modern type annotations (`list[X]`, `X | None`). All DB I/O is async. API prefix: `/api/v1`.
 
 ---
 
-## 15. Keeping Quick-Reference Files in Sync
+## 10. Anti-Patterns
 
-**When you update rules in this file**, sync the relevant changes into the quick-reference sections of these files so their inline summaries stay accurate:
-
-- [.clinerules](.clinerules)
-- [.cursorrules](.cursorrules)
-- [.windsurfrules](.windsurfrules)
-- [AGENTS.md](AGENTS.md)
-- [CLAUDE.md](CLAUDE.md)
-- [.antigravity/rules.md](.antigravity/rules.md)
-- [.github/copilot-instructions.md](.github/copilot-instructions.md)
-
-These files each contain a condensed quick-reference summary that mirrors the critical rules here. Agent.md remains the single source of truth — the other files are entry-point summaries only.
+- Don't introduce an IoC container or `@inject` — wire dependencies with FastAPI `Depends` providers.
+- Don't keep session (or other control-flow) state in a module-global `ContextVar`. Inject the request-scoped `AsyncSession`.
+- Don't pass the `AsyncSession` to use cases, or sessions to repository constructors as constants — adapters get the request session via the provider.
+- Don't return `JSONResponse(model.model_dump())` from routes — return the model and let FastAPI serialise it; set `response.status_code` for dynamic codes.
+- Don't make ports ABCs — use `typing.Protocol`; don't suffix ports with `Base`.
+- Don't create classes of only `@staticmethod`s — use module functions.
+- Don't bypass use cases — routes never call repositories directly.
+- Don't let Domain import from Infrastructure or API.
+- Don't create entity-specific result enums or wrapper collection DTOs.
+- Don't scatter entity files into flat shared directories.
 
 ---
 
-## 16. File References
+## 11. Keeping Quick-Reference Files in Sync
 
-**Shared infrastructure (present in every project)**
-- [Operation result enums](src/domain/enums/operation_results.py)
-- [API schema base model](src/api/schemas/base_schema.py)
-- [Operation response schemas](src/api/schemas/operation_schema.py)
-- [Response helpers and status maps](src/api/result_status_maps.py)
-- [DB Base](src/infrastructure/database/base.py)
-- [DB models](src/infrastructure/database/models/)
-- [Connection factory Base](src/infrastructure/database/connection_factory_base.py)
-- [Connection factory](src/infrastructure/database/connection_factory.py)
-- [Transaction manager Base](src/application/services/transaction_manager_base.py)
-- [Transaction manager](src/infrastructure/database/transaction_manager.py)
-- [DI Container](src/container.py)
-- [Settings](src/config/settings.py)
-- [Main app](src/main.py)
-
-**Authentication infrastructure (present in every project using JWT)**
-- [JWT guard dependency](src/api/dependencies/jwt_dependency.py)
-- [User context Base](src/application/services/user_context_base.py)
-- [User context implementation](src/infrastructure/auth/user_context.py)
-- [Password hasher Base](src/application/services/password_hasher_base.py)
-- [Password hasher implementation](src/infrastructure/auth/password_hasher.py)
-- [Token service Base](src/application/services/token_service_base.py)
-- [Token service implementation](src/infrastructure/auth/token_service.py)
-- [Auth use case Base](src/application/use_cases/auth/auth_use_case_base.py)
-- [Auth use case implementation](src/application/use_cases/auth/auth_use_case.py)
-- [Auth DTOs](src/application/use_cases/auth/auth_dto.py)
-- [Auth routes](src/api/routers/auth/auth_routes.py)
-
-**Per-entity file locations** (substitute `<entity>` with your entity name)
-
-| Purpose | Path |
-|---------|------|
-| Entity dataclass | `src/domain/entities/<entity>/<entity>.py` |
-| Entity enums | `src/domain/enums/<entity>_enum.py` |
-| Repository Base | `src/domain/repositories/<entity>/<entity>_repository_base.py` |
-| Repository implementation | `src/infrastructure/repositories/<entity>/<entity>_repository.py` |
-| DTOs | `src/application/use_cases/<entity>/<entity>_dto.py` |
-| Entity converter | `src/application/use_cases/<entity>/<entity>_converter.py` |
-| Use case Base | `src/application/use_cases/<entity>/<entity>_use_case_base.py` |
-| Use case implementation | `src/application/use_cases/<entity>/<entity>_use_case.py` |
-| API schemas | `src/api/routers/<entity>/<entity>_schema.py` |
-| API converter | `src/api/routers/<entity>/<entity>_converter.py` |
-| Routes | `src/api/routers/<entity>/<entity>_routes.py` |
+`AGENT.md` is the single source of truth. The quick-reference files below mirror its critical rules and must be updated together: [.clinerules](.clinerules), [.cursorrules](.cursorrules), [.windsurfrules](.windsurfrules), [AGENTS.md](AGENTS.md), [CLAUDE.md](CLAUDE.md), [.antigravity/rules.md](.antigravity/rules.md), [.github/copilot-instructions.md](.github/copilot-instructions.md).

@@ -6,15 +6,14 @@ from unittest.mock import AsyncMock
 
 import pytest
 from fastapi import FastAPI
-from fastapi_injector import attach_injector
 from httpx import ASGITransport, AsyncClient
-from injector import Binder, Injector, InstanceProvider, Module
 
 from src.api.dependencies import jwt_dependency
+from src.api.dependencies.providers import get_user_use_case
 from src.api.routers.user import user_routes
 from src.application.use_cases.auth import auth_dto
 from src.application.use_cases.user import user_dto as user_dto_module
-from src.application.use_cases.user import user_use_case_base
+from src.application.use_cases.user.user_use_case import UserUseCase
 from src.domain.enums import operation_results, user_enum
 
 
@@ -35,23 +34,14 @@ def _make_user_dto(user_id: int = 1) -> user_dto_module.UserDTO:
 
 @pytest.fixture
 def mock_use_case() -> AsyncMock:
-    return AsyncMock(spec=user_use_case_base.UserUseCaseBase)
+    return AsyncMock(spec=UserUseCase)
 
 
 @pytest.fixture
 def test_app(mock_use_case: AsyncMock) -> FastAPI:
     app = FastAPI()
-
-    class TestModule(Module):
-        def configure(self, binder: Binder) -> None:
-            binder.bind(
-                user_use_case_base.UserUseCaseBase,
-                to=InstanceProvider(mock_use_case),
-            )
-
-    test_injector = Injector([TestModule()])
-    attach_injector(app, test_injector)
     app.include_router(user_routes.router)
+    app.dependency_overrides[get_user_use_case] = lambda: mock_use_case
     app.dependency_overrides[jwt_dependency.get_current_user] = (
         _mock_current_user
     )

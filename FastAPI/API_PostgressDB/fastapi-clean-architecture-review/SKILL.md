@@ -1,10 +1,10 @@
 ---
 name: fastapi-clean-architecture-review
-description: Audit an existing FastAPI project for Clean Architecture compliance — verifies unidirectional layer dependencies, correct abstraction boundaries, repository pattern correctness, DI wiring, naming conventions, DB constraint rules, and documentation standards. Reports every violation with file and line number.
+description: Audit an existing FastAPI project for Clean Architecture compliance — verifies unidirectional layer dependencies, ports-as-Protocol boundaries, repository pattern correctness, FastAPI-native DI wiring, naming conventions, DB constraint rules, and documentation standards. Reports every violation with file and line number.
 argument-hint: "[--fix]"
 disable-model-invocation: true
 metadata:
-  version: "1.1.0"
+  version: "2.0.0"
 ---
 
 # FastAPI Clean Architecture — Review Skill
@@ -25,8 +25,8 @@ Read all files in `src/domain/`.
 
 Check:
 - **Import direction**: no imports from `src/application/`, `src/infrastructure/`, or `src/api/`
-- **Naming**: entity classes are singular nouns; repository interfaces end with `Base`; enums use `StrEnum` with lowercase values and live in `src/domain/enums/`; no entity-specific result enums (e.g. `CreateUserResult` is a violation)
-- **Documentation**: every `.py` file has a module docstring; every class has a class docstring; every `__init__` has a docstring; public ABC methods have Google-style docstrings
+- **Naming**: entity classes are singular nouns; repository ports are `typing.Protocol`s with clean names (`UserRepository`, not `UserRepositoryBase`); enums use `StrEnum` with lowercase values and live in `src/domain/enums/`; no entity-specific result enums (e.g. `CreateUserResult` is a violation)
+- **Documentation**: every `.py` file has a module docstring; every class has a class docstring; port methods carry Google-style docstrings
 
 ### Phase 2 — Application layer (`src/application/`)
 
@@ -34,9 +34,9 @@ Read all files in `src/application/`.
 
 Check:
 - **Import direction**: no imports from `src/infrastructure/` or `src/api/`
-- **Naming**: use case ABCs end with `Base`; DTOs are frozen dataclasses with `DTO` suffix; no wrapper collection DTOs (e.g. `UserListDTO` is a violation); return types use `list[UserDTO]` directly
-- **DI**: injectable `__init__` methods have `@inject`
-- **Repository pattern**: use cases contain no exception handling for mutations — they forward repository results as-is; no direct session or DB access
+- **Naming**: service ports are `Protocol`s with clean names (`PasswordHasher`, `TokenService`, `Logger`); use cases are plain concrete classes (no `Base` ABC); DTOs are frozen dataclasses with `DTO` suffix; no wrapper collection DTOs; return types use `list[UserDTO]` directly
+- **Converters**: module-level functions, not classes of static methods
+- **Repository pattern**: use cases contain no exception handling for mutations — they forward repository results as-is; no direct session or DB access; no `@inject`
 - **Documentation**: same rules as Phase 1
 
 ### Phase 3 — Infrastructure layer (`src/infrastructure/`)
@@ -45,20 +45,17 @@ Read all files in `src/infrastructure/`.
 
 Check:
 - **Import direction**: no imports from `src/api/`
+- **Naming**: adapters are mechanism-qualified (`SqlAlchemyUserRepository`, `BcryptPasswordHasher`, `JwtTokenService`, `JsonLogger`)
 - **Repository pattern**:
   - Each method performs exactly one CRUD operation — flag any method that combines read + write
-  - Mutation methods catch all exceptions internally and return result enums; nothing propagates
-  - Exception mapping: `IntegrityError` → `UNIQUE_CONSTRAINT_ERROR`, `DeadlockDetectedError` → `CONCURRENCY_ERROR`, all others → `FAILURE`
-  - No session parameters in repository constructors or method signatures — repos inject `ConnectionFactoryBase`
-  - Every method uses `async with self._connection_factory.get_session()`
+  - Mutation methods catch DB exceptions internally and return result enums; nothing propagates
+  - Exception mapping: `IntegrityError` → `UNIQUE_CONSTRAINT_ERROR`, deadlock (`DBAPIError.__cause__`) → `CONCURRENCY_ERROR`, all others → `FAILURE`
+  - Adapters receive the `AsyncSession` by constructor injection — flag any module-global session state or `ContextVar`-based session sharing
 - **DB constraints** (SQLAlchemy only):
-  - Every `UniqueConstraint`, `ForeignKeyConstraint`, `CheckConstraint`, `Index` has an explicit `name`
-  - Naming pattern: `uq_`, `fk_`, `ck_`, `ix_`
-  - Constraints declared in `__table_args__`, not as column-level shorthand (except primary key)
-  - `id`, `created_at`, `updated_at` never set in Python code
-  - `session.refresh()` called after every insert and update
+  - Every `UniqueConstraint`, `ForeignKeyConstraint`, `CheckConstraint`, `Index` has an explicit `name` (`uq_`, `fk_`, `ck_`, `ix_`)
+  - Constraints declared in `__table_args__` (except primary key)
+  - `id`, `created_at` never set in Python code; `session.refresh()` called after insert
   - `SQLAlchemyEnum` type defined at module level, not inline
-- **DI**: `@inject` on every injectable `__init__`; `singleton` scope only on `ConnectionFactory` and external service clients — never on repos
 - **Documentation**: same rules as Phase 1
 
 ### Phase 4 — API layer (`src/api/`)
@@ -66,24 +63,23 @@ Check:
 Read all files in `src/api/`.
 
 Check:
-- **Import direction**: no imports from `src/infrastructure/`
-- **Naming**: schemas end with `Request` or `Response` and inherit `APIModelBase`; no bare schema classes
+- **Naming**: schemas end with `Request` or `Response` and inherit `APIModelBase`; converters are module functions
 - **DI**:
-  - Routes use `Injected(BaseClass)` for use cases and services — flag any `Depends()` used for this purpose
-  - `Depends()` only permitted in `src/api/dependencies/` and in `dependencies=[...]` on `APIRouter`
-  - Guard functions defined inside route files (should be in `src/api/dependencies/`)
-  - `Depends(get_current_user)` in individual route signatures instead of on `APIRouter`
+  - Composition root is `src/api/dependencies/providers.py` — provider functions wire ports to adapters; flag any `injector`/`fastapi-injector`/`@inject`/`Injected(...)` usage
+  - Routes depend on the concrete use case via `Annotated[UseCase, Depends(get_..._use_case)]`
+  - Guard functions live in `src/api/dependencies/`, not inside route files; `Depends(get_current_user)` declared on the `APIRouter`, not scattered in signatures
+- **Responses**: routes return the response model (FastAPI serialises it to camelCase). Flag any `JSONResponse(model.model_dump())` — it bypasses `response_model` and the alias generator. Dynamic status set via `response.status_code`.
 - **Code style**: lines over 80 chars (excluding `# noqa: E501`); `List[X]`, `Optional[X]`, `Dict[K,V]` instead of modern annotations; sync DB calls
 - **Documentation**: same rules as Phase 1
 
-### Phase 5 — Container and entry point (`src/container.py`, `src/main.py`)
+### Phase 5 — Entry point (`src/main.py`)
 
-Read both files.
+Read `src/main.py` and `src/api/dependencies/`.
 
 Check:
-- **`main.py` middleware order**: `InjectorMiddleware` added before `attach_injector()`; `attach_injector()` called before `include_router()`
-- **`container.py`**: every Base/implementation pair that exists in the codebase has a `binder.bind()` entry; no manual instantiation of injectable classes
-- **Singleton scope**: only `ConnectionFactory` and external service clients — flag repos or use cases bound as singleton
+- **`lifespan`**: long-lived resources (DB engine, Mongo/Redis clients) created in `lifespan`, stored on `app.state`, and disposed on shutdown
+- **No IoC container**: flag any `Injector`, `InjectorMiddleware`, `attach_injector`, or `container.py`
+- **Providers**: every port has a provider that returns a concrete adapter; stateless singletons use `@lru_cache`; the session is request-scoped via `get_session`
 
 ### Phase 6 — Global checks
 
@@ -102,7 +98,7 @@ Check:
 
 | # | File | Line | Rule | Fix |
 |---|------|------|------|-----|
-| 1 | src/domain/entities/user.py | 3 | Domain imports from Infrastructure | Remove import of `UserRepository` |
+| 1 | src/domain/entities/user.py | 3 | Domain imports from Infrastructure | Remove import of `SqlAlchemyUserRepository` |
 ...
 
 ### Layer results
@@ -110,7 +106,7 @@ Check:
 - Application:    ✅ / ⚠️ <N violations>
 - Infrastructure: ✅ / ⚠️ <N violations>
 - API:            ✅ / ⚠️ <N violations>
-- Container/Main: ✅ / ⚠️ <N violations>
+- Main/Providers: ✅ / ⚠️ <N violations>
 - Global:         ✅ / ⚠️ <N violations>
 ```
 

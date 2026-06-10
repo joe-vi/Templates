@@ -1,5 +1,7 @@
 """Application configuration loaded from environment variables."""
 
+from functools import lru_cache
+
 from pydantic import computed_field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from sqlalchemy.engine import URL
@@ -41,3 +43,13 @@ class Settings(BaseSettings):
     jwt_algorithm: str = "HS256"
     access_token_expire_minutes: int = 30
     refresh_token_expire_days: int = 7
+
+
+@lru_cache
+def get_settings() -> Settings:
+    """Return the process-wide Settings singleton.
+
+    Cached so the environment is parsed once. Used as a FastAPI dependency and
+    by the application startup wiring.
+    """
+    return Settings()

@@ -11,50 +11,60 @@ API  →  Infrastructure  →  Application  →  Domain
 | Domain | `src/domain/` | Nothing |
 | Application | `src/application/` | Domain only |
 | Infrastructure | `src/infrastructure/` | Domain + Application |
-| API | `src/api/` | Application ABCs only |
-| `container.py` | root | All layers |
+| API | `src/api/` | Application + Infrastructure (adapters wired only in `dependencies/`) |
+
+There is **no IoC container**. The composition root is FastAPI's own dependency
+system: provider functions in `src/api/dependencies/providers.py`.
 
 ## Naming
 
-- ABCs: `Base` suffix — `UserRepositoryBase`, `UserUseCaseBase`
-- DTOs: frozen dataclasses, `DTO` suffix; return `list[UserDTO]` directly, never a wrapper DTO
-- API schemas: `Request` / `Response` suffix; all inherit `APIModelBase`
-- Enums: `StrEnum`, lowercase values, all in `src/domain/enums/`
-- Result enums: always generic — `CreateResult`, `UpdateResult`, `DeleteResult`; never entity-specific
-- Booleans: `is_active`, `has_items`, `can_update` — never bare nouns
-- No abbreviations: `repository` not `repo`, `connection` not `conn`
+- Ports are `typing.Protocol`s with the clean name — `UserRepository`, `PasswordHasher`, `TokenService`, `Logger`. No `Base` suffix.
+- Adapters are mechanism-qualified — `SqlAlchemyUserRepository`, `BcryptPasswordHasher`, `JwtTokenService`, `JsonLogger`.
+- Use cases are plain concrete classes (`UserUseCase`, `AuthUseCase`) — no separate interface.
+- DTOs: frozen dataclasses, `DTO` suffix; return `list[UserDTO]` directly, never a wrapper DTO.
+- API schemas: `Request` / `Response` suffix; all inherit `APIModelBase`.
+- Converters: module-level functions, never classes of static methods.
+- Enums: `StrEnum`, lowercase values, all in `src/domain/enums/`.
+- Result enums: always generic — `CreateResult`, `UpdateResult`, `DeleteResult`; never entity-specific.
+- Booleans: `is_active`, `has_items`, `can_update` — never bare nouns. No abbreviations.
 
-## Dependency injection
+## Ports & adapters (dependency inversion via Protocol)
 
-- Every injectable `__init__` must have `@inject` from `injector`
-- Routes use `Injected(BaseClass)` for use cases/services — never `Depends()` for these
-- `Depends()` only in `src/api/dependencies/` and `dependencies=[...]` on `APIRouter`
-- `main.py` order: `InjectorMiddleware` → `attach_injector()` → `include_router()`
-- `singleton` scope only for `ConnectionFactory` and external service clients
+- A port is a `typing.Protocol` defining required methods; it lives where it is consumed (repository ports in Domain, service ports in `src/application/services/`).
+- An adapter is a plain class that structurally satisfies the port — it does not import or subclass it.
+- Use cases take ports as constructor parameters; providers supply the concrete adapter.
 
-## Repository pattern
+## Dependency injection (FastAPI `Depends`)
 
-- One CRUD operation per method — never combine read + write
-- Mutation methods catch all DB exceptions internally and return result enums — nothing propagates
-- Exception mapping: `IntegrityError` → `UNIQUE_CONSTRAINT_ERROR`; `DeadlockDetectedError` → `CONCURRENCY_ERROR`; others → `FAILURE`
-- Inject `ConnectionFactoryBase`; open session with `async with self._connection_factory.get_session()`
-- Never accept a session parameter
+- Wire everything in `src/api/dependencies/providers.py`. Declare collaborators with `Annotated[Port, Depends(provider)]`.
+- Stateless singletons (`PasswordHasher`, `TokenService`, `Logger`) use `@lru_cache` on the provider; repositories and use cases are built per request.
+- Routes depend on the concrete use case: `Annotated[UserUseCase, Depends(get_user_use_case)]`.
+- No `injector`, no `@inject`, no `InjectorMiddleware`. Tests override providers with `app.dependency_overrides`.
+
+## Session & repository pattern
+
+- The engine + `async_sessionmaker` are created in `main.lifespan` and stored on `app.state.session_factory`.
+- `api.dependencies.database.get_session` yields a request-scoped `AsyncSession`, cached per request (shared unit of work). No module-global session state, no `ContextVar` for sessions.
+- Repository adapters receive the `AsyncSession` by constructor. One CRUD operation per method.
+- Mutation methods own their commit and map DB exceptions to result enums: `IntegrityError` → `UNIQUE_CONSTRAINT_ERROR`; `DBAPIError` whose `__cause__` is a deadlock → `CONCURRENCY_ERROR`; others → `FAILURE` (after `rollback()`). Read methods just query.
+
+## Routes & responses
+
+- Routes return the response **model**; FastAPI serialises it (camelCase via `response_model`). Never return `JSONResponse(model.model_dump())`.
+- For result-dependent status, inject `response: Response`, set `response.status_code = result_status_maps.<OP>_STATUS_MAP[result]`, and return the model. Use `HTTPException` for read-not-found and auth failures.
 
 ## Database (SQLAlchemy)
 
-- Never set `id`, `created_at`, or `updated_at` in Python
-- Call `session.refresh()` after every insert/update
-- Every constraint has an explicit `name`: `uq_`, `fk_`, `ck_`, `ix_`
-- Declare constraints in `__table_args__`
+- Never set `id` or `created_at` in Python; call `session.refresh()` after insert.
+- Every constraint has an explicit `name`: `uq_`, `fk_`, `ck_`, `ix_`. Declare constraints in `__table_args__`.
 
 ## Adding a new entity — layer order
 
-1. Domain: enum → entity → repository ABC
-2. Infrastructure: DB model → repository implementation
-3. Application: DTO → converter → use case ABC → use case implementation
-4. API: schema → API converter → routes
-5. Wire: `binder.bind()` pairs in `container.py`; include router in `main.py`
+1. Domain: enum → entity → repository **Protocol** port.
+2. Infrastructure: DB model → `sqlalchemy_<entity>_repository.py` adapter (takes `AsyncSession`).
+3. Application: DTO → converter functions → concrete use case.
+4. API: schema → converter functions → routes (return models); add providers in `dependencies/providers.py`; include router in `main.py`.
 
 ## After every change
 
-Remind the user: `uv run ruff check src/ --fix && uv run ruff format src/`
+Remind the user: `uv run ruff check src/ tests/ --fix && uv run ruff format src/ tests/`

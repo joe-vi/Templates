@@ -1,29 +1,26 @@
-"""PyJWT implementation of the token service."""
+"""PyJWT adapter implementing the token service port."""
 
 from datetime import UTC, datetime, timedelta
 
 import jwt
-from injector import inject
 from jwt.exceptions import InvalidTokenError
 
-from src.application.services import token_service_base
 from src.application.use_cases.auth import auth_dto
-from src.config import settings as settings_module
+from src.config.settings import Settings
 from src.domain.enums import user_enum
 
 _ACCESS_TOKEN_TYPE = "access"
 _REFRESH_TOKEN_TYPE = "refresh"
 
 
-class TokenService(token_service_base.TokenServiceBase):
-    """PyJWT implementation of TokenServiceBase using HS256.
+class JwtTokenService:
+    """Token service backed by PyJWT using a symmetric algorithm.
 
-    To switch providers or algorithms, create a new class that implements
-    TokenServiceBase and update the binding in container.py.
+    To switch providers or algorithms, implement the ``TokenService`` port
+    with a new adapter and update the dependency provider.
     """
 
-    @inject
-    def __init__(self, settings: settings_module.Settings) -> None:
+    def __init__(self, settings: Settings) -> None:
         """Initialize the token service with JWT configuration.
 
         Args:

@@ -8,61 +8,69 @@ patterns, and anti-patterns. **These rules override any general defaults.**
 
 ## Architecture (Clean Architecture — 4 Layers)
 
-Dependency direction: Domain → Application → Infrastructure → API (inward only).
+Dependency direction: API → Infrastructure → Application → Domain (inward only). Domain never
+imports from any other layer. There is **no IoC container** — the composition root is FastAPI's
+own dependency system (`src/api/dependencies/providers.py`).
 
-- Domain (`src/domain/`): Entities, repository ABCs, enums. No external deps.
-- Application (`src/application/`): Use cases, DTOs, converters, service ABCs. Imports Domain only.
-- Infrastructure (`src/infrastructure/`): DB models, repository impls, auth impls.
-- API (`src/api/`): Routes, schemas, API converters. Imports Application ABCs only.
-- DI Container (`src/container.py`): `Binder.bind()` wiring.
+- Domain (`src/domain/`): Entities, repository ports (Protocols), enums. No external deps.
+- Application (`src/application/`): Use cases, DTOs, converter functions, service ports (Protocols). Imports Domain only.
+- Infrastructure (`src/infrastructure/`): DB models, repository/auth/logging adapters, engine + session.
+- API (`src/api/`): Routes, schemas, converters, dependency providers. Wires adapters to ports.
 
 ## Critical Rules (Quick Reference)
 
 ### Naming
-- All ABC/interface classes MUST end with `Base` (e.g., `UserRepositoryBase`, `UserUseCaseBase`)
-- Operation result enums are generic and shared: `CreateResult`, `UpdateResult`, `DeleteResult`
-- DTOs: frozen dataclasses with `DTO` suffix; use `list[UserDTO]` directly, never a wrapper DTO class
-- API schemas: `Request` suffix for inputs, `Response` suffix for outputs; all inherit from `APIModelBase` (`src/api/schemas/base_schema.py`)
-- `APIModelBase`: camelCase JSON serialisation, accepts snake_case or camelCase on input
-- Booleans read like questions: `is_active`, `has_items` — never bare nouns
-- No abbreviations: `repository` not `repo`, `connection` not `conn`
+- Ports are `typing.Protocol`s with clean names (`UserRepository`, `PasswordHasher`, `TokenService`, `Logger`) — NO `Base` suffix.
+- Adapters are mechanism-qualified (`SqlAlchemyUserRepository`, `BcryptPasswordHasher`, `JwtTokenService`, `JsonLogger`).
+- Use cases are plain concrete classes (`UserUseCase`, `AuthUseCase`) — no separate interface.
+- Operation result enums are generic and shared: `CreateResult`, `UpdateResult`, `DeleteResult`.
+- DTOs: frozen dataclasses with `DTO` suffix; return `list[UserDTO]` directly.
+- API schemas: `Request`/`Response` suffix; all inherit `APIModelBase` (camelCase JSON).
+- Converters are module functions, NOT classes of static methods.
+- Booleans read like questions (`is_active`); no abbreviations (`repository` not `repo`).
 
-### Dependency Injection (`fastapi-injector`)
-- Every injectable `__init__` MUST have `@inject` from `injector` — omitting causes `TypeError`
-- `InjectorMiddleware` MUST be added BEFORE `attach_injector()` in `main.py`
-- Routes use `Injected(BaseClass)` for use case/service DI — never `Depends()` for these
-- `Depends()` is only permitted in `src/api/dependencies/` for cross-cutting guards
+### Dependency Injection (FastAPI `Depends`)
+- Wire dependencies as provider functions in `src/api/dependencies/providers.py`; declare collaborators with `Annotated[Port, Depends(provider)]`.
+- Stateless singletons use `@lru_cache`; repositories/use cases are built per request.
+- Routes depend on the concrete use case via `Annotated[UserUseCase, Depends(get_user_use_case)]`.
+- NO `injector`, NO `@inject`, NO `InjectorMiddleware`. Override providers in tests with `app.dependency_overrides`.
 
-### Repository Pattern
-- One CRUD operation per repository method — no combined read+write in one method
-- Mutation methods catch all DB exceptions internally and return result enums
-- Repositories inject `ConnectionFactoryBase`; use cases inject `TransactionManagerBase` for atomic ops
+### Session & Repository Pattern
+- Engine + `async_sessionmaker` created in `main.lifespan`, stored on `app.state`.
+- `get_session` yields a request-scoped `AsyncSession`, cached per request (shared unit of work). NO module-global session state, NO `ContextVar` for sessions.
+- Repository adapters receive the `AsyncSession` via constructor. One CRUD operation per method.
+- Mutation methods own their commit and map DB exceptions to result enums (`IntegrityError`→`UNIQUE_CONSTRAINT_ERROR`; deadlock→`CONCURRENCY_ERROR`; else `FAILURE`). Reads just query.
+
+### Routes & Responses
+- Routes return the response MODEL; FastAPI serialises it (camelCase). Never return `JSONResponse(model.model_dump())`.
+- For result-dependent status, inject `response: Response`, set `response.status_code = result_status_maps.<OP>_STATUS_MAP[result]`, return the model. Use `HTTPException` for not-found / auth failures.
+
+### Auth
+- `get_current_user` decodes the Bearer JWT, raises 401, records the user id in the logging context, returns `TokenClaimsDTO`. Protect routers with `dependencies=[Depends(get_current_user)]`.
+- Log correlation (`request_id`, `user_id`) lives in context vars in `src/infrastructure/logging/log_context.py`.
 
 ### Database
-- All constraints MUST have an explicit `name` parameter (`uq_`, `fk_`, `ck_`, `ix_` prefix)
-- `id`, `created_at`, `updated_at` are DB-generated — never set them in Python code
-- Call `session.refresh()` after every insert/update
-- All DB operations are async; use `async with self._connection_factory.get_session()`
+- All constraints MUST have an explicit `name` (`uq_`, `fk_`, `ck_`, `ix_` prefix).
+- `id`, `created_at` are DB-generated — never set in Python; call `session.refresh()` after insert.
+- All DB operations are async.
 
 ### Enums
-- Use `StrEnum` (Python 3.11+); lowercase values matching DB storage
-- All enums live in `src/domain/enums/`
+- `StrEnum` (3.11+), lowercase values matching DB storage; all enums in `src/domain/enums/`.
 
 ### Code Style
-- Max line length: 140 characters
-- Run `ruff check src/ --fix && ruff format src/` after every code change
-- Always use `uv run` — never access `.venv` directly
-- API prefix: `/api/v1`
+- Max line length: 80 characters. Run `uv run ruff check src/ tests/ --fix && uv run ruff format src/ tests/` after every change.
+- Always use `uv run`. API prefix: `/api/v1`.
 
 ### Testing
-- Use case tests: `AsyncMock(spec=RepositoryBase)` to mock the repository
-- Route tests: minimal `FastAPI()` + `TestModule` — never import `src/main.py` or `src/container.py`
-- No `@pytest.mark.asyncio` needed (`asyncio_mode = "auto"` is configured)
+- Use case tests: `AsyncMock(spec=UserRepository)` for the repository port.
+- Route tests: minimal `FastAPI()` + `app.dependency_overrides` for the use-case provider and `get_current_user` — never import `src/main.py`.
+- `asyncio_mode = "auto"` is configured (no `@pytest.mark.asyncio`).
 
 ### Anti-Patterns (Never)
-- Do not pass sessions to repository constructors
-- Do not inject `ConnectionFactoryBase` into use cases
-- Do not use `Depends()` for use case or service injection in routes
-- Do not bypass use cases — routes never call repositories directly
-- Do not use `singleton` scope for repositories or use cases
-- Do not scatter entity files into flat shared directories
+- Do not add an IoC container or `@inject`; use FastAPI `Depends` providers.
+- Do not keep session state in a module-global `ContextVar`; inject the request-scoped session.
+- Do not pass sessions to use cases.
+- Do not return `JSONResponse(model.model_dump())` from routes.
+- Do not make ports ABCs or suffix them `Base`; use `Protocol`.
+- Do not create classes of only static methods; use module functions.
+- Do not bypass use cases — routes never call repositories directly.

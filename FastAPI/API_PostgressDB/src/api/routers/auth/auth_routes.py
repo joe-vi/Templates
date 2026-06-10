@@ -1,14 +1,17 @@
 """API routes for authentication operations."""
 
-from fastapi import APIRouter, HTTPException, status
-from fastapi.responses import JSONResponse
-from fastapi_injector import Injected
+from typing import Annotated
 
+from fastapi import APIRouter, Depends, HTTPException, status
+
+from src.api.dependencies.providers import get_auth_use_case
 from src.api.routers.auth import auth_converter, auth_schema
-from src.application.use_cases.auth import auth_use_case_base
+from src.application.use_cases.auth.auth_use_case import AuthUseCase
 from src.domain.enums import operation_results
 
 router = APIRouter(prefix="/api/v1", tags=["auth"])
+
+UseCaseDep = Annotated[AuthUseCase, Depends(get_auth_use_case)]
 
 
 @router.post(
@@ -22,13 +25,11 @@ router = APIRouter(prefix="/api/v1", tags=["auth"])
 )
 async def login(
     login_data: auth_schema.LoginRequest,
-    use_case: auth_use_case_base.AuthUseCaseBase = Injected(
-        auth_use_case_base.AuthUseCaseBase
-    ),
-) -> JSONResponse:
+    use_case: UseCaseDep,
+) -> auth_schema.TokenResponse:
     """Authenticate a user and return a JWT access and refresh token pair.
 
-    The tokens embed the user's id, username, and role as claims.
+    The tokens embed the user's id and role as claims.
 
     Args:
         login_data: The request body containing username and password.
@@ -37,15 +38,12 @@ async def login(
     Returns:
         A TokenResponse with the access token, refresh token, and token type.
     """
-    login_dto = auth_converter.AuthConverter.to_login_dto(login_data)
+    login_dto = auth_converter.to_login_dto(login_data)
     result, token_dto = await use_case.login(login_dto)
 
     if result == operation_results.LoginResult.SUCCESS:
-        return JSONResponse(
-            content=auth_converter.AuthConverter.to_token_response(
-                token_dto
-            ).model_dump()
-        )  # type: ignore[arg-type]
+        assert token_dto is not None
+        return auth_converter.to_token_response(token_dto)
 
     if result == operation_results.LoginResult.INVALID_CREDENTIALS:
         raise HTTPException(
@@ -61,7 +59,8 @@ async def login(
         )
 
     raise HTTPException(
-        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Login failed"
+        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        detail="Login failed",
     )
 
 
@@ -77,10 +76,8 @@ async def login(
 )
 async def refresh_token(
     refresh_data: auth_schema.RefreshTokenRequest,
-    use_case: auth_use_case_base.AuthUseCaseBase = Injected(
-        auth_use_case_base.AuthUseCaseBase
-    ),
-) -> JSONResponse:
+    use_case: UseCaseDep,
+) -> auth_schema.TokenResponse:
     """Issue a new access and refresh token pair from a valid refresh token.
 
     Args:
@@ -93,11 +90,8 @@ async def refresh_token(
     result, token_dto = await use_case.refresh_token(refresh_data.refresh_token)
 
     if result == operation_results.LoginResult.SUCCESS:
-        return JSONResponse(
-            content=auth_converter.AuthConverter.to_token_response(
-                token_dto
-            ).model_dump()
-        )  # type: ignore[arg-type]
+        assert token_dto is not None
+        return auth_converter.to_token_response(token_dto)
 
     if result == operation_results.LoginResult.INVALID_CREDENTIALS:
         raise HTTPException(

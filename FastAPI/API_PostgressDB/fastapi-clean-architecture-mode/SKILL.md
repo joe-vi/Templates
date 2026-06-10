@@ -1,14 +1,14 @@
 ---
 name: fastapi-clean-architecture-mode
-description: Activate Clean Architecture rules for the current FastAPI session — enforces unidirectional layer dependencies, repository pattern with result enums, dependency inversion via fastapi-injector, and all naming conventions on every file written or edited until the session ends.
+description: Activate Clean Architecture rules for the current FastAPI session — enforces unidirectional layer dependencies, ports as typing.Protocol, the repository pattern with result enums, FastAPI-native dependency injection (Depends providers), and all naming conventions on every file written or edited until the session ends.
 disable-model-invocation: true
 metadata:
-  version: "1.1.0"
+  version: "2.0.0"
 ---
 
 # FastAPI Clean Architecture — Mode Skill
 
-Activates Clean Architecture rules for the current FastAPI session. Everything Claude writes or edits from this point will follow the 4-layer structure, dependency direction, repository pattern, and naming discipline.
+Activates Clean Architecture rules for the current FastAPI session. Everything Claude writes or edits from this point will follow the 4-layer structure, dependency direction, ports-and-adapters pattern, and naming discipline.
 
 For scaffolding a new project use `/fastapi-clean-architecture-template`. To audit an existing project use `/fastapi-clean-architecture-review`.
 

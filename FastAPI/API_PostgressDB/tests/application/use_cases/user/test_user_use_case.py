@@ -5,12 +5,12 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from src.application.services import password_hasher_base
+from src.application.services.password_hasher import PasswordHasher
 from src.application.use_cases.user import user_dto as user_dto_module
 from src.application.use_cases.user import user_use_case
 from src.domain.entities.user import user as user_module
 from src.domain.enums import operation_results, user_enum
-from src.domain.repositories.user import user_repository_base
+from src.domain.repositories.user.user_repository import UserRepository
 
 
 def _make_user(user_id: int = 1) -> user_module.User:
@@ -25,21 +25,21 @@ def _make_user(user_id: int = 1) -> user_module.User:
 
 
 @pytest.fixture
-def mock_repository() -> user_repository_base.UserRepositoryBase:
-    return AsyncMock(spec=user_repository_base.UserRepositoryBase)
+def mock_repository() -> UserRepository:
+    return AsyncMock(spec=UserRepository)
 
 
 @pytest.fixture
-def mock_password_hasher() -> password_hasher_base.PasswordHasherBase:
-    hasher = MagicMock(spec=password_hasher_base.PasswordHasherBase)
+def mock_password_hasher() -> PasswordHasher:
+    hasher = MagicMock(spec=PasswordHasher)
     hasher.hash.return_value = "hashed_password"
     return hasher
 
 
 @pytest.fixture
 def use_case(
-    mock_repository: user_repository_base.UserRepositoryBase,
-    mock_password_hasher: password_hasher_base.PasswordHasherBase,
+    mock_repository: UserRepository,
+    mock_password_hasher: PasswordHasher,
 ) -> user_use_case.UserUseCase:
     return user_use_case.UserUseCase(
         repository=mock_repository, password_hasher=mock_password_hasher
