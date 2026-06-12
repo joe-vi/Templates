@@ -35,11 +35,13 @@ own dependency system (`src/api/dependencies/providers.py`).
 - Routes depend on the concrete use case via `Annotated[UserUseCase, Depends(get_user_use_case)]`.
 - NO `injector`, NO `@inject`, NO `InjectorMiddleware`. Override providers in tests with `app.dependency_overrides`.
 
-### Session & Repository Pattern
+### Session, Transactions & Repository Pattern
 - Engine + `async_sessionmaker` created in `main.lifespan`, stored on `app.state`.
-- `get_session` yields a request-scoped `AsyncSession`, cached per request (shared unit of work). NO module-global session state, NO `ContextVar` for sessions.
-- Repository adapters receive the `AsyncSession` via constructor. One CRUD operation per method.
-- Mutation methods own their commit and map DB exceptions to result enums (`IntegrityError`→`UNIQUE_CONSTRAINT_ERROR`; deadlock→`CONCURRENCY_ERROR`; else `FAILURE`). Reads just query.
+- `get_session` yields a request-scoped `AsyncSession`, cached per request — every repository and the transaction context share it. NO module-global session state, NO `ContextVar` for sessions.
+- Repository adapters receive the `AsyncSession` via constructor and NEVER commit or roll back. One CRUD operation per method.
+- Mutations `flush()`/`execute()` and map DB exceptions to result enums (`IntegrityError`→`UNIQUE_CONSTRAINT_ERROR`; deadlock→`CONCURRENCY_ERROR`; else `FAILURE`). Reads just query. `flush()` populates `id`/server defaults via RETURNING — no `session.refresh()`.
+- The use case owns the transaction boundary via the `TransactionContext` port (adapter `SqlAlchemyTransactionContext`): wrap mutations in `async with self._transaction_context.begin() as transaction:` and call `await transaction.commit()` only when every operation succeeded. Rollback-unless-committed.
+- Atomic multi-repository operations: call several repositories inside ONE `begin()` block — they share the request session and succeed or fail together.
 
 ### Routes & Responses
 - Routes return the response MODEL; FastAPI serialises it (camelCase). Never return `JSONResponse(model.model_dump())`.
@@ -51,7 +53,7 @@ own dependency system (`src/api/dependencies/providers.py`).
 
 ### Database
 - All constraints MUST have an explicit `name` (`uq_`, `fk_`, `ck_`, `ix_` prefix).
-- `id`, `created_at` are DB-generated — never set in Python; call `session.refresh()` after insert.
+- `id`, `created_at` are DB-generated — never set in Python; `flush()` RETURNING populates them (no `session.refresh()`).
 - All DB operations are async.
 
 ### Enums
@@ -70,6 +72,8 @@ own dependency system (`src/api/dependencies/providers.py`).
 - Do not add an IoC container or `@inject`; use FastAPI `Depends` providers.
 - Do not keep session state in a module-global `ContextVar`; inject the request-scoped session.
 - Do not pass sessions to use cases.
+- Do not commit or roll back inside repositories — the use case owns the boundary via `TransactionContext`.
+- Do not call `transaction.commit()` after any failed result in the block.
 - Do not return `JSONResponse(model.model_dump())` from routes.
 - Do not make ports ABCs or suffix them `Base`; use `Protocol`.
 - Do not create classes of only static methods; use module functions.

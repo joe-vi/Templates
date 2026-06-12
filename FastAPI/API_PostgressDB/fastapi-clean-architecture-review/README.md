@@ -30,7 +30,7 @@ The audit runs in 6 phases, one layer at a time. Each phase targets a specific p
 |-------|-------|-----------------------------------|
 | 1 | Domain | Layer must have zero external dependencies — entities, repository ports (Protocols), and enums only; no imports from any other layer |
 | 2 | Application | May only import from Domain — concrete use cases, DTOs, converter functions, service ports (Protocols); no exception handling for mutations |
-| 3 | Infrastructure | Repository pattern correctness — one operation per method, result enums returned (never exceptions propagated), adapters take the `AsyncSession` by constructor, DB constraints explicitly named |
+| 3 | Infrastructure | Repository pattern correctness — one operation per method, result enums returned (never exceptions propagated), adapters take the `AsyncSession` by constructor and never commit/roll back, DB constraints explicitly named |
 | 4 | API | Routes depend on the concrete use case via `Depends` providers; guard functions isolated to `dependencies/`; schemas inherit `APIModelBase`; routes return models (no `JSONResponse(model.model_dump())`) |
 | 5 | Main / Providers | FastAPI-native wiring — providers wire ports to adapters, resources created/disposed in `lifespan`, no IoC container (`injector`/`@inject`/`InjectorMiddleware`) |
 | 6 | Global | Naming discipline — ports are clean-named Protocols, adapters mechanism-qualified, generic result enums (`CreateResult` not `CreateUserResult`), no abbreviations |

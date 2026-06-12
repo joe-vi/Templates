@@ -40,7 +40,8 @@ API  →  Infrastructure  →  Application  →  Domain
 
 Key architectural patterns enforced on every scaffold regardless of tech stack:
 
-- **Repository pattern** — one CRUD operation per method; mutation methods return result enums (`CreateResult`, `UpdateResult`, `DeleteResult`), never raise exceptions to use cases
+- **Repository pattern** — one CRUD operation per method; mutation methods return result enums (`CreateResult`, `UpdateResult`, `DeleteResult`), never raise exceptions to use cases; repositories never commit — the use case owns the transaction boundary
+- **Unit of work** — mutating use cases wrap repository calls in `TransactionContext.begin()` and commit only on all-success; multi-repository operations inside one block are atomic (rollback-unless-committed)
 - **Ports & adapters** — use cases depend on `typing.Protocol` ports; adapters (mechanism-qualified, e.g. `SqlAlchemyUserRepository`) structurally satisfy them; provider functions in `src/api/dependencies/providers.py` wire them (no IoC container)
 - **FastAPI-native DI** — `Depends` provider functions; routes depend on the concrete use case; no `injector`, no `@inject`
 - **Request-scoped sessions** — one `AsyncSession` per request via `get_session`, shared by every adapter in that request; no module-global session state

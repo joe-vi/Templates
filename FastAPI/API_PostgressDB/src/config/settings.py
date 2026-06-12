@@ -2,7 +2,6 @@
 
 from functools import lru_cache
 
-from pydantic import computed_field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from sqlalchemy.engine import URL
 
@@ -24,7 +23,6 @@ class Settings(BaseSettings):
     pool_size: int = 5
     max_overflow: int = 10
 
-    @computed_field
     @property
     def database_url(self) -> URL:
         """Build the SQLAlchemy database URL from connection components."""

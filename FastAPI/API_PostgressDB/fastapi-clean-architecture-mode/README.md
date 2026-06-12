@@ -35,10 +35,11 @@ Domain has zero external dependencies. Every other layer may only import from th
 - `src/api/dependencies/providers.py` is the only place that wires adapters to ports (the composition root) — there is no IoC container
 - Adapters are built in provider functions; FastAPI resolves the dependency graph
 
-**Repository pattern**
+**Repository pattern & unit of work**
 - One CRUD operation per method — orchestration belongs in use cases, not repositories
 - Mutation methods return result enums (`CreateResult`, `UpdateResult`, `DeleteResult`), never raise exceptions to use cases
-- Repository adapters receive the request-scoped `AsyncSession` by constructor — there is no module-global session state
+- Repository adapters receive the request-scoped `AsyncSession` by constructor and never commit or roll back — there is no module-global session state
+- The use case owns the transaction boundary via the `TransactionContext` port: commit only on all-success, rollback-unless-committed; repository calls spanning several repositories inside one `begin()` block are atomic
 
 **Dependency injection (FastAPI `Depends`)**
 - Provider functions in `src/api/dependencies/providers.py`; collaborators declared with `Annotated[Port, Depends(provider)]`

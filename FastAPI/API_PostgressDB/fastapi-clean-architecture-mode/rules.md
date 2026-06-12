@@ -41,12 +41,14 @@ system: provider functions in `src/api/dependencies/providers.py`.
 - Routes depend on the concrete use case: `Annotated[UserUseCase, Depends(get_user_use_case)]`.
 - No `injector`, no `@inject`, no `InjectorMiddleware`. Tests override providers with `app.dependency_overrides`.
 
-## Session & repository pattern
+## Session, transactions & repository pattern
 
 - The engine + `async_sessionmaker` are created in `main.lifespan` and stored on `app.state.session_factory`.
-- `api.dependencies.database.get_session` yields a request-scoped `AsyncSession`, cached per request (shared unit of work). No module-global session state, no `ContextVar` for sessions.
-- Repository adapters receive the `AsyncSession` by constructor. One CRUD operation per method.
-- Mutation methods own their commit and map DB exceptions to result enums: `IntegrityError` → `UNIQUE_CONSTRAINT_ERROR`; `DBAPIError` whose `__cause__` is a deadlock → `CONCURRENCY_ERROR`; others → `FAILURE` (after `rollback()`). Read methods just query.
+- `api.dependencies.database.get_session` yields a request-scoped `AsyncSession`, cached per request — every repository and the transaction context share it. No module-global session state, no `ContextVar` for sessions.
+- Repository adapters receive the `AsyncSession` by constructor and never commit or roll back. One CRUD operation per method.
+- Mutations `flush()`/`execute()` and map DB exceptions to result enums: `IntegrityError` → `UNIQUE_CONSTRAINT_ERROR`; `DBAPIError` whose `__cause__` is a deadlock → `CONCURRENCY_ERROR`; others → `FAILURE`. Read methods just query. `flush()` populates `id`/server defaults via RETURNING — no `session.refresh()`.
+- The use case owns the transaction boundary via the `TransactionContext` port (adapter `SqlAlchemyTransactionContext`): wrap mutations in `async with self._transaction_context.begin() as transaction:` and call `await transaction.commit()` only when every operation succeeded. Rollback-unless-committed.
+- Atomic multi-repository operations: call several repositories inside one `begin()` block — they share the request session and succeed or fail together.
 
 ## Routes & responses
 
@@ -55,14 +57,14 @@ system: provider functions in `src/api/dependencies/providers.py`.
 
 ## Database (SQLAlchemy)
 
-- Never set `id` or `created_at` in Python; call `session.refresh()` after insert.
+- Never set `id` or `created_at` in Python; `flush()` RETURNING populates them (no `session.refresh()`).
 - Every constraint has an explicit `name`: `uq_`, `fk_`, `ck_`, `ix_`. Declare constraints in `__table_args__`.
 
 ## Adding a new entity — layer order
 
 1. Domain: enum → entity → repository **Protocol** port.
 2. Infrastructure: DB model → `sqlalchemy_<entity>_repository.py` adapter (takes `AsyncSession`).
-3. Application: DTO → converter functions → concrete use case.
+3. Application: DTO → converter functions → concrete use case (inject `TransactionContext` for mutations; commit only on success).
 4. API: schema → converter functions → routes (return models); add providers in `dependencies/providers.py`; include router in `main.py`.
 
 ## After every change

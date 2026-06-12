@@ -22,7 +22,8 @@ Invoke-WebRequest -Uri "https://github.com/joe-vi/Templates/archive/refs/heads/m
 - **Async Database**: Asynchronous PostgreSQL operations using SQLAlchemy 2.0+ and asyncpg
 - **JWT Authentication**: Access and refresh token pair with configurable expiry
 - **Dependency Injection**: FastAPI-native `Depends` providers; the composition root lives in `src/api/dependencies/providers.py` (no separate IoC container)
-- **Request-Scoped Sessions**: A single `AsyncSession` per request, provided by `get_session` and shared by every adapter in that request — a natural unit of work, with no module-global session state
+- **Request-Scoped Sessions**: A single `AsyncSession` per request, provided by `get_session` and shared by every adapter in that request — with no module-global session state
+- **Unit of Work**: Mutating use cases own the transaction boundary via the `TransactionContext` port — commit only on all-success, rollback-unless-committed; operations spanning several repositories inside one `begin()` block are atomic
 - **Ports & Adapters**: Collaborators are defined as `typing.Protocol` ports and implemented by mechanism-qualified adapters (`SqlAlchemyUserRepository`, `BcryptPasswordHasher`, `JwtTokenService`, `JsonLogger`)
 - **Role-Based Access**: User roles (`admin`, `user`) and statuses (`active`, `inactive`) stored as lowercase enums
 - **Package Management**: Modern Python package management with `uv`
@@ -49,7 +50,8 @@ Invoke-WebRequest -Uri "https://github.com/joe-vi/Templates/archive/refs/heads/m
 │   │   ├── services/                       # Protocol ports
 │   │   │   ├── logger.py                    # Logger
 │   │   │   ├── password_hasher.py           # PasswordHasher
-│   │   │   └── token_service.py             # TokenService
+│   │   │   ├── token_service.py             # TokenService
+│   │   │   └── transaction_context.py       # TransactionContext (unit of work)
 │   │   └── use_cases/
 │   │       ├── auth/
 │   │       │   ├── auth_dto.py
@@ -65,6 +67,7 @@ Invoke-WebRequest -Uri "https://github.com/joe-vi/Templates/archive/refs/heads/m
 │   │   ├── database/
 │   │   │   ├── base.py                     # SQLAlchemy DeclarativeBase
 │   │   │   ├── session.py                  # create_engine / create_session_factory
+│   │   │   ├── sqlalchemy_transaction_context.py   # Unit-of-work adapter
 │   │   │   └── models/
 │   │   │       └── user_model.py           # ORM model for users table
 │   │   ├── logging/
@@ -91,12 +94,15 @@ Invoke-WebRequest -Uri "https://github.com/joe-vi/Templates/archive/refs/heads/m
 │   │   └── routers/
 │   │       └── user/
 │   │           ├── test_user_converter.py
-│   │           └── test_user_routes.py     # Route tests via minimal FastAPI + TestModule
+│   │           └── test_user_routes.py     # Route tests via dependency_overrides
 │   └── application/
 │       └── use_cases/
 │           └── user/
 │               ├── test_user_converter.py
-│               └── test_user_use_case.py   # Use case tests via AsyncMock repositories
+│               └── test_user_use_case.py   # Use case tests via AsyncMock ports
+│   └── infrastructure/
+│       └── database/
+│           └── test_sqlalchemy_transaction_context.py  # Unit-of-work atomicity (in-memory SQLite)
 ├── alembic/                                # Database migration scripts
 ├── alembic.ini
 ├── docker-compose.yml                      # PostgreSQL 18
@@ -116,13 +122,13 @@ Invoke-WebRequest -Uri "https://github.com/joe-vi/Templates/archive/refs/heads/m
 ### 2. Application Layer (`src/application/`)
 - **Use Cases**: Plain concrete classes holding the business logic (`UserUseCase`, `AuthUseCase`)
 - **DTOs**: Frozen dataclasses with `DTO` suffix
-- **Service Ports**: `PasswordHasher`, `TokenService`, `Logger` (Protocols)
+- **Service Ports**: `PasswordHasher`, `TokenService`, `Logger`, `TransactionContext` (Protocols)
 - **Converters**: Module-level functions for entity ↔ DTO mapping
 - **Rule**: Imports Domain only
 
 ### 3. Infrastructure Layer (`src/infrastructure/`)
 - **Database**: `session.py` builds the engine + `async_sessionmaker`; the session is provided per request (no factory object, no shared `ContextVar`)
-- **Repository Adapters**: `SqlAlchemyUserRepository` takes an `AsyncSession`; mutations own their commit and map DB errors to result enums
+- **Repository Adapters**: `SqlAlchemyUserRepository` takes an `AsyncSession`; mutations flush and map DB errors to result enums — they never commit; the use case owns the boundary via `SqlAlchemyTransactionContext` (commit on all-success, rollback otherwise)
 - **Auth/Logging Adapters**: `BcryptPasswordHasher`, `JwtTokenService`, `JsonLogger`
 - **Rule**: Implements (structurally satisfies) the ports from the Domain and Application layers
 
@@ -178,9 +184,26 @@ uv run alembic upgrade head
 
 ## Running the Application
 
-### Option A: VS Code (Recommended)
+### Option A: VS Code
 
-A `.vscode/launch.json` is included for one-click debugging. Press `F5` or open the **Run and Debug** panel and select **FastAPI**.
+Create `.vscode/launch.json` (the `.vscode/` directory is gitignored) with the
+configuration below, then press `F5`:
+
+```json
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "FastAPI",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "uvicorn",
+      "args": ["src.main:app", "--reload"],
+      "jinja": false
+    }
+  ]
+}
+```
 
 ### Option B: Command Line
 
@@ -255,7 +278,7 @@ uv run alembic downgrade -1                              # Roll back one step
 ## Adding New Features
 
 1. **Domain**: Add entity in `src/domain/entities/<name>/` and a repository **Protocol** port in `src/domain/repositories/<name>/<name>_repository.py` (clean name, e.g. `OrderRepository`)
-2. **Application**: Add DTO, converter functions, and a concrete use case in `src/application/use_cases/<name>/`
+2. **Application**: Add DTO, converter functions, and a concrete use case in `src/application/use_cases/<name>/` — inject `TransactionContext`, wrap mutations in `begin()`, commit only on success (several repository calls in one block are atomic)
 3. **Infrastructure**: Add ORM model in `src/infrastructure/database/models/` and a `sqlalchemy_<name>_repository.py` adapter (takes an `AsyncSession`) in `src/infrastructure/repositories/<name>/`
 4. **API**: Add Pydantic schemas (inheriting `APIModelBase`), converter functions, and routes in `src/api/routers/<name>/` that return response models
 5. **Providers**: Add provider functions in `src/api/dependencies/providers.py`:
@@ -263,8 +286,11 @@ uv run alembic downgrade -1                              # Roll back one step
    def get_order_repository(session: Annotated[AsyncSession, Depends(get_session)]) -> OrderRepository:
        return SqlAlchemyOrderRepository(session)
 
-   def get_order_use_case(repository: Annotated[OrderRepository, Depends(get_order_repository)]) -> OrderUseCase:
-       return OrderUseCase(repository=repository)
+   def get_order_use_case(
+       repository: Annotated[OrderRepository, Depends(get_order_repository)],
+       transaction_context: Annotated[TransactionContext, Depends(get_transaction_context)],
+   ) -> OrderUseCase:
+       return OrderUseCase(repository=repository, transaction_context=transaction_context)
    ```
 6. **Main**: Include the new router in `src/main.py`
 7. **Migration**: Generate and apply an Alembic migration for any new DB models

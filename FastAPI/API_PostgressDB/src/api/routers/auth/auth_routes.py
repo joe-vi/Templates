@@ -41,8 +41,10 @@ async def login(
     login_dto = auth_converter.to_login_dto(login_data)
     result, token_dto = await use_case.login(login_dto)
 
-    if result == operation_results.LoginResult.SUCCESS:
-        assert token_dto is not None
+    if (
+        result == operation_results.LoginResult.SUCCESS
+        and token_dto is not None
+    ):
         return auth_converter.to_token_response(token_dto)
 
     if result == operation_results.LoginResult.INVALID_CREDENTIALS:
@@ -89,8 +91,10 @@ async def refresh_token(
     """
     result, token_dto = await use_case.refresh_token(refresh_data.refresh_token)
 
-    if result == operation_results.LoginResult.SUCCESS:
-        assert token_dto is not None
+    if (
+        result == operation_results.LoginResult.SUCCESS
+        and token_dto is not None
+    ):
         return auth_converter.to_token_response(token_dto)
 
     if result == operation_results.LoginResult.INVALID_CREDENTIALS:

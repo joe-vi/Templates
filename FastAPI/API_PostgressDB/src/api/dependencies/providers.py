@@ -15,12 +15,16 @@ from src.api.dependencies.database import get_session
 from src.application.services.logger import Logger
 from src.application.services.password_hasher import PasswordHasher
 from src.application.services.token_service import TokenService
+from src.application.services.transaction_context import TransactionContext
 from src.application.use_cases.auth.auth_use_case import AuthUseCase
 from src.application.use_cases.user.user_use_case import UserUseCase
 from src.config.settings import get_settings
 from src.domain.repositories.user.user_repository import UserRepository
 from src.infrastructure.auth.bcrypt_password_hasher import BcryptPasswordHasher
 from src.infrastructure.auth.jwt_token_service import JwtTokenService
+from src.infrastructure.database.sqlalchemy_transaction_context import (
+    SqlAlchemyTransactionContext,
+)
 from src.infrastructure.logging.json_logger import JsonLogger
 from src.infrastructure.repositories.user.sqlalchemy_user_repository import (
     SqlAlchemyUserRepository,
@@ -52,12 +56,31 @@ def get_user_repository(
     return SqlAlchemyUserRepository(session)
 
 
+def get_transaction_context(
+    session: Annotated[AsyncSession, Depends(get_session)],
+) -> TransactionContext:
+    """Build a transaction context over the request-scoped session.
+
+    Because FastAPI caches get_session per request, this context and every
+    repository share one session — repository calls inside a begin() block
+    therefore form a single atomic unit of work.
+    """
+    return SqlAlchemyTransactionContext(session)
+
+
 def get_user_use_case(
     repository: Annotated[UserRepository, Depends(get_user_repository)],
     password_hasher: Annotated[PasswordHasher, Depends(get_password_hasher)],
+    transaction_context: Annotated[
+        TransactionContext, Depends(get_transaction_context)
+    ],
 ) -> UserUseCase:
     """Build the user use case for the current request."""
-    return UserUseCase(repository=repository, password_hasher=password_hasher)
+    return UserUseCase(
+        repository=repository,
+        password_hasher=password_hasher,
+        transaction_context=transaction_context,
+    )
 
 
 def get_auth_use_case(

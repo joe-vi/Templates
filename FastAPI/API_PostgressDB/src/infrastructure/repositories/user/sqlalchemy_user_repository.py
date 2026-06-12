@@ -1,7 +1,9 @@
 """SQLAlchemy adapter implementing the user repository port."""
 
+from typing import Any, cast
+
 import asyncpg
-from sqlalchemy import delete, select, update
+from sqlalchemy import CursorResult, delete, select, update
 from sqlalchemy.exc import DBAPIError, IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -27,15 +29,19 @@ class SqlAlchemyUserRepository:
     """User repository backed by SQLAlchemy and PostgreSQL.
 
     Receives the request-scoped ``AsyncSession`` by constructor injection
-    (wired in ``api.dependencies``). Mutation methods own their commit and map
-    database errors to result enums; nothing propagates to the use case.
+    (wired in ``api.dependencies``). Mutations flush so database errors
+    surface here and are mapped to result enums — nothing propagates to the
+    use case. The repository never commits or rolls back: the transaction
+    boundary is owned by the use case via the ``TransactionContext`` port,
+    which is what lets several repository calls form one atomic unit of work.
     """
 
     def __init__(self, session: AsyncSession) -> None:
         """Initialize the repository.
 
         Args:
-            session: The request-scoped async session to operate on.
+            session: The request-scoped async session, shared with every
+                other repository and the transaction context in this request.
         """
         self._session = session
 
@@ -51,25 +57,24 @@ class SqlAlchemyUserRepository:
         )
         self._session.add(model)
         try:
-            await self._session.commit()
+            # Flush executes the INSERT (RETURNING populates id and server
+            # defaults) without ending the transaction, so this call can
+            # participate in a multi-operation unit of work.
+            await self._session.flush()
         except IntegrityError:
-            await self._session.rollback()
             return (
                 operation_results.CreateResult.UNIQUE_CONSTRAINT_ERROR,
                 None,
             )
         except DBAPIError as exc:
-            await self._session.rollback()
             if isinstance(
                 exc.__cause__, asyncpg.exceptions.DeadlockDetectedError
             ):
                 return (operation_results.CreateResult.CONCURRENCY_ERROR, None)
             return (operation_results.CreateResult.FAILURE, None)
         except Exception:
-            await self._session.rollback()
             return (operation_results.CreateResult.FAILURE, None)
 
-        await self._session.refresh(model)
         return (operation_results.CreateResult.SUCCESS, model.id)
 
     async def get_by_id(self, user_id: int) -> User | None:
@@ -98,48 +103,50 @@ class SqlAlchemyUserRepository:
         self, user_id: int, role: user_enum.UserRole
     ) -> operation_results.UpdateResult:
         try:
-            update_result = await self._session.execute(
-                update(user_model.UserModel)
-                .where(user_model.UserModel.id == user_id)
-                .values(role=role)
+            # execute() returns CursorResult for UPDATE/DELETE at runtime;
+            # the static type is Result, which lacks rowcount.
+            update_result = cast(
+                "CursorResult[Any]",
+                await self._session.execute(
+                    update(user_model.UserModel)
+                    .where(user_model.UserModel.id == user_id)
+                    .values(role=role)
+                ),
             )
-            await self._session.commit()
             return (
                 operation_results.UpdateResult.SUCCESS
                 if update_result.rowcount > 0
                 else operation_results.UpdateResult.NOT_FOUND
             )
         except DBAPIError as exc:
-            await self._session.rollback()
             if isinstance(
                 exc.__cause__, asyncpg.exceptions.DeadlockDetectedError
             ):
                 return operation_results.UpdateResult.CONCURRENCY_ERROR
             return operation_results.UpdateResult.FAILURE
         except Exception:
-            await self._session.rollback()
             return operation_results.UpdateResult.FAILURE
 
     async def delete(self, user_id: int) -> operation_results.DeleteResult:
         try:
-            delete_result = await self._session.execute(
-                delete(user_model.UserModel).where(
-                    user_model.UserModel.id == user_id
-                )
+            delete_result = cast(
+                "CursorResult[Any]",
+                await self._session.execute(
+                    delete(user_model.UserModel).where(
+                        user_model.UserModel.id == user_id
+                    )
+                ),
             )
-            await self._session.commit()
             return (
                 operation_results.DeleteResult.SUCCESS
                 if delete_result.rowcount > 0
                 else operation_results.DeleteResult.NOT_FOUND
             )
         except DBAPIError as exc:
-            await self._session.rollback()
             if isinstance(
                 exc.__cause__, asyncpg.exceptions.DeadlockDetectedError
             ):
                 return operation_results.DeleteResult.CONCURRENCY_ERROR
             return operation_results.DeleteResult.FAILURE
         except Exception:
-            await self._session.rollback()
             return operation_results.DeleteResult.FAILURE

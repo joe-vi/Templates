@@ -37,6 +37,7 @@ Check:
 - **Naming**: service ports are `Protocol`s with clean names (`PasswordHasher`, `TokenService`, `Logger`); use cases are plain concrete classes (no `Base` ABC); DTOs are frozen dataclasses with `DTO` suffix; no wrapper collection DTOs; return types use `list[UserDTO]` directly
 - **Converters**: module-level functions, not classes of static methods
 - **Repository pattern**: use cases contain no exception handling for mutations — they forward repository results as-is; no direct session or DB access; no `@inject`
+- **Transactions**: mutating use-case methods wrap repository calls in `TransactionContext.begin()` and call `transaction.commit()` only on the all-success path — flag any mutation outside a transaction block and any commit after a failed result
 - **Documentation**: same rules as Phase 1
 
 ### Phase 3 — Infrastructure layer (`src/infrastructure/`)
@@ -51,10 +52,11 @@ Check:
   - Mutation methods catch DB exceptions internally and return result enums; nothing propagates
   - Exception mapping: `IntegrityError` → `UNIQUE_CONSTRAINT_ERROR`, deadlock (`DBAPIError.__cause__`) → `CONCURRENCY_ERROR`, all others → `FAILURE`
   - Adapters receive the `AsyncSession` by constructor injection — flag any module-global session state or `ContextVar`-based session sharing
+  - Repositories never commit or roll back — flag any `session.commit()`/`session.rollback()` in a repository; the transaction boundary belongs to the use case via `TransactionContext`
 - **DB constraints** (SQLAlchemy only):
   - Every `UniqueConstraint`, `ForeignKeyConstraint`, `CheckConstraint`, `Index` has an explicit `name` (`uq_`, `fk_`, `ck_`, `ix_`)
   - Constraints declared in `__table_args__` (except primary key)
-  - `id`, `created_at` never set in Python code; `session.refresh()` called after insert
+  - `id`, `created_at` never set in Python code; `flush()` RETURNING populates them (flag `session.refresh()` after inserts)
   - `SQLAlchemyEnum` type defined at module level, not inline
 - **Documentation**: same rules as Phase 1
 

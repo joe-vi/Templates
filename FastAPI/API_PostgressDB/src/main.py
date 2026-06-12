@@ -52,12 +52,19 @@ async def add_request_id(
     request: Request,
     call_next: Callable[[Request], Awaitable[Response]],
 ) -> Response:
-    """Tag each request with a unique id for log correlation."""
-    token = log_context.request_id_var.set(str(uuid.uuid4()))
+    """Scope the log-correlation context variables to this request.
+
+    request_id is set here; user_id is cleared so a value can never leak
+    between requests handled in the same task (e.g. under test transports),
+    then populated by the JWT guard once the caller is authenticated.
+    """
+    request_id_token = log_context.request_id_var.set(str(uuid.uuid4()))
+    user_id_token = log_context.user_id_var.set(None)
     try:
         return await call_next(request)
     finally:
-        log_context.request_id_var.reset(token)
+        log_context.user_id_var.reset(user_id_token)
+        log_context.request_id_var.reset(request_id_token)
 
 
 app.include_router(auth_routes.router)

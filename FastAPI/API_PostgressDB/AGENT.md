@@ -28,12 +28,12 @@ src/
 │   │   ├── <entity>_dto.py
 │   │   ├── <entity>_converter.py       # module functions, not a class
 │   │   └── <entity>_use_case.py        # concrete class, no separate ABC
-│   └── services/<service>.py           # Protocol ports (password_hasher, token_service, logger)
+│   └── services/<service>.py           # Protocol ports (password_hasher, token_service, logger, transaction_context)
 ├── infrastructure/
 │   ├── repositories/<entity>/sqlalchemy_<entity>_repository.py   # adapter (mechanism-qualified name)
 │   ├── auth/{bcrypt_password_hasher.py, jwt_token_service.py}
 │   ├── logging/{json_logger.py, log_context.py}
-│   └── database/{base.py, session.py, models/<entity>_model.py}
+│   └── database/{base.py, session.py, sqlalchemy_transaction_context.py, models/<entity>_model.py}
 └── api/
     ├── dependencies/
     │   ├── database.py        # get_session (request-scoped AsyncSession)
@@ -82,15 +82,18 @@ src/
 - Routes depend on the **concrete use case** via `Annotated[UserUseCase, Depends(get_user_use_case)]`.
 - Tests override any provider with `app.dependency_overrides[provider] = ...` — no second container, no `@inject`, no middleware ordering.
 
-### Database session & transactions
+### Database session & transactions (unit of work)
 - The engine and `async_sessionmaker` are created once in `main.lifespan` and stored on `app.state.session_factory`.
-- `api.dependencies.database.get_session` yields a **request-scoped `AsyncSession`**. Because FastAPI caches it per request, every adapter in one request shares the same session — a natural unit of work. There is **no module-global session state**.
-- Repository **adapters receive the `AsyncSession`** by constructor injection. Never pass sessions to use cases; never keep session state in a `ContextVar`.
-- **Mutation methods own their commit** and map DB errors to result enums (so the route can map the result to a status before responding). Read methods just query.
+- `api.dependencies.database.get_session` yields a **request-scoped `AsyncSession`**. FastAPI caches it per request, so every repository adapter **and the transaction context** in one request share the same session. There is **no module-global session state**.
+- Repository **adapters receive the `AsyncSession`** by constructor injection. They **never commit or roll back**. Mutations `flush()` (inserts) or `execute()` (update/delete) so DB errors surface in the repository and are mapped to result enums; reads just query.
   - `IntegrityError` → `UNIQUE_CONSTRAINT_ERROR`
   - `DBAPIError` whose `__cause__` is `asyncpg…DeadlockDetectedError` → `CONCURRENCY_ERROR`; otherwise `FAILURE`
-  - any other `Exception` → `FAILURE` (after `rollback()`)
-- For an operation spanning multiple repositories that must be atomic, manage a single transaction in the use case over the shared session (repositories would not self-commit in that flow). The template ships the non-atomic default; it does not include a transaction-manager abstraction.
+  - any other `Exception` → `FAILURE`
+- **The use case owns the transaction boundary** via the `TransactionContext` port (`src/application/services/transaction_context.py`; adapter `SqlAlchemyTransactionContext` in `src/infrastructure/database/`). Every mutating use-case method wraps its repository calls in `async with self._transaction_context.begin() as transaction:` and calls `await transaction.commit()` only when every operation reported success.
+- Semantics are **rollback unless committed**: leaving the `begin()` block without commit — by early return on a failure result or by an exception — rolls back everything performed inside it. Committing a partially-failed unit of work is structurally impossible.
+- **Atomic multi-repository operations**: call any number of repositories inside one `begin()` block; they share the request session, so they all succeed or all fail. If any call returns a non-success result, return without committing — every earlier operation rolls back.
+- `flush()` populates `id` and server defaults via RETURNING, so the new entity id is available inside the block before commit. Do not call `session.refresh()` after inserts.
+- Uncommitted work is discarded when the request ends — forgetting to commit fails safe (nothing is silently persisted).
 
 ### Converters
 - Converters are **module-level functions**, not classes of static methods. `user_converter.to_dto(...)`, `to_entity(...)`, etc.
@@ -129,8 +132,8 @@ Status/message maps live in `src/api/result_status_maps.py`.
 
 ### DB-Generated Values
 Never set these in Python code:
-- **`id`**: `autoincrement=True`. Entity holds `id: int | None = None` before insert; populated after `session.refresh()`.
-- **`created_at`**: `server_default=func.now()`. Entity field is `datetime | None = None`. Call `session.refresh()` after insert to populate it.
+- **`id`**: `autoincrement=True`. Entity holds `id: int | None = None` before insert; `session.flush()` populates it via RETURNING.
+- **`created_at`**: `server_default=func.now()`. Entity field is `datetime | None = None`; populated by the same flush RETURNING. Never call `session.refresh()` after inserts.
 
 ### Database Constraints
 - Every constraint **must** have an explicit `name` so Alembic can manage it. Declare constraints in `__table_args__`.
@@ -157,7 +160,7 @@ Never set these in Python code:
 
 1. **Domain**: enums in `src/domain/enums/<entity>_enum.py`; entity dataclass in `src/domain/entities/<entity>/`; repository **Protocol** in `src/domain/repositories/<entity>/<entity>_repository.py`.
 2. **Infrastructure**: ORM model in `src/infrastructure/database/models/<entity>_model.py` (re-export from `models/__init__.py`); adapter `sqlalchemy_<entity>_repository.py` taking an `AsyncSession`.
-3. **Application**: frozen DTOs, converter **functions**, concrete use case in `src/application/use_cases/<entity>/`.
+3. **Application**: frozen DTOs, converter **functions**, concrete use case in `src/application/use_cases/<entity>/`. Mutating use cases inject `TransactionContext` and wrap repository calls in a `begin()` block, committing only on success.
 4. **API**: Pydantic schemas (inherit `APIModelBase`), converter functions, routes returning models; add providers in `src/api/dependencies/providers.py`; include the router in `main.py`.
 
 ---
@@ -168,6 +171,7 @@ Tests live in `tests/` and mirror `src/`.
 
 ### Use Case Tests
 - Mock collaborators with `AsyncMock(spec=UserRepository)` / `MagicMock(spec=PasswordHasher)` — `spec` against the Protocol surfaces the real method names.
+- Provide a `FakeTransactionContext` (a tiny async-context-manager fake yielding a fake transaction — Protocols make this trivial) and assert that `commit` was called on success and **not** called on failure.
 - `asyncio_mode = "auto"` is configured; no `@pytest.mark.asyncio` needed.
 
 ### Route Tests
@@ -186,6 +190,7 @@ Tests live in `tests/` and mirror `src/`.
 | API | `<entity>_converter.py` | Yes |
 | API | `<entity>_routes.py` | Yes — override providers |
 | Infrastructure | repository adapter | No — needs a live DB (integration only) |
+| Infrastructure | `SqlAlchemyTransactionContext` | Yes — integration test against in-memory SQLite (aiosqlite) proving commit/rollback atomicity |
 
 ---
 
@@ -202,6 +207,9 @@ Tests live in `tests/` and mirror `src/`.
 - Don't introduce an IoC container or `@inject` — wire dependencies with FastAPI `Depends` providers.
 - Don't keep session (or other control-flow) state in a module-global `ContextVar`. Inject the request-scoped `AsyncSession`.
 - Don't pass the `AsyncSession` to use cases, or sessions to repository constructors as constants — adapters get the request session via the provider.
+- Don't commit or roll back inside repositories — the use case owns the boundary via `TransactionContext`.
+- Don't call `transaction.commit()` unless every repository call in the block returned success.
+- Don't call `session.refresh()` after inserts — `flush()` RETURNING already populates `id` and server defaults.
 - Don't return `JSONResponse(model.model_dump())` from routes — return the model and let FastAPI serialise it; set `response.status_code` for dynamic codes.
 - Don't make ports ABCs — use `typing.Protocol`; don't suffix ports with `Base`.
 - Don't create classes of only `@staticmethod`s — use module functions.

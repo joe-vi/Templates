@@ -2,7 +2,7 @@
 
 from datetime import datetime
 
-from pydantic import ConfigDict, EmailStr, Field
+from pydantic import EmailStr, Field
 
 from src.api.schemas import base_schema
 from src.domain.enums import user_enum
@@ -38,8 +38,6 @@ class UserUpdateRoleRequest(base_schema.APIModelBase):
 
 class UserResponse(base_schema.APIModelBase):
     """Response model for a full user entity (used by GET endpoints)."""
-
-    model_config = ConfigDict(from_attributes=True)
 
     id: int
     email: str

@@ -86,9 +86,14 @@ Generate these regardless of stack. Use concise, idiomatic Python — no unneces
 - **`session.py`** (infrastructure): `create_engine(settings) -> AsyncEngine` and `create_session_factory(engine) -> async_sessionmaker[AsyncSession]` (with `expire_on_commit=False`). No connection-factory object, no `ContextVar`.
 - **`api/dependencies/database.py`**: `get_session(request) -> AsyncIterator[AsyncSession]` — reads `request.app.state.session_factory` and yields a request-scoped session via `async with`.
 
-The engine + session factory are created once in `main.lifespan` and stored on `app.state.session_factory`; the engine is disposed on shutdown. Repository adapters receive the `AsyncSession` by constructor injection. Driver: `asyncpg` for postgres (`postgresql+asyncpg://`), `aiosqlite` for sqlite (`sqlite+aiosqlite:///`).
+The engine + session factory are created once in `main.lifespan` and stored on `app.state.session_factory`; the engine is disposed on shutdown. Repository adapters receive the `AsyncSession` by constructor injection and never commit or roll back — mutations `flush()` and map errors to result enums. Driver: `asyncpg` for postgres (`postgresql+asyncpg://`), `aiosqlite` for sqlite (`sqlite+aiosqlite:///`).
 
-For an operation that must be atomic across repositories, manage a single transaction in the use case over the shared request session. The template ships the non-atomic default and does not include a transaction-manager abstraction.
+Also generate the unit-of-work pair:
+
+- **`transaction_context.py`** (application services): `Transaction` and `TransactionContext` Protocols — `begin()` returns an async context manager yielding a `Transaction` with `commit()`; rollback-unless-committed semantics.
+- **`sqlalchemy_transaction_context.py`** (infrastructure/database): adapter over the request-scoped session.
+
+Mutating use cases inject `TransactionContext`, wrap repository calls in `async with ...begin() as transaction:`, and call `await transaction.commit()` only when every operation succeeded. Calls spanning several repositories inside one block are atomic — they share the request session.
 
 #### `mongodb`
 
@@ -148,7 +153,8 @@ No `Injector`, no `InjectorMiddleware`, no `attach_injector`.
 `src/api/dependencies/providers.py` is the composition root. Plain functions wire ports to adapters:
 - Stateless singletons (`PasswordHasher`, `TokenService`, `Logger`, cache) via `@lru_cache`.
 - `get_<entity>_repository(session: Annotated[AsyncSession, Depends(get_session)])` returns the adapter.
-- `get_<entity>_use_case(...)` composes the repository + service ports and returns the concrete use case.
+- `get_transaction_context(session: ...)` returns `SqlAlchemyTransactionContext(session)` — same request session, so repositories and the transaction context share one transaction.
+- `get_<entity>_use_case(...)` composes the repository + service ports + `TransactionContext` and returns the concrete use case.
 
 ### Step 10 — Generate `pyproject.toml`
 

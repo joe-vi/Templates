@@ -40,10 +40,12 @@ is FastAPI's own dependency system (`src/api/dependencies/providers.py`).
 - Routes depend on the concrete use case: `Annotated[UserUseCase, Depends(get_user_use_case)]`.
 - **No** `injector`, **no** `@inject`, **no** `InjectorMiddleware`. Override providers in tests with `app.dependency_overrides`.
 
-### Session & Repositories
+### Session, Transactions & Repositories
 - The engine + `async_sessionmaker` are created in `main.lifespan` and stored on `app.state`.
-- `get_session` (`api/dependencies/database.py`) yields a **request-scoped `AsyncSession`**; FastAPI caches it per request (shared unit of work). No module-global session state, no `ContextVar` for sessions.
-- Repository **adapters receive the `AsyncSession`** via constructor. Mutation methods own their commit and map DB errors to result enums (`IntegrityError`→`UNIQUE_CONSTRAINT_ERROR`; deadlock→`CONCURRENCY_ERROR`; else `FAILURE`). Reads just query.
+- `get_session` (`api/dependencies/database.py`) yields a **request-scoped `AsyncSession`**; FastAPI caches it per request, so every repository and the transaction context share it. No module-global session state, no `ContextVar` for sessions.
+- Repository **adapters receive the `AsyncSession`** via constructor and **never commit or roll back**. Mutations `flush()`/`execute()` and map DB errors to result enums (`IntegrityError`→`UNIQUE_CONSTRAINT_ERROR`; deadlock→`CONCURRENCY_ERROR`; else `FAILURE`). Reads just query. `flush()` populates `id`/server defaults via RETURNING — no `session.refresh()`.
+- **The use case owns the transaction boundary** via the `TransactionContext` port (adapter `SqlAlchemyTransactionContext`): wrap mutations in `async with self._transaction_context.begin() as transaction:`; call `await transaction.commit()` only when every operation succeeded. Rollback-unless-committed.
+- **Atomic multi-repository operations**: call several repositories inside one `begin()` block — they share the request session and succeed or fail together.
 - One CRUD operation per repository method.
 
 ### Routes & Responses
@@ -56,7 +58,7 @@ is FastAPI's own dependency system (`src/api/dependencies/providers.py`).
 
 ### Database
 - All constraints **must** have an explicit `name` (`uq_`, `fk_`, `ck_`, `ix_` prefix).
-- `id`, `created_at` are DB-generated — never set in Python; call `session.refresh()` after insert.
+- `id`, `created_at` are DB-generated — never set in Python; `flush()` RETURNING populates them (no `session.refresh()`).
 - All DB operations are async.
 
 ### Enums
@@ -75,6 +77,8 @@ is FastAPI's own dependency system (`src/api/dependencies/providers.py`).
 - Do not add an IoC container or `@inject`; use FastAPI `Depends` providers.
 - Do not keep session state in a module-global `ContextVar`; inject the request-scoped session.
 - Do not pass sessions to use cases.
+- Do not commit or roll back inside repositories — the use case owns the boundary via `TransactionContext`.
+- Do not call `transaction.commit()` after any failed result in the block.
 - Do not return `JSONResponse(model.model_dump())` from routes.
 - Do not make ports ABCs or suffix them `Base`; use `Protocol`.
 - Do not create classes of only static methods; use module functions.
