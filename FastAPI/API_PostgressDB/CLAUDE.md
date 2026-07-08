@@ -12,8 +12,9 @@ conventions, patterns, and anti-patterns. **These rules override any general def
 API → Infrastructure → Application → Domain   (dependencies point inward only)
 ```
 
-Domain never imports from any other layer. There is **no IoC container** — the composition root
-is FastAPI's own dependency system (`src/api/dependencies/providers.py`).
+Domain never imports from any other layer. The composition root is a **Dishka container** —
+`AppProvider` in `src/api/dependencies/providers.py` binds implementation, port, and scope in
+one line per binding; the graph is validated at container creation in `main.py`.
 
 | Layer | Location | Key Rule |
 |---|---|---|
@@ -35,14 +36,14 @@ is FastAPI's own dependency system (`src/api/dependencies/providers.py`).
 - Booleans read like questions (`is_active`); no abbreviations (`repository` not `repo`).
 
 ### Dependency Injection (FastAPI `Depends`)
-- Wire dependencies as provider functions in `src/api/dependencies/providers.py`; declare collaborators with `Annotated[Port, Depends(provider)]`.
-- Stateless singletons use `@lru_cache`; repositories/use cases are built per request.
-- Routes depend on the concrete use case: `Annotated[UserUseCase, Depends(get_user_use_case)]`.
+- The composition root is the Dishka `AppProvider` (`src/api/dependencies/providers.py`): one line per binding — `provide(Impl, provides=Port, scope=Scope.REQUEST)`; constructors auto-wired from type hints; graph validated at container creation in `main.py`.
+- Scopes are explicit: `Scope.APP` (engine, stateless services) and `Scope.REQUEST` (session, repositories, transaction context, use cases). Resources use generator providers (`yield` + cleanup).
+- Routes use `route_class=DishkaRoute` and `use_case: FromDishka[UserUseCase]`. Guards needing container objects use `@inject` + `FromDishka[...]` (only in `src/api/dependencies/`).
 - **No** `injector`, **no** `@inject`, **no** `InjectorMiddleware`. Override providers in tests with `app.dependency_overrides`.
 
 ### Session, Transactions & Repositories
-- The engine + `async_sessionmaker` are created in `main.lifespan` and stored on `app.state`.
-- `get_session` (`api/dependencies/database.py`) yields a **request-scoped `AsyncSession`**; FastAPI caches it per request, so every repository and the transaction context share it. No module-global session state, no `ContextVar` for sessions.
+- The engine + `async_sessionmaker` are `Scope.APP` providers; `container.close()` in `lifespan` disposes the engine.
+- The `AsyncSession` is a **REQUEST-scoped generator provider** in `AppProvider`; every repository and the transaction context in one request share it, and the scope closes it. No module-global session state, no `ContextVar` for sessions.
 - Repository **adapters receive the `AsyncSession`** via constructor and **never commit or roll back**. Mutations `flush()`/`execute()` and map DB errors to result enums (`IntegrityError`→`UNIQUE_CONSTRAINT_ERROR`; deadlock→`CONCURRENCY_ERROR`; else `FAILURE`). Reads just query. `flush()` populates `id`/server defaults via RETURNING — no `session.refresh()`.
 - **The use case owns the transaction boundary** via the `TransactionContext` port (adapter `SqlAlchemyTransactionContext`): wrap mutations in `async with self._transaction_context.begin() as transaction:`; call `await transaction.commit()` only when every operation succeeded. Rollback-unless-committed.
 - **Atomic multi-repository operations**: call several repositories inside one `begin()` block — they share the request session and succeed or fail together.

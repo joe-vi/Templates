@@ -1,12 +1,10 @@
 """API routes for user CRUD operations."""
 
-from typing import Annotated
-
+from dishka.integrations.fastapi import DishkaRoute, FromDishka
 from fastapi import APIRouter, Depends, HTTPException, Response, status
 
 from src.api import result_status_maps
 from src.api.dependencies.jwt_dependency import get_current_user
-from src.api.dependencies.providers import get_user_use_case
 from src.api.routers.user import user_converter, user_schema
 from src.api.schemas import operation_schema
 from src.application.use_cases.user.user_use_case import UserUseCase
@@ -14,10 +12,11 @@ from src.application.use_cases.user.user_use_case import UserUseCase
 router = APIRouter(
     prefix="/api/v1",
     tags=["users"],
+    route_class=DishkaRoute,
     dependencies=[Depends(get_current_user)],
 )
 
-UseCaseDep = Annotated[UserUseCase, Depends(get_user_use_case)]
+UseCaseDep = FromDishka[UserUseCase]
 
 
 @router.post(

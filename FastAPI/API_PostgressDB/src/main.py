@@ -4,39 +4,34 @@ import uuid
 from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
 
+from dishka import make_async_container
+from dishka.integrations.fastapi import FastapiProvider, setup_dishka
 from fastapi import FastAPI, Request, Response
 
+from src.api.dependencies.providers import AppProvider
 from src.api.routers.auth import auth_routes
 from src.api.routers.user import user_routes
-from src.config.settings import get_settings
-from src.infrastructure.database.session import (
-    create_engine,
-    create_session_factory,
-)
 from src.infrastructure.logging import log_context
+
+# The dependency graph is validated here — a missing binding fails at import,
+# not mid-request. APP-scoped resources (the engine) are finalised by
+# container.close() in the lifespan shutdown.
+container = make_async_container(AppProvider(), FastapiProvider())
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     """Manage the application startup and shutdown lifecycle.
 
-    Creates the database engine and session factory on startup, stores the
-    factory on ``app.state`` for the request-scoped session dependency, and
-    disposes the engine on shutdown.
-
     Args:
         app: The FastAPI application instance.
 
     Yields:
-        None.
+        None. On shutdown, closes the container, finalising APP-scoped
+        resources (disposes the database engine).
     """
-    settings = get_settings()
-    engine = create_engine(settings)
-    app.state.session_factory = create_session_factory(engine)
-    try:
-        yield
-    finally:
-        await engine.dispose()
+    yield
+    await app.state.dishka_container.close()
 
 
 app = FastAPI(
@@ -69,6 +64,7 @@ async def add_request_id(
 
 app.include_router(auth_routes.router)
 app.include_router(user_routes.router)
+setup_dishka(container, app)
 
 
 @app.get("/")

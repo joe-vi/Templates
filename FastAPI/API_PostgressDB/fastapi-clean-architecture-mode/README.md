@@ -1,6 +1,6 @@
 # fastapi-clean-architecture-mode
 
-A Claude Code skill that activates **Clean Architecture** rules for the current FastAPI session. Every file Claude writes or edits will follow strict layer boundaries, dependency inversion via `typing.Protocol` ports, the repository pattern with result enums, and FastAPI-native DI discipline until the session ends.
+A Claude Code skill that activates **Clean Architecture** rules for the current FastAPI session. Every file Claude writes or edits will follow strict layer boundaries, dependency inversion via `typing.Protocol` ports, the repository pattern with result enums, and declarative Dishka DI discipline until the session ends.
 
 > **Related skills**
 > - [`fastapi-clean-architecture-template`](../fastapi-clean-architecture-template/) — scaffold a new project with Clean Architecture enforced from day one
@@ -32,8 +32,8 @@ Domain has zero external dependencies. Every other layer may only import from th
 
 **Abstraction boundaries**
 - Use cases depend on `typing.Protocol` ports, never concrete adapters
-- `src/api/dependencies/providers.py` is the only place that wires adapters to ports (the composition root) — there is no IoC container
-- Adapters are built in provider functions; FastAPI resolves the dependency graph
+- The Dishka `AppProvider` in `src/api/dependencies/providers.py` is the only place that wires adapters to ports (the composition root)
+- One line binds implementation, port, and scope: `provide(Impl, provides=Port, scope=Scope.REQUEST)`; constructors are auto-wired from type hints and the graph is validated at container creation
 
 **Repository pattern & unit of work**
 - One CRUD operation per method — orchestration belongs in use cases, not repositories
@@ -41,10 +41,10 @@ Domain has zero external dependencies. Every other layer may only import from th
 - Repository adapters receive the request-scoped `AsyncSession` by constructor and never commit or roll back — there is no module-global session state
 - The use case owns the transaction boundary via the `TransactionContext` port: commit only on all-success, rollback-unless-committed; repository calls spanning several repositories inside one `begin()` block are atomic
 
-**Dependency injection (FastAPI `Depends`)**
-- Provider functions in `src/api/dependencies/providers.py`; collaborators declared with `Annotated[Port, Depends(provider)]`
-- Routes depend on the concrete use case via `Depends(get_..._use_case)`
-- No `injector`, no `@inject`, no `InjectorMiddleware`; tests override providers with `app.dependency_overrides`
+**Dependency injection (Dishka)**
+- `AppProvider` declares every binding with an explicit scope (`Scope.APP` / `Scope.REQUEST`); injectable classes carry no decorators
+- Routes use `route_class=DishkaRoute` and `FromDishka[UseCase]`; guards use `@inject` + `FromDishka[...]` only in `src/api/dependencies/`
+- Tests bind mocks in a small test container (`setup_dishka`); `provide(..., override=True)` overrides real bindings
 
 **Naming discipline**
 - Ports are `Protocol`s with clean names (`UserRepository`); adapters are mechanism-qualified (`SqlAlchemyUserRepository`)

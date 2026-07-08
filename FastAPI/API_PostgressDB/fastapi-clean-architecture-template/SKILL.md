@@ -1,6 +1,6 @@
 ---
 name: fastapi-clean-architecture-template
-description: Scaffold a new project following Clean Architecture principles on FastAPI — strict 4-layer structure (Domain, Application, Infrastructure, API) with unidirectional dependencies, ports as typing.Protocol, the repository pattern, result-enum error handling, and FastAPI-native dependency injection (Depends providers). Supports PostgreSQL, MongoDB, SQLite; JWT, OAuth2, API key auth; optional Redis cache.
+description: Scaffold a new project following Clean Architecture principles on FastAPI — strict 4-layer structure (Domain, Application, Infrastructure, API) with unidirectional dependencies, ports as typing.Protocol, the repository pattern, result-enum error handling, and declarative Dishka dependency injection (one binding per line with explicit APP/REQUEST scopes). Supports PostgreSQL, MongoDB, SQLite; JWT, OAuth2, API key auth; optional Redis cache.
 argument-hint: "<project-name> [--db postgres|mongodb|sqlite] [--auth jwt|oauth2|apikey] [--cache none|redis] [--no-docker]"
 disable-model-invocation: true
 metadata:
@@ -53,7 +53,7 @@ Parse all flags. Apply defaults for any flag not provided.
 │   │   │   └── models/__init__.py
 │   │   └── repositories/
 │   └── api/
-│       ├── dependencies/      # database.py, providers.py, guards
+│       ├── dependencies/      # providers.py (Dishka AppProvider), guards
 │       ├── routers/
 │       └── schemas/
 │           ├── base_schema.py
@@ -84,9 +84,9 @@ Generate these regardless of stack. Use concise, idiomatic Python — no unneces
 
 - **`base.py`**: SQLAlchemy `DeclarativeBase` subclass.
 - **`session.py`** (infrastructure): `create_engine(settings) -> AsyncEngine` and `create_session_factory(engine) -> async_sessionmaker[AsyncSession]` (with `expire_on_commit=False`). No connection-factory object, no `ContextVar`.
-- **`api/dependencies/database.py`**: `get_session(request) -> AsyncIterator[AsyncSession]` — reads `request.app.state.session_factory` and yields a request-scoped session via `async with`.
+- The `AsyncSession` is a `Scope.REQUEST` generator provider in `AppProvider` (`async with factory() as session: yield session`) — no separate dependency module.
 
-The engine + session factory are created once in `main.lifespan` and stored on `app.state.session_factory`; the engine is disposed on shutdown. Repository adapters receive the `AsyncSession` by constructor injection and never commit or roll back — mutations `flush()` and map errors to result enums. Driver: `asyncpg` for postgres (`postgresql+asyncpg://`), `aiosqlite` for sqlite (`sqlite+aiosqlite:///`).
+The engine + session factory are `Scope.APP` providers (the engine as a generator provider so `container.close()` disposes it on shutdown). Repository adapters receive the `AsyncSession` by constructor injection and never commit or roll back — mutations `flush()` and map errors to result enums. Driver: `asyncpg` for postgres (`postgresql+asyncpg://`), `aiosqlite` for sqlite (`sqlite+aiosqlite:///`).
 
 Also generate the unit-of-work pair:
 
@@ -127,7 +127,7 @@ Ports are `typing.Protocol`s in `src/application/services/`; adapters are mechan
 
 - `CacheService` port (application layer): `get()`, `set()`, `delete()`.
 - `RedisCacheService` adapter (infrastructure): `redis.asyncio` client created in `lifespan`, disposed on shutdown.
-- Provide it via an `@lru_cache` provider (or `app.state`) in `dependencies/providers.py`.
+- Bind it at `Scope.APP` in `AppProvider` (generator provider so cleanup runs at `container.close()`).
 
 ### Step 7 — Generate `settings.py`
 
@@ -141,24 +141,24 @@ Ports are `typing.Protocol`s in `src/application/services/`; adapters are mechan
 
 ### Step 8 — Generate `main.py`
 
-- `lifespan`: build the engine + session factory (or Mongo/Redis clients), store on `app.state`, dispose on shutdown.
-- `FastAPI(lifespan=lifespan)`.
-- A request-id middleware that sets the `request_id` context var per request.
-- `app.include_router(...)` for each router.
+- `container = make_async_container(AppProvider(), FastapiProvider())` at module level — the graph is validated here.
+- `lifespan`: `await app.state.dishka_container.close()` on shutdown (finalises the engine and other APP-scoped resources).
+- `FastAPI(lifespan=lifespan)`; a request-id middleware that scopes the `request_id`/`user_id` context vars per request.
+- `app.include_router(...)` for each router, then `setup_dishka(container, app)`.
 
-No `Injector`, no `InjectorMiddleware`, no `attach_injector`.
+No `fastapi-injector`, no `@inject` on domain/application classes.
 
-### Step 9 — Generate dependency providers
+### Step 9 — Generate the Dishka provider
 
-`src/api/dependencies/providers.py` is the composition root. Plain functions wire ports to adapters:
-- Stateless singletons (`PasswordHasher`, `TokenService`, `Logger`, cache) via `@lru_cache`.
-- `get_<entity>_repository(session: Annotated[AsyncSession, Depends(get_session)])` returns the adapter.
-- `get_transaction_context(session: ...)` returns `SqlAlchemyTransactionContext(session)` — same request session, so repositories and the transaction context share one transaction.
-- `get_<entity>_use_case(...)` composes the repository + service ports + `TransactionContext` and returns the concrete use case.
+`AppProvider` in `src/api/dependencies/providers.py` is the composition root — one declarative line per binding, constructors auto-wired from type hints:
+- Stateless singletons (`PasswordHasher`, `TokenService`, `Logger`, cache) at `Scope.APP`: `provide(BcryptPasswordHasher, provides=PasswordHasher, scope=Scope.APP)`.
+- Engine (generator provider) and session factory at `Scope.APP`; the session as a `Scope.REQUEST` generator provider.
+- `provide(Sqlalchemy<Entity>Repository, provides=<Entity>Repository, scope=Scope.REQUEST)` and `provide(SqlAlchemyTransactionContext, provides=TransactionContext, scope=Scope.REQUEST)` — same request session, so repositories and the transaction context share one transaction.
+- `provide(<Entity>UseCase, scope=Scope.REQUEST)` — dependencies resolved automatically.
 
 ### Step 10 — Generate `pyproject.toml`
 
-Base dependencies: `fastapi>=0.115`, `pydantic>=2.0`, `pydantic-settings>=2.0`, `uvicorn[standard]>=0.30`. (No `injector` / `fastapi-injector`.)
+Base dependencies: `fastapi>=0.115`, `dishka>=1.10`, `pydantic>=2.0`, `pydantic-settings>=2.0`, `uvicorn[standard]>=0.30`. (No `injector` / `fastapi-injector`.)
 
 Stack additions:
 

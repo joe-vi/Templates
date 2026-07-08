@@ -11,7 +11,7 @@ Dependencies flow **inward only**: API → Infrastructure → Application → Do
 | Infrastructure | `src/infrastructure/` | DB models, repository adapters, auth/logging adapters, engine/session | Domain + Application |
 | API | `src/api/` | Routes, request/response schemas, API converters, **dependency providers** | Application + Infrastructure (only in `dependencies/`) |
 
-There is **no IoC container**. The composition root is FastAPI's own dependency system: provider functions in `src/api/dependencies/providers.py` build the graph, and FastAPI resolves and caches it per request.
+The composition root is a **Dishka container**: `AppProvider` in `src/api/dependencies/providers.py` declares one binding per dependency — implementation, port, and scope in a single line. Constructor arguments are auto-wired from type hints, injectable classes carry no decorators, and the graph is validated when the container is created in `main.py`, so a missing binding fails at startup rather than mid-request.
 
 ### File Organisation
 
@@ -36,8 +36,7 @@ src/
 │   └── database/{base.py, session.py, sqlalchemy_transaction_context.py, models/<entity>_model.py}
 └── api/
     ├── dependencies/
-    │   ├── database.py        # get_session (request-scoped AsyncSession)
-    │   ├── providers.py       # composition root: ports -> adapters, use-case builders
+    │   ├── providers.py       # composition root: Dishka AppProvider (ports -> adapters, scopes)
     │   └── jwt_dependency.py  # get_current_user guard
     ├── routers/<entity>/{<entity>_schema.py, <entity>_converter.py, <entity>_routes.py}
     ├── schemas/{base_schema.py, operation_schema.py}
@@ -76,15 +75,19 @@ src/
 - An **adapter** is a plain class that structurally satisfies the port. It does **not** import or subclass the port — structural typing keeps the adapter decoupled from the abstraction.
 - Use cases depend on ports (constructor parameters typed as the Protocol). Providers supply the concrete adapter.
 
-### Dependency Injection (FastAPI `Depends`)
-- The composition root is `src/api/dependencies/providers.py`. Each provider is a plain function; collaborators are declared with `Annotated[Port, Depends(provider)]`.
-- Stateless singletons (`PasswordHasher`, `TokenService`, `Logger`) use `@lru_cache` on their provider. Per-request objects (repositories, use cases) are built fresh by their provider each request; FastAPI caches each dependency once per request.
-- Routes depend on the **concrete use case** via `Annotated[UserUseCase, Depends(get_user_use_case)]`.
-- Tests override any provider with `app.dependency_overrides[provider] = ...` — no second container, no `@inject`, no middleware ordering.
+### Dependency Injection (Dishka)
+- The composition root is `AppProvider` in `src/api/dependencies/providers.py`. One line binds implementation, port, and scope:
+  `user_repository = provide(SqlAlchemyUserRepository, provides=UserRepository, scope=Scope.REQUEST)`.
+- **Scopes are explicit**: `Scope.APP` for process-wide singletons (engine, `PasswordHasher`, `TokenService`, `Logger`); `Scope.REQUEST` for per-request objects (session, repositories, transaction context, use cases). Everything in one request shares the same instances.
+- Constructor arguments are **auto-wired from type hints** — adding a dependency to a use case means editing only its `__init__`; no provider signature to keep in sync. Injectable classes carry **no decorators**.
+- Resources use generator providers: `yield engine` / `yield session` with cleanup after the yield; the request scope closes the session, `container.close()` (lifespan shutdown) disposes the engine.
+- The container is created in `main.py` with `make_async_container(AppProvider(), FastapiProvider())` and attached with `setup_dishka(container, app)`. **Graph validation happens at container creation** — missing bindings fail at import.
+- Routes use `route_class=DishkaRoute` on the `APIRouter` and declare `use_case: FromDishka[UserUseCase]`. Guard dependencies that need container objects use the `@inject` decorator with `FromDishka[...]` (see `jwt_dependency.py`) — this is the only decorator in the DI system, and it lives in the API layer, never on domain/application classes.
+- Tests build a small test container (`make_async_container(TestProvider())` + `setup_dishka`) binding mocks for what the router needs; `app.dependency_overrides` still works for plain FastAPI guards like `get_current_user`. Overriding a real binding uses `provide(..., override=True)` in a provider passed after `AppProvider`.
 
 ### Database session & transactions (unit of work)
-- The engine and `async_sessionmaker` are created once in `main.lifespan` and stored on `app.state.session_factory`.
-- `api.dependencies.database.get_session` yields a **request-scoped `AsyncSession`**. FastAPI caches it per request, so every repository adapter **and the transaction context** in one request share the same session. There is **no module-global session state**.
+- The engine and `async_sessionmaker` are **APP-scoped Dishka providers**; the engine is disposed by `container.close()` on shutdown.
+- The `AsyncSession` is a **REQUEST-scoped generator provider** in `AppProvider`, so every repository adapter **and the transaction context** in one request share the same session, and the request scope closes it. There is **no module-global session state**.
 - Repository **adapters receive the `AsyncSession`** by constructor injection. They **never commit or roll back**. Mutations `flush()` (inserts) or `execute()` (update/delete) so DB errors surface in the repository and are mapped to result enums; reads just query.
   - `IntegrityError` → `UNIQUE_CONSTRAINT_ERROR`
   - `DBAPIError` whose `__cause__` is `asyncpg…DeadlockDetectedError` → `CONCURRENCY_ERROR`; otherwise `FAILURE`
@@ -151,7 +154,7 @@ Never set these in Python code:
 
 - Port (`Protocol`) lives in `src/application/services/<service>.py`. Use cases depend only on the port.
 - Adapter lives in `src/infrastructure/<service>/`, mechanism-qualified name.
-- Wire it in `src/api/dependencies/providers.py`. Stateless singletons use `@lru_cache`; resources needing teardown are created in `main.lifespan` and disposed there (see the database engine).
+- Wire it with one `provide(...)` line in `AppProvider`. Stateless singletons bind at `Scope.APP`; resources needing teardown use a `Scope.APP` generator provider (`yield client` + cleanup) — `container.close()` on shutdown finalises them (see the database engine).
 - To switch providers: write a new adapter and change the `return` in its provider. The use case is untouched.
 
 ---
@@ -161,7 +164,7 @@ Never set these in Python code:
 1. **Domain**: enums in `src/domain/enums/<entity>_enum.py`; entity dataclass in `src/domain/entities/<entity>/`; repository **Protocol** in `src/domain/repositories/<entity>/<entity>_repository.py`.
 2. **Infrastructure**: ORM model in `src/infrastructure/database/models/<entity>_model.py` (re-export from `models/__init__.py`); adapter `sqlalchemy_<entity>_repository.py` taking an `AsyncSession`.
 3. **Application**: frozen DTOs, converter **functions**, concrete use case in `src/application/use_cases/<entity>/`. Mutating use cases inject `TransactionContext` and wrap repository calls in a `begin()` block, committing only on success.
-4. **API**: Pydantic schemas (inherit `APIModelBase`), converter functions, routes returning models; add providers in `src/api/dependencies/providers.py`; include the router in `main.py`.
+4. **API**: Pydantic schemas (inherit `APIModelBase`), converter functions, routes returning models (`route_class=DishkaRoute`, `FromDishka[UseCase]`); add one `provide(...)` line per new binding to `AppProvider`; include the router in `main.py`.
 
 ---
 
@@ -176,11 +179,18 @@ Tests live in `tests/` and mirror `src/`.
 
 ### Route Tests
 - Create a minimal `FastAPI()`, include only the router under test. **Never import `src/main.py`.**
-- Override the use-case provider and the auth guard with `app.dependency_overrides`:
+- Bind mocks in a small test container; override plain FastAPI guards with `app.dependency_overrides`:
   ```python
-  app.dependency_overrides[get_user_use_case] = lambda: AsyncMock(spec=UserUseCase)
+  class TestProvider(Provider):
+      @provide(scope=Scope.REQUEST)
+      def user_use_case(self) -> UserUseCase:
+          return mock_use_case
+
+  container = make_async_container(TestProvider())
+  setup_dishka(container, app)
   app.dependency_overrides[get_current_user] = lambda: TokenClaimsDTO(user_id=1, role=UserRole.ADMIN)
   ```
+  Close the container in fixture teardown (`await container.close()`).
 - Use `httpx.AsyncClient` with `ASGITransport`.
 
 | Layer | File | Test? |
@@ -204,7 +214,7 @@ Tests live in `tests/` and mirror `src/`.
 
 ## 10. Anti-Patterns
 
-- Don't introduce an IoC container or `@inject` — wire dependencies with FastAPI `Depends` providers.
+- Don't wire bindings anywhere except `AppProvider` — and never put DI decorators on domain/application classes; `@inject` is only for FastAPI guard functions in `src/api/dependencies/`.
 - Don't keep session (or other control-flow) state in a module-global `ContextVar`. Inject the request-scoped `AsyncSession`.
 - Don't pass the `AsyncSession` to use cases, or sessions to repository constructors as constants — adapters get the request session via the provider.
 - Don't commit or roll back inside repositories — the use case owns the boundary via `TransactionContext`.

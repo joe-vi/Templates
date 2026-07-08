@@ -1,6 +1,6 @@
 ---
 name: fastapi-clean-architecture-review
-description: Audit an existing FastAPI project for Clean Architecture compliance — verifies unidirectional layer dependencies, ports-as-Protocol boundaries, repository pattern correctness, FastAPI-native DI wiring, naming conventions, DB constraint rules, and documentation standards. Reports every violation with file and line number.
+description: Audit an existing FastAPI project for Clean Architecture compliance — verifies unidirectional layer dependencies, ports-as-Protocol boundaries, repository pattern correctness, declarative Dishka DI wiring (explicit scopes, graph validated at startup), naming conventions, DB constraint rules, and documentation standards. Reports every violation with file and line number.
 argument-hint: "[--fix]"
 disable-model-invocation: true
 metadata:
@@ -67,9 +67,9 @@ Read all files in `src/api/`.
 Check:
 - **Naming**: schemas end with `Request` or `Response` and inherit `APIModelBase`; converters are module functions
 - **DI**:
-  - Composition root is `src/api/dependencies/providers.py` — provider functions wire ports to adapters; flag any `injector`/`fastapi-injector`/`@inject`/`Injected(...)` usage
-  - Routes depend on the concrete use case via `Annotated[UseCase, Depends(get_..._use_case)]`
-  - Guard functions live in `src/api/dependencies/`, not inside route files; `Depends(get_current_user)` declared on the `APIRouter`, not scattered in signatures
+  - Composition root is the Dishka `AppProvider` in `src/api/dependencies/providers.py` — one `provide(Impl, provides=Port, scope=...)` line per binding; flag any `fastapi-injector`/`Injected(...)` usage or DI decorators on domain/application classes
+  - Routes use `route_class=DishkaRoute` and depend on the concrete use case via `FromDishka[UseCase]`
+  - Guard functions live in `src/api/dependencies/`, not inside route files; `Depends(get_current_user)` declared on the `APIRouter`, not scattered in signatures; guards needing container objects use `@inject` + `FromDishka[...]`
 - **Responses**: routes return the response model (FastAPI serialises it to camelCase). Flag any `JSONResponse(model.model_dump())` — it bypasses `response_model` and the alias generator. Dynamic status set via `response.status_code`.
 - **Code style**: lines over 80 chars (excluding `# noqa: E501`); `List[X]`, `Optional[X]`, `Dict[K,V]` instead of modern annotations; sync DB calls
 - **Documentation**: same rules as Phase 1
@@ -79,9 +79,9 @@ Check:
 Read `src/main.py` and `src/api/dependencies/`.
 
 Check:
-- **`lifespan`**: long-lived resources (DB engine, Mongo/Redis clients) created in `lifespan`, stored on `app.state`, and disposed on shutdown
-- **No IoC container**: flag any `Injector`, `InjectorMiddleware`, `attach_injector`, or `container.py`
-- **Providers**: every port has a provider that returns a concrete adapter; stateless singletons use `@lru_cache`; the session is request-scoped via `get_session`
+- **Container**: `make_async_container(AppProvider(), FastapiProvider())` at module level; `setup_dishka(container, app)` after routers; `lifespan` closes `app.state.dishka_container` on shutdown
+- **Legacy DI**: flag any `fastapi-injector` (`Injector`, `InjectorMiddleware`, `attach_injector`, `Injected(...)`) usage
+- **Bindings**: every port has a `provide(...)` binding with an explicit scope; long-lived resources are `Scope.APP` generator providers; the session is a `Scope.REQUEST` generator provider
 
 ### Phase 6 — Global checks
 

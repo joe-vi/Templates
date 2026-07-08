@@ -1,27 +1,39 @@
-"""Composition root: FastAPI dependency providers wiring ports to adapters.
+"""Composition root: Dishka provider wiring ports to adapters.
 
-These functions replace a separate IoC container. FastAPI's own dependency
-system resolves the graph, caches per request, and supports overrides in tests
-via ``app.dependency_overrides``.
+One declarative binding per dependency — implementation, port, and scope in a
+single line. Constructor arguments are auto-wired from type hints, injectable
+classes carry no decorators, and the dependency graph is validated when the
+container is created (see ``main.py``), so a missing binding fails at startup
+rather than mid-request.
+
+Scopes:
+    Scope.APP     — one instance for the process (engine, stateless services).
+    Scope.REQUEST — one instance per HTTP request (session, repositories,
+                    transaction context, use cases). Everything in a request
+                    shares the same ``AsyncSession``, which is what makes a
+                    multi-repository ``TransactionContext.begin()`` block
+                    atomic.
 """
 
-from functools import lru_cache
-from typing import Annotated
+from collections.abc import AsyncIterable
 
-from fastapi import Depends
-from sqlalchemy.ext.asyncio import AsyncSession
+from dishka import Provider, Scope, provide
+from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 
-from src.api.dependencies.database import get_session
 from src.application.services.logger import Logger
 from src.application.services.password_hasher import PasswordHasher
 from src.application.services.token_service import TokenService
 from src.application.services.transaction_context import TransactionContext
 from src.application.use_cases.auth.auth_use_case import AuthUseCase
 from src.application.use_cases.user.user_use_case import UserUseCase
-from src.config.settings import get_settings
+from src.config.settings import Settings, get_settings
 from src.domain.repositories.user.user_repository import UserRepository
 from src.infrastructure.auth.bcrypt_password_hasher import BcryptPasswordHasher
 from src.infrastructure.auth.jwt_token_service import JwtTokenService
+from src.infrastructure.database.session import (
+    create_engine,
+    create_session_factory,
+)
 from src.infrastructure.database.sqlalchemy_transaction_context import (
     SqlAlchemyTransactionContext,
 )
@@ -31,68 +43,52 @@ from src.infrastructure.repositories.user.sqlalchemy_user_repository import (
 )
 
 
-@lru_cache
-def get_password_hasher() -> PasswordHasher:
-    """Return the process-wide password hasher (stateless singleton)."""
-    return BcryptPasswordHasher()
+class AppProvider(Provider):
+    """Binds every port to its adapter with an explicit scope."""
 
+    @provide(scope=Scope.APP)
+    def settings(self) -> Settings:
+        return get_settings()
 
-@lru_cache
-def get_token_service() -> TokenService:
-    """Return the process-wide token service (stateless singleton)."""
-    return JwtTokenService(get_settings())
+    @provide(scope=Scope.APP)
+    async def engine(self, settings: Settings) -> AsyncIterable[AsyncEngine]:
+        engine = create_engine(settings)
+        yield engine
+        await engine.dispose()
 
+    @provide(scope=Scope.APP)
+    def session_factory(
+        self, engine: AsyncEngine
+    ) -> async_sessionmaker[AsyncSession]:
+        return create_session_factory(engine)
 
-@lru_cache
-def get_logger() -> Logger:
-    """Return the process-wide structured logger (singleton)."""
-    return JsonLogger(get_settings())
+    @provide(scope=Scope.REQUEST)
+    async def session(
+        self, session_factory: async_sessionmaker[AsyncSession]
+    ) -> AsyncIterable[AsyncSession]:
+        # Request-scoped: every repository and the transaction context in one
+        # request receive this same session (a shared unit of work). Closed
+        # automatically when the request scope exits.
+        async with session_factory() as session:
+            yield session
 
-
-def get_user_repository(
-    session: Annotated[AsyncSession, Depends(get_session)],
-) -> UserRepository:
-    """Build a user repository bound to the request-scoped session."""
-    return SqlAlchemyUserRepository(session)
-
-
-def get_transaction_context(
-    session: Annotated[AsyncSession, Depends(get_session)],
-) -> TransactionContext:
-    """Build a transaction context over the request-scoped session.
-
-    Because FastAPI caches get_session per request, this context and every
-    repository share one session — repository calls inside a begin() block
-    therefore form a single atomic unit of work.
-    """
-    return SqlAlchemyTransactionContext(session)
-
-
-def get_user_use_case(
-    repository: Annotated[UserRepository, Depends(get_user_repository)],
-    password_hasher: Annotated[PasswordHasher, Depends(get_password_hasher)],
-    transaction_context: Annotated[
-        TransactionContext, Depends(get_transaction_context)
-    ],
-) -> UserUseCase:
-    """Build the user use case for the current request."""
-    return UserUseCase(
-        repository=repository,
-        password_hasher=password_hasher,
-        transaction_context=transaction_context,
+    # Stateless services — one instance per process.
+    password_hasher = provide(
+        BcryptPasswordHasher, provides=PasswordHasher, scope=Scope.APP
     )
-
-
-def get_auth_use_case(
-    repository: Annotated[UserRepository, Depends(get_user_repository)],
-    password_hasher: Annotated[PasswordHasher, Depends(get_password_hasher)],
-    token_service: Annotated[TokenService, Depends(get_token_service)],
-    logger: Annotated[Logger, Depends(get_logger)],
-) -> AuthUseCase:
-    """Build the authentication use case for the current request."""
-    return AuthUseCase(
-        user_repository=repository,
-        password_hasher=password_hasher,
-        token_service=token_service,
-        logger=logger,
+    token_service = provide(
+        JwtTokenService, provides=TokenService, scope=Scope.APP
     )
+    logger = provide(JsonLogger, provides=Logger, scope=Scope.APP)
+
+    # Per-request collaborators — auto-wired from constructor type hints.
+    user_repository = provide(
+        SqlAlchemyUserRepository, provides=UserRepository, scope=Scope.REQUEST
+    )
+    transaction_context = provide(
+        SqlAlchemyTransactionContext,
+        provides=TransactionContext,
+        scope=Scope.REQUEST,
+    )
+    user_use_case = provide(UserUseCase, scope=Scope.REQUEST)
+    auth_use_case = provide(AuthUseCase, scope=Scope.REQUEST)
