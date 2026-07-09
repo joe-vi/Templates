@@ -4,19 +4,17 @@ import uuid
 from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
 
-from dishka import make_async_container
-from dishka.integrations.fastapi import FastapiProvider, setup_dishka
 from fastapi import FastAPI, Request, Response
+from injector import Injector
+from sqlalchemy.ext.asyncio import AsyncEngine
 
-from src.api.dependencies.providers import AppProvider
+from src.api.dependencies.injection import async_request_scope
+from src.api.dependencies.providers import AppModule
 from src.api.routers.auth import auth_routes
 from src.api.routers.user import user_routes
 from src.infrastructure.logging import log_context
 
-# The dependency graph is validated here — a missing binding fails at import,
-# not mid-request. APP-scoped resources (the engine) are finalised by
-# container.close() in the lifespan shutdown.
-container = make_async_container(AppProvider(), FastapiProvider())
+injector = Injector([AppModule()])
 
 
 @asynccontextmanager
@@ -27,11 +25,12 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         app: The FastAPI application instance.
 
     Yields:
-        None. On shutdown, closes the container, finalising APP-scoped
-        resources (disposes the database engine).
+        None. On shutdown, disposes the database engine (singletons are not
+        covered by the request-scope teardown).
     """
     yield
-    await app.state.dishka_container.close()
+    engine = app.state.injector.get(AsyncEngine)
+    await engine.dispose()
 
 
 app = FastAPI(
@@ -40,23 +39,27 @@ app = FastAPI(
     version="1.0.0",
     lifespan=lifespan,
 )
+app.state.injector = injector
 
 
 @app.middleware("http")
-async def add_request_id(
+async def request_context(
     request: Request,
     call_next: Callable[[Request], Awaitable[Response]],
 ) -> Response:
-    """Scope the log-correlation context variables to this request.
+    """Open the DI request scope and the log-correlation context.
 
-    request_id is set here; user_id is cleared so a value can never leak
-    between requests handled in the same task (e.g. under test transports),
-    then populated by the JWT guard once the caller is authenticated.
+    Every request-scoped dependency resolved while handling this request is
+    cached for the request and disposed when it ends. request_id is set here;
+    user_id is cleared so a value can never leak between requests handled in
+    the same task, then populated by the JWT guard once the caller is
+    authenticated.
     """
     request_id_token = log_context.request_id_var.set(str(uuid.uuid4()))
     user_id_token = log_context.user_id_var.set(None)
     try:
-        return await call_next(request)
+        async with async_request_scope():
+            return await call_next(request)
     finally:
         log_context.user_id_var.reset(user_id_token)
         log_context.request_id_var.reset(request_id_token)
@@ -64,7 +67,6 @@ async def add_request_id(
 
 app.include_router(auth_routes.router)
 app.include_router(user_routes.router)
-setup_dishka(container, app)
 
 
 @app.get("/")

@@ -9,9 +9,11 @@ patterns, and anti-patterns. **These rules override any general defaults.**
 ## Architecture (Clean Architecture — 4 Layers)
 
 Dependency direction: API → Infrastructure → Application → Domain (inward only). Domain never
-imports from any other layer. The composition root is a **Dishka container** —
-`AppProvider` in `src/api/dependencies/providers.py` declares implementation, port, and scope
-in one line per binding; the graph is validated at startup.
+imports from any other layer. The composition root is `AppModule` in
+`src/api/dependencies/providers.py` (injector + in-house `TypedBinder` and request scope in
+`injection.py`): one line binds implementation, port, and scope, and a mismatched
+implementation is a mypy error at that line. No graph-completeness validation — a missing
+binding fails at runtime on first resolution (accepted trade-off).
 
 - Domain (`src/domain/`): Entities, repository ports (Protocols), enums. No external deps.
 - Application (`src/application/`): Use cases, DTOs, converter functions, service ports (Protocols). Imports Domain only.
@@ -30,16 +32,17 @@ in one line per binding; the graph is validated at startup.
 - Converters are module functions, NOT classes of static methods.
 - Booleans read like questions (`is_active`); no abbreviations (`repository` not `repo`).
 
-### Dependency Injection (Dishka)
-- Composition root: Dishka `AppProvider` in `src/api/dependencies/providers.py` — one line per binding: `provide(Impl, provides=Port, scope=Scope.REQUEST)`.
-- Scopes are explicit: `Scope.APP` (engine, stateless services) and `Scope.REQUEST` (session, repositories, transaction context, use cases). Constructors auto-wired from type hints; injectable classes carry NO decorators.
-- Container built in `main.py` via `make_async_container(AppProvider(), FastapiProvider())` + `setup_dishka(container, app)`; the graph is validated at container creation.
-- Routes: `route_class=DishkaRoute` on the router, `use_case: FromDishka[UserUseCase]` in signatures. Guards needing container objects use `@inject` + `FromDishka[...]` (only in `src/api/dependencies/`).
-- Tests: bind mocks in a small test container (`make_async_container(TestProvider())` + `setup_dishka`); `app.dependency_overrides` still overrides plain guards; `provide(..., override=True)` overrides real bindings.
+### Dependency Injection (injector + TypedBinder)
+- Composition root: `AppModule.configure()` in `src/api/dependencies/providers.py` using the `TypedBinder` facade — one line per binding: `typed_binder.bind_typed(UserRepository).to(SqlAlchemyUserRepository, scope=request)`. A wrong implementation for a port is a mypy error at that line. Concrete classes: `bind_self_typed(UserUseCase, scope=request)`.
+- Scopes: `singleton` (engine, stateless services) and `request` (session, repositories, transaction context, use cases). Request-scope state lives in a ContextVar; the scope is entered per request by the middleware in `main.py` and disposes its objects on exit (LIFO; `aclose()` preferred, async `close()` awaited).
+- `@inject` REQUIRED on every implementation whose `__init__` takes dependencies (injector auto-wires from type hints; omitting it is a runtime `TypeError`). Construction logic lives in `@provider` methods on `AppModule`.
+- Routes/guards resolve via `Annotated[UseCase, Injected(UseCase)]` — a thin Depends over `app.state.injector`.
+- NO graph-completeness validation: a missing binding fails at runtime on first resolution.
+- Tests: bind mock instances in a `TestModule` (`binder.bind(UserUseCase, to=mock)`), set `app.state.injector = Injector([TestModule()])`; `app.dependency_overrides` for plain guards.
 
 ### Session, Transactions & Repository Pattern
-- Engine + `async_sessionmaker` are `Scope.APP` providers; `container.close()` in `lifespan` disposes the engine.
-- The `AsyncSession` is a `Scope.REQUEST` generator provider — every repository and the transaction context in one request share it, and the scope closes it. NO module-global session state, NO `ContextVar` for sessions.
+- Engine + `async_sessionmaker` are singleton `@provider` methods on `AppModule`; the engine is disposed in `lifespan` shutdown.
+- The `AsyncSession` is a request-scoped `@provider` method — every repository and the transaction context in one request share it, and the scope teardown closes it via `aclose()`. Repositories receive the session by constructor, never via ambient state.
 - Repository adapters receive the `AsyncSession` via constructor and NEVER commit or roll back. One CRUD operation per method.
 - Mutations `flush()`/`execute()` and map DB exceptions to result enums (`IntegrityError`→`UNIQUE_CONSTRAINT_ERROR`; deadlock→`CONCURRENCY_ERROR`; else `FAILURE`). Reads just query. `flush()` populates `id`/server defaults via RETURNING — no `session.refresh()`.
 - The use case owns the transaction boundary via the `TransactionContext` port (adapter `SqlAlchemyTransactionContext`): wrap mutations in `async with self._transaction_context.begin() as transaction:` and call `await transaction.commit()` only when every operation succeeded. Rollback-unless-committed.
@@ -67,11 +70,12 @@ in one line per binding; the graph is validated at startup.
 
 ### Testing
 - Use case tests: `AsyncMock(spec=UserRepository)` for the repository port.
-- Route tests: minimal `FastAPI()` + a Dishka test container binding mocks (`setup_dishka`), plus `app.dependency_overrides` for `get_current_user` — never import `src/main.py`.
+- Route tests: minimal `FastAPI()` + `app.state.injector = Injector([TestModule()])` binding mock instances, plus `app.dependency_overrides` for `get_current_user` — never import `src/main.py`.
 - `asyncio_mode = "auto"` is configured (no `@pytest.mark.asyncio`).
 
 ### Anti-Patterns (Never)
-- Do not wire bindings outside `AppProvider`; never put DI decorators on domain/application classes (`@inject` only on guards in `src/api/dependencies/`).
+- Do not wire bindings outside `AppModule.configure()`; always bind through `TypedBinder`.
+- Do not omit `@inject` on implementations whose `__init__` takes dependencies — resolution fails with `TypeError`.
 - Do not keep session state in a module-global `ContextVar`; inject the request-scoped session.
 - Do not pass sessions to use cases.
 - Do not commit or roll back inside repositories — the use case owns the boundary via `TransactionContext`.

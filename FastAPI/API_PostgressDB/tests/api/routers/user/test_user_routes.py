@@ -5,10 +5,9 @@ from datetime import datetime
 from unittest.mock import AsyncMock
 
 import pytest
-from dishka import Provider, Scope, make_async_container, provide
-from dishka.integrations.fastapi import setup_dishka
 from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
+from injector import Binder, Injector, Module
 
 from src.api.dependencies import jwt_dependency
 from src.api.routers.user import user_routes
@@ -39,25 +38,20 @@ def mock_use_case() -> AsyncMock:
 
 
 @pytest.fixture
-async def test_app(
-    mock_use_case: AsyncMock,
-) -> AsyncGenerator[FastAPI]:
-    # A test container binds only what the router under test needs; the mock
-    # is returned for the UserUseCase binding.
-    class TestProvider(Provider):
-        @provide(scope=Scope.REQUEST)
-        def user_use_case(self) -> UserUseCase:
-            return mock_use_case
+def test_app(mock_use_case: AsyncMock) -> FastAPI:
+    # A test injector binds only what the router under test needs; the mock
+    # is instance-bound, so no request scope is required.
+    class TestModule(Module):
+        def configure(self, binder: Binder) -> None:
+            binder.bind(UserUseCase, to=mock_use_case)
 
     app = FastAPI()
     app.include_router(user_routes.router)
-    container = make_async_container(TestProvider())
-    setup_dishka(container, app)
+    app.state.injector = Injector([TestModule()])
     app.dependency_overrides[jwt_dependency.get_current_user] = (
         _mock_current_user
     )
-    yield app
-    await container.close()
+    return app
 
 
 @pytest.fixture

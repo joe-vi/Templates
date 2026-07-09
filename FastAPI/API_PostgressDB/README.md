@@ -21,8 +21,8 @@ Invoke-WebRequest -Uri "https://github.com/joe-vi/Templates/archive/refs/heads/m
 - **Clean Architecture**: Four-layer separation of concerns — Domain, Application, Infrastructure, API
 - **Async Database**: Asynchronous PostgreSQL operations using SQLAlchemy 2.0+ and asyncpg
 - **JWT Authentication**: Access and refresh token pair with configurable expiry
-- **Dependency Injection**: Declarative [Dishka](https://github.com/reagento/dishka) container — one line binds implementation, port, and scope (`provide(Impl, provides=Port, scope=Scope.REQUEST)`); constructors auto-wired from type hints, no decorators on your classes, graph validated at startup
-- **Request-Scoped Sessions**: A single `AsyncSession` per request (a `Scope.REQUEST` generator provider), shared by every adapter in that request — with no module-global session state
+- **Dependency Injection**: `injector` with an in-house typed facade — one line binds implementation, port, and scope (`bind_typed(UserRepository).to(SqlAlchemyUserRepository, scope=request)`), constructors auto-wired via `@inject`, and a mismatched implementation is a mypy error at the binding line
+- **Request-Scoped Sessions**: A single `AsyncSession` per request (a request-scoped provider, disposed automatically on request end), shared by every adapter in that request
 - **Unit of Work**: Mutating use cases own the transaction boundary via the `TransactionContext` port — commit only on all-success, rollback-unless-committed; operations spanning several repositories inside one `begin()` block are atomic
 - **Ports & Adapters**: Collaborators are defined as `typing.Protocol` ports and implemented by mechanism-qualified adapters (`SqlAlchemyUserRepository`, `BcryptPasswordHasher`, `JwtTokenService`, `JsonLogger`)
 - **Role-Based Access**: User roles (`admin`, `user`) and statuses (`active`, `inactive`) stored as lowercase enums
@@ -78,7 +78,8 @@ Invoke-WebRequest -Uri "https://github.com/joe-vi/Templates/archive/refs/heads/m
 │   │           └── sqlalchemy_user_repository.py   # Async CRUD adapter
 │   ├── api/                                # Routes, schemas, dependency providers
 │   │   ├── dependencies/
-│   │   │   ├── providers.py                # composition root: Dishka AppProvider (ports → adapters, scopes)
+│   │   │   ├── injection.py                # RequestScope, TypedBinder, Injected()
+│   │   │   ├── providers.py                # composition root: AppModule (ports → adapters, scopes)
 │   │   │   └── jwt_dependency.py           # JWT guard (get_current_user)
 │   │   ├── routers/
 │   │   │   ├── auth/{auth_converter,auth_routes,auth_schema}.py
@@ -93,7 +94,7 @@ Invoke-WebRequest -Uri "https://github.com/joe-vi/Templates/archive/refs/heads/m
 │   │   └── routers/
 │   │       └── user/
 │   │           ├── test_user_converter.py
-│   │           └── test_user_routes.py     # Route tests via a Dishka test container
+│   │           └── test_user_routes.py     # Route tests via an injector TestModule
 │   ├── application/
 │   │   └── use_cases/
 │   │       └── user/
@@ -132,7 +133,7 @@ Invoke-WebRequest -Uri "https://github.com/joe-vi/Templates/archive/refs/heads/m
 - **Rule**: Implements (structurally satisfies) the ports from the Domain and Application layers
 
 ### 4. API Layer (`src/api/`)
-- **Routes**: FastAPI endpoints (`route_class=DishkaRoute`) that depend on the concrete use case via `use_case: FromDishka[UserUseCase]` and **return response models** (FastAPI serialises them to camelCase)
+- **Routes**: FastAPI endpoints that depend on the concrete use case via `Annotated[UserUseCase, Injected(UserUseCase)]` and **return response models** (FastAPI serialises them to camelCase)
 - **Dependencies**: `providers.py` is the composition root (ports → adapters); `database.py` yields the request-scoped session; `jwt_dependency.py` is the JWT guard
 - **Schemas**: Pydantic request/response models; all inherit `APIModelBase` (camelCase JSON, snake_case Python attributes)
 - **Rule**: Wires adapters to ports in `dependencies/`; routes never call repositories directly
@@ -280,12 +281,12 @@ uv run alembic downgrade -1                              # Roll back one step
 2. **Application**: Add DTO, converter functions, and a concrete use case in `src/application/use_cases/<name>/` — inject `TransactionContext`, wrap mutations in `begin()`, commit only on success (several repository calls in one block are atomic)
 3. **Infrastructure**: Add ORM model in `src/infrastructure/database/models/` and a `sqlalchemy_<name>_repository.py` adapter (takes an `AsyncSession`) in `src/infrastructure/repositories/<name>/`
 4. **API**: Add Pydantic schemas (inheriting `APIModelBase`), converter functions, and routes in `src/api/routers/<name>/` that return response models
-5. **Providers**: Add one binding per line to `AppProvider` in `src/api/dependencies/providers.py` — constructors are auto-wired from type hints:
+5. **Bindings**: Add one line per binding to `AppModule.configure()` in `src/api/dependencies/providers.py` (constructors auto-wired via `@inject`; a wrong implementation is a mypy error):
    ```python
-   order_repository = provide(
-       SqlAlchemyOrderRepository, provides=OrderRepository, scope=Scope.REQUEST
+   typed_binder.bind_typed(OrderRepository).to(
+       SqlAlchemyOrderRepository, scope=request
    )
-   order_use_case = provide(OrderUseCase, scope=Scope.REQUEST)
+   typed_binder.bind_self_typed(OrderUseCase, scope=request)
    ```
 6. **Main**: Include the new router in `src/main.py`
 7. **Migration**: Generate and apply an Alembic migration for any new DB models

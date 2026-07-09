@@ -1,6 +1,6 @@
 ---
 name: fastapi-clean-architecture-template
-description: Scaffold a new project following Clean Architecture principles on FastAPI — strict 4-layer structure (Domain, Application, Infrastructure, API) with unidirectional dependencies, ports as typing.Protocol, the repository pattern, result-enum error handling, and declarative Dishka dependency injection (one binding per line with explicit APP/REQUEST scopes). Supports PostgreSQL, MongoDB, SQLite; JWT, OAuth2, API key auth; optional Redis cache.
+description: Scaffold a new project following Clean Architecture principles on FastAPI — strict 4-layer structure (Domain, Application, Infrastructure, API) with unidirectional dependencies, ports as typing.Protocol, the repository pattern, result-enum error handling, and typed declarative dependency injection (injector + TypedBinder: one binding per line with explicit singleton/request scopes, conformance checked by mypy). Supports PostgreSQL, MongoDB, SQLite; JWT, OAuth2, API key auth; optional Redis cache.
 argument-hint: "<project-name> [--db postgres|mongodb|sqlite] [--auth jwt|oauth2|apikey] [--cache none|redis] [--no-docker]"
 disable-model-invocation: true
 metadata:
@@ -53,7 +53,7 @@ Parse all flags. Apply defaults for any flag not provided.
 │   │   │   └── models/__init__.py
 │   │   └── repositories/
 │   └── api/
-│       ├── dependencies/      # providers.py (Dishka AppProvider), guards
+│       ├── dependencies/      # injection.py (scope + TypedBinder), providers.py (AppModule), guards
 │       ├── routers/
 │       └── schemas/
 │           ├── base_schema.py
@@ -141,24 +141,25 @@ Ports are `typing.Protocol`s in `src/application/services/`; adapters are mechan
 
 ### Step 8 — Generate `main.py`
 
-- `container = make_async_container(AppProvider(), FastapiProvider())` at module level — the graph is validated here.
-- `lifespan`: `await app.state.dishka_container.close()` on shutdown (finalises the engine and other APP-scoped resources).
-- `FastAPI(lifespan=lifespan)`; a request-id middleware that scopes the `request_id`/`user_id` context vars per request.
-- `app.include_router(...)` for each router, then `setup_dishka(container, app)`.
+- `injector = Injector([AppModule()])` at module level; `app.state.injector = injector`.
+- `lifespan`: dispose the engine on shutdown (`await app.state.injector.get(AsyncEngine).dispose()`).
+- `FastAPI(lifespan=lifespan)`; a `request_context` middleware that enters `async_request_scope()` and scopes the `request_id`/`user_id` context vars per request.
+- `app.include_router(...)` for each router.
 
-No `fastapi-injector`, no `@inject` on domain/application classes.
+Copy `injection.py` (RequestScope, request_scope context managers, TypedBinder, Injected) verbatim from `FastAPI/API_PostgressDB/src/api/dependencies/injection.py`.
 
-### Step 9 — Generate the Dishka provider
+### Step 9 — Generate the composition root
 
-`AppProvider` in `src/api/dependencies/providers.py` is the composition root — one declarative line per binding, constructors auto-wired from type hints:
-- Stateless singletons (`PasswordHasher`, `TokenService`, `Logger`, cache) at `Scope.APP`: `provide(BcryptPasswordHasher, provides=PasswordHasher, scope=Scope.APP)`.
-- Engine (generator provider) and session factory at `Scope.APP`; the session as a `Scope.REQUEST` generator provider.
-- `provide(Sqlalchemy<Entity>Repository, provides=<Entity>Repository, scope=Scope.REQUEST)` and `provide(SqlAlchemyTransactionContext, provides=TransactionContext, scope=Scope.REQUEST)` — same request session, so repositories and the transaction context share one transaction.
-- `provide(<Entity>UseCase, scope=Scope.REQUEST)` — dependencies resolved automatically.
+`AppModule` in `src/api/dependencies/providers.py` is the composition root — one declarative line per binding via `TypedBinder`, constructors auto-wired via `@inject`:
+- Stateless singletons (`PasswordHasher`, `TokenService`, `Logger`, cache): `typed_binder.bind_typed(PasswordHasher).to(BcryptPasswordHasher, scope=singleton)`.
+- Engine, session factory: singleton `@provider` methods; the session: a request-scoped `@provider` method (disposed via `aclose()` by the scope teardown).
+- `bind_typed(<Entity>Repository).to(Sqlalchemy<Entity>Repository, scope=request)` and `bind_typed(TransactionContext).to(SqlAlchemyTransactionContext, scope=request)` — same request session, so repositories and the transaction context share one transaction.
+- `bind_self_typed(<Entity>UseCase, scope=request)` — dependencies resolved automatically.
+- Add `@inject` to every implementation whose `__init__` takes dependencies.
 
 ### Step 10 — Generate `pyproject.toml`
 
-Base dependencies: `fastapi>=0.115`, `dishka>=1.10`, `pydantic>=2.0`, `pydantic-settings>=2.0`, `uvicorn[standard]>=0.30`. (No `injector` / `fastapi-injector`.)
+Base dependencies: `fastapi>=0.115`, `injector>=0.22`, `pydantic>=2.0`, `pydantic-settings>=2.0`, `uvicorn[standard]>=0.30`. (No `fastapi-injector`, no `dishka` — the request scope and typed binder are in-house.)
 
 Stack additions:
 

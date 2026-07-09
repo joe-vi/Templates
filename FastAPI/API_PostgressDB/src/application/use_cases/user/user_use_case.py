@@ -1,5 +1,7 @@
 """User use case."""
 
+from injector import inject
+
 from src.application.services.password_hasher import PasswordHasher
 from src.application.services.transaction_context import TransactionContext
 from src.application.use_cases.user import user_converter, user_dto
@@ -17,6 +19,7 @@ class UserUseCase:
     fail together.
     """
 
+    @inject
     def __init__(
         self,
         repository: UserRepository,

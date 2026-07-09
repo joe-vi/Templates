@@ -3,6 +3,7 @@
 from typing import Any, cast
 
 import asyncpg
+from injector import inject
 from sqlalchemy import CursorResult, delete, select, update
 from sqlalchemy.exc import DBAPIError, IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -36,6 +37,7 @@ class SqlAlchemyUserRepository:
     which is what lets several repository calls form one atomic unit of work.
     """
 
+    @inject
     def __init__(self, session: AsyncSession) -> None:
         """Initialize the repository.
 

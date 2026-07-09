@@ -2,10 +2,10 @@
 
 from typing import Annotated
 
-from dishka.integrations.fastapi import FromDishka, inject
 from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
+from src.api.dependencies.injection import Injected
 from src.application.services.token_service import TokenService
 from src.application.use_cases.auth import auth_dto
 from src.infrastructure.logging import log_context
@@ -13,10 +13,9 @@ from src.infrastructure.logging import log_context
 _security = HTTPBearer()
 
 
-@inject
 async def get_current_user(
     credentials: Annotated[HTTPAuthorizationCredentials, Depends(_security)],
-    token_service: FromDishka[TokenService],
+    token_service: Annotated[TokenService, Injected(TokenService)],
 ) -> auth_dto.TokenClaimsDTO:
     """Validate the Bearer JWT access token and return its claims.
 

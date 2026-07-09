@@ -12,9 +12,11 @@ conventions, patterns, and anti-patterns. **These rules override any general def
 API → Infrastructure → Application → Domain   (dependencies point inward only)
 ```
 
-Domain never imports from any other layer. The composition root is a **Dishka container** —
-`AppProvider` in `src/api/dependencies/providers.py` binds implementation, port, and scope in
-one line per binding; the graph is validated at container creation in `main.py`.
+Domain never imports from any other layer. The composition root is `AppModule` in
+`src/api/dependencies/providers.py` (injector + in-house `TypedBinder`/request scope in
+`injection.py`) — one line binds implementation, port, and scope, and a mismatched
+implementation is a mypy error at that line. No graph-completeness validation: a missing
+binding fails at runtime on first resolution (accepted).
 
 | Layer | Location | Key Rule |
 |---|---|---|
@@ -36,14 +38,15 @@ one line per binding; the graph is validated at container creation in `main.py`.
 - Booleans read like questions (`is_active`); no abbreviations (`repository` not `repo`).
 
 ### Dependency Injection (FastAPI `Depends`)
-- The composition root is the Dishka `AppProvider` (`src/api/dependencies/providers.py`): one line per binding — `provide(Impl, provides=Port, scope=Scope.REQUEST)`; constructors auto-wired from type hints; graph validated at container creation in `main.py`.
-- Scopes are explicit: `Scope.APP` (engine, stateless services) and `Scope.REQUEST` (session, repositories, transaction context, use cases). Resources use generator providers (`yield` + cleanup).
-- Routes use `route_class=DishkaRoute` and `use_case: FromDishka[UserUseCase]`. Guards needing container objects use `@inject` + `FromDishka[...]` (only in `src/api/dependencies/`).
-- **No** `injector`, **no** `@inject`, **no** `InjectorMiddleware`. Override providers in tests with `app.dependency_overrides`.
+- Composition root: `AppModule.configure()` uses `TypedBinder` — `typed_binder.bind_typed(UserRepository).to(SqlAlchemyUserRepository, scope=request)`; wrong implementation for a port = mypy error. Concrete classes: `bind_self_typed(UserUseCase, scope=request)`.
+- Scopes: `singleton` (engine, stateless services) and `request` (session, repositories, transaction context, use cases). Request-scope state lives in a ContextVar; entered per request by the `request_context` middleware; disposes objects on exit (LIFO, `aclose()` preferred, async `close()` awaited).
+- **`@inject` required** on every implementation whose `__init__` takes dependencies (auto-wiring). Construction logic lives in `@provider` methods on `AppModule`.
+- Routes/guards resolve via `Annotated[UseCase, Injected(UseCase)]` (thin `Depends` over `app.state.injector`).
+- Tests: bind mock instances in a `TestModule` and set `app.state.injector = Injector([TestModule()])`; `app.dependency_overrides` for plain guards.
 
 ### Session, Transactions & Repositories
-- The engine + `async_sessionmaker` are `Scope.APP` providers; `container.close()` in `lifespan` disposes the engine.
-- The `AsyncSession` is a **REQUEST-scoped generator provider** in `AppProvider`; every repository and the transaction context in one request share it, and the scope closes it. No module-global session state, no `ContextVar` for sessions.
+- The engine + `async_sessionmaker` are singleton `@provider` methods; the engine is disposed in `lifespan` shutdown.
+- The `AsyncSession` is a **request-scoped `@provider` method**; every repository and the transaction context in one request share it, and the scope teardown closes it via `aclose()`. Repositories receive the session by constructor — never via ambient state.
 - Repository **adapters receive the `AsyncSession`** via constructor and **never commit or roll back**. Mutations `flush()`/`execute()` and map DB errors to result enums (`IntegrityError`→`UNIQUE_CONSTRAINT_ERROR`; deadlock→`CONCURRENCY_ERROR`; else `FAILURE`). Reads just query. `flush()` populates `id`/server defaults via RETURNING — no `session.refresh()`.
 - **The use case owns the transaction boundary** via the `TransactionContext` port (adapter `SqlAlchemyTransactionContext`): wrap mutations in `async with self._transaction_context.begin() as transaction:`; call `await transaction.commit()` only when every operation succeeded. Rollback-unless-committed.
 - **Atomic multi-repository operations**: call several repositories inside one `begin()` block — they share the request session and succeed or fail together.
@@ -75,8 +78,9 @@ one line per binding; the graph is validated at container creation in `main.py`.
 - `asyncio_mode = "auto"` is configured (no `@pytest.mark.asyncio`).
 
 ### Anti-Patterns (Never)
-- Do not add an IoC container or `@inject`; use FastAPI `Depends` providers.
-- Do not keep session state in a module-global `ContextVar`; inject the request-scoped session.
+- Do not wire bindings outside `AppModule.configure()`, and always bind through `TypedBinder`.
+- Do not omit `@inject` on implementations whose `__init__` takes dependencies — resolution fails with `TypeError`.
+- Do not let repositories consult ambient state for the session; it is injected by constructor.
 - Do not pass sessions to use cases.
 - Do not commit or roll back inside repositories — the use case owns the boundary via `TransactionContext`.
 - Do not call `transaction.commit()` after any failed result in the block.

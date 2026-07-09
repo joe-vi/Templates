@@ -1,15 +1,17 @@
 """API routes for authentication operations."""
 
-from dishka.integrations.fastapi import DishkaRoute, FromDishka
+from typing import Annotated
+
 from fastapi import APIRouter, HTTPException, status
 
+from src.api.dependencies.injection import Injected
 from src.api.routers.auth import auth_converter, auth_schema
 from src.application.use_cases.auth.auth_use_case import AuthUseCase
 from src.domain.enums import operation_results
 
-router = APIRouter(prefix="/api/v1", tags=["auth"], route_class=DishkaRoute)
+router = APIRouter(prefix="/api/v1", tags=["auth"])
 
-UseCaseDep = FromDishka[AuthUseCase]
+UseCaseDep = Annotated[AuthUseCase, Injected(AuthUseCase)]
 
 
 @router.post(

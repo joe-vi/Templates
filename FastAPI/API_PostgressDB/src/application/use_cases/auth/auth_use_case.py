@@ -1,5 +1,7 @@
 """Authentication use case."""
 
+from injector import inject
+
 from src.application.services.logger import Logger
 from src.application.services.password_hasher import PasswordHasher
 from src.application.services.token_service import TokenService
@@ -11,6 +13,7 @@ from src.domain.repositories.user.user_repository import UserRepository
 class AuthUseCase:
     """Application logic for authentication operations."""
 
+    @inject
     def __init__(
         self,
         user_repository: UserRepository,

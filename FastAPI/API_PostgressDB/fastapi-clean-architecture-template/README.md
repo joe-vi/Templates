@@ -42,16 +42,16 @@ Key architectural patterns enforced on every scaffold regardless of tech stack:
 
 - **Repository pattern** — one CRUD operation per method; mutation methods return result enums (`CreateResult`, `UpdateResult`, `DeleteResult`), never raise exceptions to use cases; repositories never commit — the use case owns the transaction boundary
 - **Unit of work** — mutating use cases wrap repository calls in `TransactionContext.begin()` and commit only on all-success; multi-repository operations inside one block are atomic (rollback-unless-committed)
-- **Ports & adapters** — use cases depend on `typing.Protocol` ports; adapters (mechanism-qualified, e.g. `SqlAlchemyUserRepository`) structurally satisfy them; the Dishka `AppProvider` in `src/api/dependencies/providers.py` wires them
-- **Declarative DI (Dishka)** — one line binds implementation, port, and scope; constructors auto-wired from type hints; no decorators on your classes; graph validated at startup
-- **Request-scoped sessions** — one `AsyncSession` per request (`Scope.REQUEST` generator provider), shared by every adapter in that request; no module-global session state
+- **Ports & adapters** — use cases depend on `typing.Protocol` ports; adapters (mechanism-qualified, e.g. `SqlAlchemyUserRepository`) structurally satisfy them; `AppModule` in `src/api/dependencies/providers.py` wires them via the typed binder
+- **Typed declarative DI (injector + TypedBinder)** — one line binds implementation, port, and scope; a mismatched implementation is a mypy error at the binding line; constructors auto-wired via `@inject`
+- **Request-scoped sessions** — one `AsyncSession` per request (request-scoped provider, disposed automatically on request end), shared by every adapter in that request
 - **Strict naming** — ports are clean-named Protocols, adapters mechanism-qualified, DTOs end with `DTO`, schemas with `Request`/`Response`; operation result enums are always generic (`CreateResult`, not `CreateUserResult`)
 - **Responses** — routes return the response model and let FastAPI serialise it (camelCase); they never hand-build `JSONResponse`
 - **DB-generated fields** — `id`, `created_at` are never set in Python; all constraints are explicitly named for safe migrations
 
 ## Tech stack options
 
-The only things that change between stacks are `src/infrastructure/` adapters and the bindings in `AppProvider` (`src/api/dependencies/providers.py`). All other layers are identical.
+The only things that change between stacks are `src/infrastructure/` adapters and the bindings in `AppModule` (`src/api/dependencies/providers.py`). All other layers are identical.
 
 | Flag | Values | Default |
 |------|--------|---------|

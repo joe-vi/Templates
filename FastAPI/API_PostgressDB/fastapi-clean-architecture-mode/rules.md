@@ -13,9 +13,11 @@ API  →  Infrastructure  →  Application  →  Domain
 | Infrastructure | `src/infrastructure/` | Domain + Application |
 | API | `src/api/` | Application + Infrastructure (adapters wired only in `dependencies/`) |
 
-The composition root is a **Dishka container**: `AppProvider` in
-`src/api/dependencies/providers.py` declares implementation, port, and scope in
-one line per binding; the graph is validated at container creation in `main.py`.
+The composition root is `AppModule` in `src/api/dependencies/providers.py`,
+built on `injector` plus the in-house `TypedBinder` and request scope
+(`injection.py`): one line binds implementation, port, and scope, and a
+mismatched implementation is a mypy error at that line. No graph-completeness
+validation — a missing binding fails at runtime on first resolution.
 
 ## Naming
 
@@ -35,13 +37,14 @@ one line per binding; the graph is validated at container creation in `main.py`.
 - An adapter is a plain class that structurally satisfies the port — it does not import or subclass it.
 - Use cases take ports as constructor parameters; providers supply the concrete adapter.
 
-## Dependency injection (Dishka)
+## Dependency injection (injector + TypedBinder)
 
-- Wire everything in `AppProvider` (`src/api/dependencies/providers.py`) — one line per binding: `provide(Impl, provides=Port, scope=Scope.REQUEST)`.
-- Explicit scopes: `Scope.APP` (engine, stateless services), `Scope.REQUEST` (session, repositories, transaction context, use cases). Constructors auto-wired from type hints; injectable classes carry no decorators.
-- Container built in `main.py`: `make_async_container(AppProvider(), FastapiProvider())` + `setup_dishka(container, app)`; graph validated at creation.
-- Routes: `route_class=DishkaRoute` + `use_case: FromDishka[UserUseCase]`. Guards needing container objects use `@inject` + `FromDishka[...]` (only in `src/api/dependencies/`).
-- Tests: bind mocks in a test container (`make_async_container(TestProvider())` + `setup_dishka`); `app.dependency_overrides` for plain guards; `provide(..., override=True)` to replace real bindings.
+- Wire everything in `AppModule.configure()` via `TypedBinder` — one line per binding: `typed_binder.bind_typed(UserRepository).to(SqlAlchemyUserRepository, scope=request)`; concrete classes use `bind_self_typed(UserUseCase, scope=request)`. A wrong implementation is a mypy error.
+- Explicit scopes: `singleton` (engine, stateless services), `request` (session, repositories, transaction context, use cases). Request-scope state lives in a ContextVar; entered per request by the middleware in `main.py`; disposes objects on exit (LIFO, `aclose()` preferred, async `close()` awaited).
+- `@inject` required on every implementation whose `__init__` takes dependencies. Construction logic lives in `@provider` methods on `AppModule`.
+- Routes/guards: `Annotated[UseCase, Injected(UseCase)]` — a thin Depends over `app.state.injector`.
+- No graph-completeness validation: a missing binding fails at runtime on first resolution.
+- Tests: bind mock instances in a `TestModule`, set `app.state.injector = Injector([TestModule()])`; `app.dependency_overrides` for plain guards.
 
 ## Session, transactions & repository pattern
 

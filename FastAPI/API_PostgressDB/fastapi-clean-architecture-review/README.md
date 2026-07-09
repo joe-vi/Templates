@@ -32,7 +32,7 @@ The audit runs in 6 phases, one layer at a time. Each phase targets a specific p
 | 2 | Application | May only import from Domain — concrete use cases, DTOs, converter functions, service ports (Protocols); no exception handling for mutations |
 | 3 | Infrastructure | Repository pattern correctness — one operation per method, result enums returned (never exceptions propagated), adapters take the `AsyncSession` by constructor and never commit/roll back, DB constraints explicitly named |
 | 4 | API | Routes depend on the concrete use case via `Depends` providers; guard functions isolated to `dependencies/`; schemas inherit `APIModelBase`; routes return models (no `JSONResponse(model.model_dump())`) |
-| 5 | Main / Providers | Dishka wiring — `AppProvider` binds every port with an explicit scope, `setup_dishka` after routers, `container.close()` on shutdown, no `fastapi-injector` remnants |
+| 5 | Main / Providers | Typed injector wiring — `AppModule` binds every port via `TypedBinder` with an explicit scope, request scope entered by middleware, engine disposed in `lifespan`, `@inject` present on implementations |
 | 6 | Global | Naming discipline — ports are clean-named Protocols, adapters mechanism-qualified, generic result enums (`CreateResult` not `CreateUserResult`), no abbreviations |
 
 Results are reported as a table with file, line, rule violated, and suggested fix. Pass `--fix` to apply fixes automatically.

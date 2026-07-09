@@ -11,7 +11,7 @@ Dependencies flow **inward only**: API → Infrastructure → Application → Do
 | Infrastructure | `src/infrastructure/` | DB models, repository adapters, auth/logging adapters, engine/session | Domain + Application |
 | API | `src/api/` | Routes, request/response schemas, API converters, **dependency providers** | Application + Infrastructure (only in `dependencies/`) |
 
-The composition root is a **Dishka container**: `AppProvider` in `src/api/dependencies/providers.py` declares one binding per dependency — implementation, port, and scope in a single line. Constructor arguments are auto-wired from type hints, injectable classes carry no decorators, and the graph is validated when the container is created in `main.py`, so a missing binding fails at startup rather than mid-request.
+The composition root is `AppModule` in `src/api/dependencies/providers.py`, built on the **injector** library with two in-house pieces (`src/api/dependencies/injection.py`): a ContextVar-backed **request scope** with automatic disposal, and the **`TypedBinder`** facade, which makes every binding a one-liner — implementation, port, and scope — where a mismatched implementation is a mypy error at that line. There is no graph-completeness validation: a missing binding surfaces as a runtime error on first resolution (accepted trade-off).
 
 ### File Organisation
 
@@ -36,7 +36,8 @@ src/
 │   └── database/{base.py, session.py, sqlalchemy_transaction_context.py, models/<entity>_model.py}
 └── api/
     ├── dependencies/
-    │   ├── providers.py       # composition root: Dishka AppProvider (ports -> adapters, scopes)
+    │   ├── injection.py       # RequestScope, request_scope(), TypedBinder, Injected()
+    │   ├── providers.py       # composition root: AppModule (ports -> adapters, scopes)
     │   └── jwt_dependency.py  # get_current_user guard
     ├── routers/<entity>/{<entity>_schema.py, <entity>_converter.py, <entity>_routes.py}
     ├── schemas/{base_schema.py, operation_schema.py}
@@ -75,19 +76,21 @@ src/
 - An **adapter** is a plain class that structurally satisfies the port. It does **not** import or subclass the port — structural typing keeps the adapter decoupled from the abstraction.
 - Use cases depend on ports (constructor parameters typed as the Protocol). Providers supply the concrete adapter.
 
-### Dependency Injection (Dishka)
-- The composition root is `AppProvider` in `src/api/dependencies/providers.py`. One line binds implementation, port, and scope:
-  `user_repository = provide(SqlAlchemyUserRepository, provides=UserRepository, scope=Scope.REQUEST)`.
-- **Scopes are explicit**: `Scope.APP` for process-wide singletons (engine, `PasswordHasher`, `TokenService`, `Logger`); `Scope.REQUEST` for per-request objects (session, repositories, transaction context, use cases). Everything in one request shares the same instances.
-- Constructor arguments are **auto-wired from type hints** — adding a dependency to a use case means editing only its `__init__`; no provider signature to keep in sync. Injectable classes carry **no decorators**.
-- Resources use generator providers: `yield engine` / `yield session` with cleanup after the yield; the request scope closes the session, `container.close()` (lifespan shutdown) disposes the engine.
-- The container is created in `main.py` with `make_async_container(AppProvider(), FastapiProvider())` and attached with `setup_dishka(container, app)`. **Graph validation happens at container creation** — missing bindings fail at import.
-- Routes use `route_class=DishkaRoute` on the `APIRouter` and declare `use_case: FromDishka[UserUseCase]`. Guard dependencies that need container objects use the `@inject` decorator with `FromDishka[...]` (see `jwt_dependency.py`) — this is the only decorator in the DI system, and it lives in the API layer, never on domain/application classes.
-- Tests build a small test container (`make_async_container(TestProvider())` + `setup_dishka`) binding mocks for what the router needs; `app.dependency_overrides` still works for plain FastAPI guards like `get_current_user`. Overriding a real binding uses `provide(..., override=True)` in a provider passed after `AppProvider`.
+### Dependency Injection (injector + TypedBinder)
+- The composition root is `AppModule` in `src/api/dependencies/providers.py`. One line binds implementation, port, and scope via the typed facade:
+  `typed_binder.bind_typed(UserRepository).to(SqlAlchemyUserRepository, scope=request)` — and binding an implementation that does not satisfy the port is a **mypy error at that line**. Concrete classes with no port use `bind_self_typed(UserUseCase, scope=request)`.
+- **Scopes are explicit**: `singleton` (from `injector`) for process-wide objects (engine, `PasswordHasher`, `TokenService`, `Logger`); `request` (from `injection.py`) for per-request objects (session, repositories, transaction context, use cases). Everything in one request shares the same instances; the request scope's state lives in a `ContextVar`, isolated per request under asyncio.
+- **Every implementation whose `__init__` takes dependencies carries `@inject`** (from `injector`) so the graph auto-wires from type hints. Omitting it fails at resolution with a `TypeError`.
+- Construction that needs logic lives in `@provider` methods on `AppModule` (`provide_settings`, `provide_engine`, `provide_session_factory`, `provide_session`).
+- **Disposal**: on request end the scope disposes its objects in reverse creation order — `aclose()` preferred, an async `close()` is awaited, failures are logged without blocking other teardowns. The session is closed this way. The engine (a singleton) is disposed explicitly in `main.lifespan` shutdown.
+- The request scope is entered per HTTP request by the `request_context` middleware in `main.py`. Resolving a request-scoped binding outside a scope raises a descriptive `RuntimeError`.
+- Routes and guards resolve via `Annotated[UserUseCase, Injected(UserUseCase)]` — a thin `Depends` over `request.app.state.injector`.
+- **No graph-completeness validation**: a forgotten binding is a runtime error on first resolution, not a startup failure. This is an accepted trade-off; the wrong-implementation case is still caught statically by `TypedBinder`.
+- Tests bind mock **instances** in a `TestModule` (`binder.bind(UserUseCase, to=mock_use_case)` — instance-bound, so no request scope is needed) and set `app.state.injector = Injector([TestModule()])`; `app.dependency_overrides` handles plain guards like `get_current_user`.
 
 ### Database session & transactions (unit of work)
-- The engine and `async_sessionmaker` are **APP-scoped Dishka providers**; the engine is disposed by `container.close()` on shutdown.
-- The `AsyncSession` is a **REQUEST-scoped generator provider** in `AppProvider`, so every repository adapter **and the transaction context** in one request share the same session, and the request scope closes it. There is **no module-global session state**.
+- The engine and `async_sessionmaker` are **singleton `@provider` methods** on `AppModule`; the engine is disposed in `main.lifespan` shutdown.
+- The `AsyncSession` is a **request-scoped `@provider` method**, so every repository adapter **and the transaction context** in one request share the same session, and the request-scope teardown closes it via `aclose()`. Repositories receive the session **by constructor** — transactional behaviour is never decided by ambient state (the scope's `ContextVar` is only the DI instance cache).
 - Repository **adapters receive the `AsyncSession`** by constructor injection. They **never commit or roll back**. Mutations `flush()` (inserts) or `execute()` (update/delete) so DB errors surface in the repository and are mapped to result enums; reads just query.
   - `IntegrityError` → `UNIQUE_CONSTRAINT_ERROR`
   - `DBAPIError` whose `__cause__` is `asyncpg…DeadlockDetectedError` → `CONCURRENCY_ERROR`; otherwise `FAILURE`
@@ -154,7 +157,7 @@ Never set these in Python code:
 
 - Port (`Protocol`) lives in `src/application/services/<service>.py`. Use cases depend only on the port.
 - Adapter lives in `src/infrastructure/<service>/`, mechanism-qualified name.
-- Wire it with one `provide(...)` line in `AppProvider`. Stateless singletons bind at `Scope.APP`; resources needing teardown use a `Scope.APP` generator provider (`yield client` + cleanup) — `container.close()` on shutdown finalises them (see the database engine).
+- Wire it with one `bind_typed(...).to(..., scope=singleton)` line in `AppModule`. Request-scoped resources are disposed automatically by the scope teardown (`close()`/`aclose()`); singleton resources holding connections must be disposed in `main.lifespan` shutdown (see the database engine).
 - To switch providers: write a new adapter and change the `return` in its provider. The use case is untouched.
 
 ---
@@ -164,7 +167,7 @@ Never set these in Python code:
 1. **Domain**: enums in `src/domain/enums/<entity>_enum.py`; entity dataclass in `src/domain/entities/<entity>/`; repository **Protocol** in `src/domain/repositories/<entity>/<entity>_repository.py`.
 2. **Infrastructure**: ORM model in `src/infrastructure/database/models/<entity>_model.py` (re-export from `models/__init__.py`); adapter `sqlalchemy_<entity>_repository.py` taking an `AsyncSession`.
 3. **Application**: frozen DTOs, converter **functions**, concrete use case in `src/application/use_cases/<entity>/`. Mutating use cases inject `TransactionContext` and wrap repository calls in a `begin()` block, committing only on success.
-4. **API**: Pydantic schemas (inherit `APIModelBase`), converter functions, routes returning models (`route_class=DishkaRoute`, `FromDishka[UseCase]`); add one `provide(...)` line per new binding to `AppProvider`; include the router in `main.py`.
+4. **API**: Pydantic schemas (inherit `APIModelBase`), converter functions, routes returning models (`Annotated[UseCase, Injected(UseCase)]`); add one `bind_typed(...).to(...)`/`bind_self_typed(...)` line per new binding to `AppModule.configure()`; include the router in `main.py`.
 
 ---
 
@@ -179,18 +182,15 @@ Tests live in `tests/` and mirror `src/`.
 
 ### Route Tests
 - Create a minimal `FastAPI()`, include only the router under test. **Never import `src/main.py`.**
-- Bind mocks in a small test container; override plain FastAPI guards with `app.dependency_overrides`:
+- Bind mock instances in a `TestModule`; override plain FastAPI guards with `app.dependency_overrides`:
   ```python
-  class TestProvider(Provider):
-      @provide(scope=Scope.REQUEST)
-      def user_use_case(self) -> UserUseCase:
-          return mock_use_case
+  class TestModule(Module):
+      def configure(self, binder: Binder) -> None:
+          binder.bind(UserUseCase, to=mock_use_case)  # instance-bound: no scope needed
 
-  container = make_async_container(TestProvider())
-  setup_dishka(container, app)
+  app.state.injector = Injector([TestModule()])
   app.dependency_overrides[get_current_user] = lambda: TokenClaimsDTO(user_id=1, role=UserRole.ADMIN)
   ```
-  Close the container in fixture teardown (`await container.close()`).
 - Use `httpx.AsyncClient` with `ASGITransport`.
 
 | Layer | File | Test? |
@@ -214,7 +214,8 @@ Tests live in `tests/` and mirror `src/`.
 
 ## 10. Anti-Patterns
 
-- Don't wire bindings anywhere except `AppProvider` — and never put DI decorators on domain/application classes; `@inject` is only for FastAPI guard functions in `src/api/dependencies/`.
+- Don't wire bindings anywhere except `AppModule.configure()`, and always through `TypedBinder` so conformance is checked.
+- Don't omit `@inject` on an implementation whose `__init__` takes dependencies — resolution fails with `TypeError` at runtime.
 - Don't keep session (or other control-flow) state in a module-global `ContextVar`. Inject the request-scoped `AsyncSession`.
 - Don't pass the `AsyncSession` to use cases, or sessions to repository constructors as constants — adapters get the request session via the provider.
 - Don't commit or roll back inside repositories — the use case owns the boundary via `TransactionContext`.

@@ -3,6 +3,7 @@
 from datetime import UTC, datetime, timedelta
 
 import jwt
+from injector import inject
 from jwt.exceptions import InvalidTokenError
 
 from src.application.use_cases.auth import auth_dto
@@ -20,6 +21,7 @@ class JwtTokenService:
     with a new adapter and update the dependency provider.
     """
 
+    @inject
     def __init__(self, settings: Settings) -> None:
         """Initialize the token service with JWT configuration.
 

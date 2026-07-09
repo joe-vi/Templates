@@ -13,7 +13,7 @@ dependencies = [
     "email-validator>=2.0.0",
     "pydantic-settings>=2.6.0",
     "python-dotenv>=1.0.1",
-    "dishka>=1.10.0",
+    "injector>=0.22.0",
     "PyJWT>=2.10.0",
     "passlib[bcrypt]>=1.7.4",
     "bcrypt>=3.2.0,<4.0",
@@ -67,6 +67,17 @@ plugins = ["pydantic.mypy"]
 [[tool.mypy.overrides]]
 module = "asyncpg.*"
 ignore_missing_imports = true
+
+# TypedBinder's conformance check requires passing Protocol classes where
+# type[P] is expected; mypy's type-abstract rule rejects that even for
+# correct bindings. Disable only that code, only in the composition modules —
+# the arg-type conformance check (wrong implementation for a port) stays on.
+[[tool.mypy.overrides]]
+module = [
+    "src.api.dependencies.providers",
+    "src.api.dependencies.jwt_dependency",
+]
+disable_error_code = ["type-abstract"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"

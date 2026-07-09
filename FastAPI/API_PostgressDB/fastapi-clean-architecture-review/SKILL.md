@@ -1,6 +1,6 @@
 ---
 name: fastapi-clean-architecture-review
-description: Audit an existing FastAPI project for Clean Architecture compliance — verifies unidirectional layer dependencies, ports-as-Protocol boundaries, repository pattern correctness, declarative Dishka DI wiring (explicit scopes, graph validated at startup), naming conventions, DB constraint rules, and documentation standards. Reports every violation with file and line number.
+description: Audit an existing FastAPI project for Clean Architecture compliance — verifies unidirectional layer dependencies, ports-as-Protocol boundaries, repository pattern correctness, typed declarative DI wiring (injector + TypedBinder, explicit scopes, mypy-checked binding conformance), naming conventions, DB constraint rules, and documentation standards. Reports every violation with file and line number.
 argument-hint: "[--fix]"
 disable-model-invocation: true
 metadata:
@@ -67,9 +67,10 @@ Read all files in `src/api/`.
 Check:
 - **Naming**: schemas end with `Request` or `Response` and inherit `APIModelBase`; converters are module functions
 - **DI**:
-  - Composition root is the Dishka `AppProvider` in `src/api/dependencies/providers.py` — one `provide(Impl, provides=Port, scope=...)` line per binding; flag any `fastapi-injector`/`Injected(...)` usage or DI decorators on domain/application classes
-  - Routes use `route_class=DishkaRoute` and depend on the concrete use case via `FromDishka[UseCase]`
-  - Guard functions live in `src/api/dependencies/`, not inside route files; `Depends(get_current_user)` declared on the `APIRouter`, not scattered in signatures; guards needing container objects use `@inject` + `FromDishka[...]`
+  - Composition root is `AppModule.configure()` in `src/api/dependencies/providers.py` — one `bind_typed(Port).to(Impl, scope=...)` line per binding via `TypedBinder`; flag raw `binder.bind(...)` calls for port bindings (they skip conformance checking) and any `fastapi-injector` usage
+  - Every implementation whose `__init__` takes dependencies carries `@inject`; flag missing ones (runtime `TypeError`)
+  - Routes depend on the concrete use case via `Annotated[UseCase, Injected(UseCase)]`
+  - Guard functions live in `src/api/dependencies/`, not inside route files; `Depends(get_current_user)` declared on the `APIRouter`, not scattered in signatures
 - **Responses**: routes return the response model (FastAPI serialises it to camelCase). Flag any `JSONResponse(model.model_dump())` — it bypasses `response_model` and the alias generator. Dynamic status set via `response.status_code`.
 - **Code style**: lines over 80 chars (excluding `# noqa: E501`); `List[X]`, `Optional[X]`, `Dict[K,V]` instead of modern annotations; sync DB calls
 - **Documentation**: same rules as Phase 1
@@ -79,9 +80,9 @@ Check:
 Read `src/main.py` and `src/api/dependencies/`.
 
 Check:
-- **Container**: `make_async_container(AppProvider(), FastapiProvider())` at module level; `setup_dishka(container, app)` after routers; `lifespan` closes `app.state.dishka_container` on shutdown
-- **Legacy DI**: flag any `fastapi-injector` (`Injector`, `InjectorMiddleware`, `attach_injector`, `Injected(...)`) usage
-- **Bindings**: every port has a `provide(...)` binding with an explicit scope; long-lived resources are `Scope.APP` generator providers; the session is a `Scope.REQUEST` generator provider
+- **Injector**: `Injector([AppModule()])` at module level, stored on `app.state.injector`; the `request_context` middleware enters `async_request_scope()` per request; `lifespan` disposes the engine on shutdown
+- **Legacy DI**: flag any `fastapi-injector` package usage (`InjectorMiddleware`, `attach_injector`) — this template uses its own `injection.py`
+- **Bindings**: every port bound via `TypedBinder` with an explicit scope; the session is a request-scoped `@provider`; singletons holding connections are disposed in `lifespan`
 
 ### Phase 6 — Global checks
 

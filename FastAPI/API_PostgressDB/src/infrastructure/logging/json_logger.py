@@ -4,6 +4,8 @@ import json
 import logging
 from datetime import UTC, datetime
 
+from injector import inject
+
 from src.config.settings import Settings
 from src.infrastructure.logging import log_context
 
@@ -39,6 +41,7 @@ class JsonLogger:
     port with a new adapter and update the dependency provider.
     """
 
+    @inject
     def __init__(self, settings: Settings) -> None:
         """Initialize the logger with a JSON handler.
 
