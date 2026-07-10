@@ -125,7 +125,7 @@ Invoke-WebRequest -Uri "https://github.com/joe-vi/Templates/archive/refs/heads/m
 
 ### 2. Application Layer (`src/application/`)
 - **Use Cases**: Plain concrete classes holding the business logic (`UserUseCase`, `AuthUseCase`)
-- **DTOs**: Frozen dataclasses with `DTO` suffix
+- **DTOs**: Frozen Pydantic models inheriting `DTOBase` with `DTO` suffix — they double as the API request/response bodies, so validation lives on them
 - **Service Ports**: `PasswordHasher`, `TokenService`, `Logger`, `TransactionContext`, `UserContext` (Protocols)
 - **Converters**: Module-level functions for entity ↔ DTO mapping
 - **Rule**: Imports Domain only

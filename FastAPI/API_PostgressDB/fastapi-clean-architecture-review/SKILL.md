@@ -34,7 +34,7 @@ Read all files in `src/application/`.
 
 Check:
 - **Import direction**: no imports from `src/infrastructure/` or `src/api/`
-- **Naming**: service ports are `Protocol`s with clean names (`PasswordHasher`, `TokenService`, `Logger`); use cases are plain concrete classes (no `Base` ABC); DTOs are frozen dataclasses with `DTO` suffix; no wrapper collection DTOs; return types use `list[UserDTO]` directly
+- **Naming**: service ports are `Protocol`s with clean names (`PasswordHasher`, `TokenService`, `Logger`); use cases are plain concrete classes (no `Base` ABC); DTOs are frozen Pydantic models inheriting `DTOBase` with `DTO` suffix; no wrapper collection DTOs; return types use `list[UserDTO]` directly
 - **Converters**: module-level functions, not classes of static methods
 - **Repository pattern**: use cases contain no exception handling for mutations — they forward repository results as-is; no direct session or DB access; no `@inject`
 - **Transactions**: mutating use-case methods wrap repository calls in `TransactionContext.begin()` and call `transaction.commit()` only on the all-success path — flag any mutation outside a transaction block and any commit after a failed result
