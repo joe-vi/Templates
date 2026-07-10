@@ -1,16 +1,44 @@
 """Unit tests for UserUseCase."""
 
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from datetime import datetime
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from src.application.services import password_hasher_base
+from src.application.services.password_hasher import PasswordHasher
 from src.application.use_cases.user import user_dto as user_dto_module
 from src.application.use_cases.user import user_use_case
 from src.domain.entities.user import user as user_module
 from src.domain.enums import operation_results, user_enum
-from src.domain.repositories.user import user_repository_base
+from src.domain.repositories.user.user_repository import UserRepository
+
+
+class FakeTransaction:
+    """In-memory transaction handle recording whether commit was called."""
+
+    def __init__(self) -> None:
+        self.is_committed = False
+
+    async def commit(self) -> None:
+        self.is_committed = True
+
+
+class FakeTransactionContext:
+    """In-memory TransactionContext satisfying the port structurally."""
+
+    def __init__(self) -> None:
+        self.transaction = FakeTransaction()
+        self.is_rolled_back = False
+
+    @asynccontextmanager
+    async def begin(self) -> AsyncIterator[FakeTransaction]:
+        try:
+            yield self.transaction
+        finally:
+            if not self.transaction.is_committed:
+                self.is_rolled_back = True
 
 
 def _make_user(user_id: int = 1) -> user_module.User:
@@ -25,24 +53,32 @@ def _make_user(user_id: int = 1) -> user_module.User:
 
 
 @pytest.fixture
-def mock_repository() -> user_repository_base.UserRepositoryBase:
-    return AsyncMock(spec=user_repository_base.UserRepositoryBase)
+def mock_repository() -> UserRepository:
+    return AsyncMock(spec=UserRepository)
 
 
 @pytest.fixture
-def mock_password_hasher() -> password_hasher_base.PasswordHasherBase:
-    hasher = MagicMock(spec=password_hasher_base.PasswordHasherBase)
+def mock_password_hasher() -> PasswordHasher:
+    hasher = MagicMock(spec=PasswordHasher)
     hasher.hash.return_value = "hashed_password"
     return hasher
 
 
 @pytest.fixture
+def fake_transaction_context() -> FakeTransactionContext:
+    return FakeTransactionContext()
+
+
+@pytest.fixture
 def use_case(
-    mock_repository: user_repository_base.UserRepositoryBase,
-    mock_password_hasher: password_hasher_base.PasswordHasherBase,
+    mock_repository: UserRepository,
+    mock_password_hasher: PasswordHasher,
+    fake_transaction_context: FakeTransactionContext,
 ) -> user_use_case.UserUseCase:
     return user_use_case.UserUseCase(
-        repository=mock_repository, password_hasher=mock_password_hasher
+        repository=mock_repository,
+        password_hasher=mock_password_hasher,
+        transaction_context=fake_transaction_context,
     )
 
 
@@ -310,3 +346,95 @@ class TestDeleteUser:
         result = await use_case.delete_user(1)
 
         assert result == operation_results.DeleteResult.CONCURRENCY_ERROR
+
+
+class TestTransactionBoundaries:
+    """The use case commits only on success and rolls back otherwise."""
+
+    async def test_create_success_commits_transaction(
+        self, use_case, mock_repository, fake_transaction_context
+    ):
+        mock_repository.create.return_value = (
+            operation_results.CreateResult.SUCCESS,
+            1,
+        )
+
+        await use_case.create_user(
+            user_dto_module.CreateUserDTO(
+                email="a@e.com", username="a", password="TestPass123"
+            )
+        )
+
+        assert fake_transaction_context.transaction.is_committed is True
+        assert fake_transaction_context.is_rolled_back is False
+
+    async def test_create_failure_rolls_back_without_commit(
+        self, use_case, mock_repository, fake_transaction_context
+    ):
+        mock_repository.create.return_value = (
+            operation_results.CreateResult.UNIQUE_CONSTRAINT_ERROR,
+            None,
+        )
+
+        await use_case.create_user(
+            user_dto_module.CreateUserDTO(
+                email="a@e.com", username="a", password="TestPass123"
+            )
+        )
+
+        assert fake_transaction_context.transaction.is_committed is False
+        assert fake_transaction_context.is_rolled_back is True
+
+    async def test_update_role_success_commits_transaction(
+        self, use_case, mock_repository, fake_transaction_context
+    ):
+        mock_repository.update_role.return_value = (
+            operation_results.UpdateResult.SUCCESS
+        )
+
+        await use_case.update_user_role(
+            user_dto_module.UpdateUserRoleDTO(
+                user_id=1, role=user_enum.UserRole.ADMIN
+            )
+        )
+
+        assert fake_transaction_context.transaction.is_committed is True
+
+    async def test_update_role_not_found_rolls_back_without_commit(
+        self, use_case, mock_repository, fake_transaction_context
+    ):
+        mock_repository.update_role.return_value = (
+            operation_results.UpdateResult.NOT_FOUND
+        )
+
+        await use_case.update_user_role(
+            user_dto_module.UpdateUserRoleDTO(
+                user_id=99, role=user_enum.UserRole.ADMIN
+            )
+        )
+
+        assert fake_transaction_context.transaction.is_committed is False
+        assert fake_transaction_context.is_rolled_back is True
+
+    async def test_delete_success_commits_transaction(
+        self, use_case, mock_repository, fake_transaction_context
+    ):
+        mock_repository.delete.return_value = (
+            operation_results.DeleteResult.SUCCESS
+        )
+
+        await use_case.delete_user(1)
+
+        assert fake_transaction_context.transaction.is_committed is True
+
+    async def test_delete_failure_rolls_back_without_commit(
+        self, use_case, mock_repository, fake_transaction_context
+    ):
+        mock_repository.delete.return_value = (
+            operation_results.DeleteResult.FAILURE
+        )
+
+        await use_case.delete_user(1)
+
+        assert fake_transaction_context.transaction.is_committed is False
+        assert fake_transaction_context.is_rolled_back is True

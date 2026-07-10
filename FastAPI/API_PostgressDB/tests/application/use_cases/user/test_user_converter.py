@@ -1,4 +1,4 @@
-"""Unit tests for UserEntityConverter."""
+"""Unit tests for the user entity/DTO converter functions."""
 
 from datetime import datetime
 
@@ -31,7 +31,7 @@ class TestToDto:
             created_at=created_at,
         )
 
-        result_dto = user_converter.UserEntityConverter.to_dto(user)
+        result_dto = user_converter.to_dto(user)
 
         assert isinstance(result_dto, user_dto_module.UserDTO)
         assert result_dto.id == 1
@@ -43,7 +43,7 @@ class TestToDto:
 
     def test_preserves_user_role_enum(self):
         user = _make_user()
-        result_dto = user_converter.UserEntityConverter.to_dto(user)
+        result_dto = user_converter.to_dto(user)
         assert result_dto.role == user_enum.UserRole.ADMIN
 
     def test_preserves_user_status_enum(self):
@@ -55,7 +55,7 @@ class TestToDto:
             status=user_enum.UserStatus.INACTIVE,
             created_at=datetime(2024, 1, 15, 10, 30, 0),
         )
-        result_dto = user_converter.UserEntityConverter.to_dto(user)
+        result_dto = user_converter.to_dto(user)
         assert result_dto.status == user_enum.UserStatus.INACTIVE
 
 
@@ -81,7 +81,7 @@ class TestToDtoList:
             ),
         ]
 
-        user_dtos = user_converter.UserEntityConverter.to_dto_list(users)
+        user_dtos = user_converter.to_dto_list(users)
 
         assert len(user_dtos) == 2
         assert user_dtos[0].id == 1
@@ -90,7 +90,7 @@ class TestToDtoList:
         assert user_dtos[1].email == "bob@example.com"
 
     def test_returns_empty_list_when_given_no_users(self):
-        user_dtos = user_converter.UserEntityConverter.to_dto_list([])
+        user_dtos = user_converter.to_dto_list([])
         assert user_dtos == []
 
     def test_preserves_order_of_users(self):
@@ -107,7 +107,7 @@ class TestToDtoList:
             for id in [3, 1, 2]
         ]
 
-        user_dtos = user_converter.UserEntityConverter.to_dto_list(users)
+        user_dtos = user_converter.to_dto_list(users)
 
         assert [dto.id for dto in user_dtos] == [3, 1, 2]
 
@@ -118,9 +118,7 @@ class TestToEntity:
             email="alice@example.com", username="alice", password="TestPass123"
         )
 
-        user = user_converter.UserEntityConverter.to_entity(
-            create_user_dto, "hashed_password"
-        )
+        user = user_converter.to_entity(create_user_dto, "hashed_password")
 
         assert user.id is None
 
@@ -133,9 +131,7 @@ class TestToEntity:
             status=user_enum.UserStatus.INACTIVE,
         )
 
-        user = user_converter.UserEntityConverter.to_entity(
-            create_user_dto, "hashed_password"
-        )
+        user = user_converter.to_entity(create_user_dto, "hashed_password")
 
         assert isinstance(user, user_module.User)
         assert user.email == "alice@example.com"
@@ -148,9 +144,7 @@ class TestToEntity:
             email="bob@example.com", username="bob", password="TestPass123"
         )
 
-        user = user_converter.UserEntityConverter.to_entity(
-            create_user_dto, "hashed_password"
-        )
+        user = user_converter.to_entity(create_user_dto, "hashed_password")
 
         assert user.role == user_enum.UserRole.USER
 
@@ -159,8 +153,6 @@ class TestToEntity:
             email="bob@example.com", username="bob", password="TestPass123"
         )
 
-        user = user_converter.UserEntityConverter.to_entity(
-            create_user_dto, "hashed_password"
-        )
+        user = user_converter.to_entity(create_user_dto, "hashed_password")
 
         assert user.status == user_enum.UserStatus.ACTIVE

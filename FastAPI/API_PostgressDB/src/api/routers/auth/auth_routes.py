@@ -1,19 +1,27 @@
-"""API routes for authentication operations."""
+"""API routes for authentication operations.
+
+Routes accept and return application DTOs directly: ``DTOBase`` gives them
+camelCase aliases on the wire (``accessToken``, ``refreshToken``), so no
+separate API schemas or converters are needed.
+"""
+
+from typing import Annotated
 
 from fastapi import APIRouter, HTTPException, status
-from fastapi.responses import JSONResponse
-from fastapi_injector import Injected
 
-from src.api.routers.auth import auth_converter, auth_schema
-from src.application.use_cases.auth import auth_use_case_base
+from src.api.dependencies.injected import Injected
+from src.application.use_cases.auth import auth_dto
+from src.application.use_cases.auth.auth_use_case import AuthUseCase
 from src.domain.enums import operation_results
 
 router = APIRouter(prefix="/api/v1", tags=["auth"])
 
+UseCaseDep = Annotated[AuthUseCase, Injected(AuthUseCase)]
+
 
 @router.post(
     "/auth/login",
-    response_model=auth_schema.TokenResponse,
+    response_model=auth_dto.TokenDTO,
     responses={
         status.HTTP_200_OK: {"description": "Authentication successful"},
         status.HTTP_401_UNAUTHORIZED: {"description": "Invalid credentials"},
@@ -21,31 +29,27 @@ router = APIRouter(prefix="/api/v1", tags=["auth"])
     },
 )
 async def login(
-    login_data: auth_schema.LoginRequest,
-    use_case: auth_use_case_base.AuthUseCaseBase = Injected(
-        auth_use_case_base.AuthUseCaseBase
-    ),
-) -> JSONResponse:
+    login_dto: auth_dto.LoginDTO,
+    use_case: UseCaseDep,
+) -> auth_dto.TokenDTO:
     """Authenticate a user and return a JWT access and refresh token pair.
 
-    The tokens embed the user's id, username, and role as claims.
+    The tokens embed the user's id and role as claims.
 
     Args:
-        login_data: The request body containing username and password.
+        login_dto: The request body containing username and password.
         use_case: The injected authentication use case.
 
     Returns:
-        A TokenResponse with the access token, refresh token, and token type.
+        A TokenDTO with the access token, refresh token, and token type.
     """
-    login_dto = auth_converter.AuthConverter.to_login_dto(login_data)
     result, token_dto = await use_case.login(login_dto)
 
-    if result == operation_results.LoginResult.SUCCESS:
-        return JSONResponse(
-            content=auth_converter.AuthConverter.to_token_response(
-                token_dto
-            ).model_dump()
-        )  # type: ignore[arg-type]
+    if (
+        result == operation_results.LoginResult.SUCCESS
+        and token_dto is not None
+    ):
+        return token_dto
 
     if result == operation_results.LoginResult.INVALID_CREDENTIALS:
         raise HTTPException(
@@ -61,13 +65,14 @@ async def login(
         )
 
     raise HTTPException(
-        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Login failed"
+        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        detail="Login failed",
     )
 
 
 @router.post(
     "/auth/refresh",
-    response_model=auth_schema.TokenResponse,
+    response_model=auth_dto.TokenDTO,
     responses={
         status.HTTP_200_OK: {"description": "Token refreshed successfully"},
         status.HTTP_401_UNAUTHORIZED: {
@@ -76,28 +81,27 @@ async def login(
     },
 )
 async def refresh_token(
-    refresh_data: auth_schema.RefreshTokenRequest,
-    use_case: auth_use_case_base.AuthUseCaseBase = Injected(
-        auth_use_case_base.AuthUseCaseBase
-    ),
-) -> JSONResponse:
+    refresh_token_dto: auth_dto.RefreshTokenDTO,
+    use_case: UseCaseDep,
+) -> auth_dto.TokenDTO:
     """Issue a new access and refresh token pair from a valid refresh token.
 
     Args:
-        refresh_data: The request body containing the refresh token.
+        refresh_token_dto: The request body containing the refresh token.
         use_case: The injected authentication use case.
 
     Returns:
-        A TokenResponse with the new access token, refresh token, and type.
+        A TokenDTO with the new access token, refresh token, and type.
     """
-    result, token_dto = await use_case.refresh_token(refresh_data.refresh_token)
+    result, token_dto = await use_case.refresh_token(
+        refresh_token_dto.refresh_token
+    )
 
-    if result == operation_results.LoginResult.SUCCESS:
-        return JSONResponse(
-            content=auth_converter.AuthConverter.to_token_response(
-                token_dto
-            ).model_dump()
-        )  # type: ignore[arg-type]
+    if (
+        result == operation_results.LoginResult.SUCCESS
+        and token_dto is not None
+    ):
+        return token_dto
 
     if result == operation_results.LoginResult.INVALID_CREDENTIALS:
         raise HTTPException(

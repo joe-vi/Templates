@@ -1,35 +1,36 @@
 """FastAPI dependency for JWT Bearer token validation."""
 
+from typing import Annotated
+
 from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
-from fastapi_injector import Injected
 
-from src.application.services import token_service_base, user_context_base
+from src.api.dependencies.injected import Injected
+from src.application.services.token_service import TokenService
+from src.application.services.user_context import UserContext
 from src.application.use_cases.auth import auth_dto
+from src.infrastructure.logging import log_context
 
 _security = HTTPBearer()
 
 
 async def get_current_user(
-    credentials: HTTPAuthorizationCredentials = Depends(_security),
-    token_service: token_service_base.TokenServiceBase = Injected(
-        token_service_base.TokenServiceBase
-    ),
-    user_context: user_context_base.UserContextBase = Injected(
-        user_context_base.UserContextBase
-    ),
+    credentials: Annotated[HTTPAuthorizationCredentials, Depends(_security)],
+    token_service: Annotated[TokenService, Injected(TokenService)],
+    user_context: Annotated[UserContext, Injected(UserContext)],
 ) -> auth_dto.TokenClaimsDTO:
-    """FastAPI dependency that validates the Bearer JWT access token.
+    """Validate the Bearer JWT access token and return its claims.
 
-    Decodes the token, raises 401 on any failure, then populates the
-    request-scoped UserContextBase so that any injected component (use case,
-    service, etc.) can read the current user's identity without needing the
-    token passed through function signatures.
+    Decodes the token, raising 401 on any failure, then populates the
+    request-scoped ``UserContext`` (so any injected use case or service can
+    read the caller's identity) and records the user id in the logging
+    context so it appears on every log line for the rest of the request.
+    Route handlers can also receive the returned ``TokenClaimsDTO`` directly
+    via ``Depends(get_current_user)``.
 
     Args:
         credentials: The HTTP Bearer credentials from the Authorization header.
-        token_service: The injected token service used to decode the JWT.
-        user_context: The request-scoped context populated with the claims.
+        token_service: The token service used to decode the JWT.
 
     Returns:
         A TokenClaimsDTO containing the authenticated user's id and role.
@@ -47,5 +48,6 @@ async def get_current_user(
         )
 
     user_context.populate(token_claims.user_id, token_claims.role)
+    log_context.user_id_var.set(token_claims.user_id)
 
     return token_claims

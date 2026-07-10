@@ -1,6 +1,6 @@
 # fastapi-clean-architecture-mode
 
-A Claude Code skill that activates **Clean Architecture** rules for the current FastAPI session. Every file Claude writes or edits will follow strict layer boundaries, dependency inversion, repository pattern with result enums, and DI discipline until the session ends.
+A Claude Code skill that activates **Clean Architecture** rules for the current FastAPI session. Every file Claude writes or edits will follow strict layer boundaries, dependency inversion via `typing.Protocol` ports, the repository pattern with result enums, and typed declarative DI discipline (injector + TypedBinder) until the session ends.
 
 > **Related skills**
 > - [`fastapi-clean-architecture-template`](../fastapi-clean-architecture-template/) — scaffold a new project with Clean Architecture enforced from day one
@@ -31,28 +31,29 @@ API  →  Infrastructure  →  Application  →  Domain
 Domain has zero external dependencies. Every other layer may only import from the layer(s) inward of it. Violations are flagged before any code is written.
 
 **Abstraction boundaries**
-- All use cases and routes depend on ABCs (interfaces), never concrete implementations
-- `container.py` is the only place that binds base classes to implementations
-- New concrete classes are never instantiated manually — the injector resolves the full chain
+- Use cases depend on `typing.Protocol` ports, never concrete adapters
+- `AppModule.configure()` in `src/api/dependencies/providers.py` is the only place that wires adapters to ports (the composition root)
+- One line binds implementation, port, and scope via `TypedBinder`: `bind_typed(Port).to(Impl, scope=request)`; a mismatched implementation is a mypy error at that line; constructors are auto-wired via `@inject`
 
-**Repository pattern**
+**Repository pattern & unit of work**
 - One CRUD operation per method — orchestration belongs in use cases, not repositories
 - Mutation methods return result enums (`CreateResult`, `UpdateResult`, `DeleteResult`), never raise exceptions to use cases
-- Each repository method opens its own session — sessions are never passed as arguments
+- Repository adapters receive the request-scoped `AsyncSession` by constructor and never commit or roll back — there is no module-global session state
+- The use case owns the transaction boundary via the `TransactionContext` port: commit only on all-success, rollback-unless-committed; repository calls spanning several repositories inside one `begin()` block are atomic
 
-**Dependency injection**
-- `@inject` on every injectable constructor
-- Routes use `Injected(BaseClass)`, never `Depends()` for use cases or services
-- `InjectorMiddleware` added before `attach_injector()` in `main.py`
+**Dependency injection (injector + TypedBinder)**
+- `AppModule` declares every binding with an explicit scope (`singleton` / `request`); implementations with constructor dependencies carry `@inject`
+- Routes and guards resolve via `Annotated[UseCase, Injected(UseCase)]`
+- The request scope disposes its objects on request end (LIFO, `aclose()` preferred); tests bind mock instances in a `TestModule` on `app.state.injector`
 
 **Naming discipline**
-- ABCs: `Base` suffix (`UserRepositoryBase`, `UserUseCaseBase`)
-- DTOs: frozen dataclasses, `DTO` suffix; `list[UserDTO]` returned directly, no wrapper DTOs
-- API schemas: `Request` / `Response` suffix, all inherit `APIModelBase`
+- Ports are `Protocol`s with clean names (`UserRepository`); adapters are mechanism-qualified (`SqlAlchemyUserRepository`)
+- DTOs: frozen Pydantic models inheriting `DTOBase` (camelCase on the wire), `DTO` suffix; `list[UserDTO]` returned directly, no wrapper DTOs
+- Converters are module functions (entity ↔ DTO only); DTOs inherit `DTOBase` and double as the API request/response bodies — no per-entity schemas
 - Result enums: always generic (`CreateResult`, not `CreateUserResult`)
 
 **New entity layer order**
-Domain → Infrastructure → Application → API → container wiring. Claude will follow this order and flag any attempt to skip a layer.
+Domain → Infrastructure → Application → API → provider wiring. Claude will follow this order and flag any attempt to skip a layer.
 
 ## When to use
 

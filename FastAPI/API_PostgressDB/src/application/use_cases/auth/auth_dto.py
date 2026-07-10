@@ -1,20 +1,29 @@
-"""Data Transfer Objects for authentication operations."""
+"""Data Transfer Objects for authentication operations.
 
-from dataclasses import dataclass
+Used directly as API request/response bodies (see ``DTOBase``), so the
+field validation rules live on the DTOs themselves.
+"""
 
+from pydantic import Field
+
+from src.application.dto_base import DTOBase
 from src.domain.enums import user_enum
 
 
-@dataclass(frozen=True)
-class LoginDTO:
+class LoginDTO(DTOBase):
     """DTO for authenticating a user."""
 
-    username: str
-    password: str
+    username: str = Field(description="Username")
+    password: str = Field(description="Plain-text password")
 
 
-@dataclass(frozen=True)
-class TokenDTO:
+class RefreshTokenDTO(DTOBase):
+    """DTO for refreshing an access token."""
+
+    refresh_token: str = Field(description="A valid JWT refresh token")
+
+
+class TokenDTO(DTOBase):
     """DTO representing the issued token pair."""
 
     access_token: str
@@ -22,8 +31,7 @@ class TokenDTO:
     token_type: str = "bearer"
 
 
-@dataclass(frozen=True)
-class TokenClaimsDTO:
+class TokenClaimsDTO(DTOBase):
     """DTO representing the decoded claims from a JWT token."""
 
     user_id: int

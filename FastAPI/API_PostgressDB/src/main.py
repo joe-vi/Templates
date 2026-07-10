@@ -1,15 +1,20 @@
 """FastAPI application entry point and lifecycle management."""
 
-from collections.abc import AsyncIterator
+import uuid
+from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
-from fastapi_injector import InjectorMiddleware, attach_injector
+from fastapi import FastAPI, Request, Response
+from injector import Injector
+from sqlalchemy.ext.asyncio import AsyncEngine
 
-from src import container
+from src.api.dependencies.providers import AppModule
+from src.api.dependencies.request_scope import async_request_scope
 from src.api.routers.auth import auth_routes
 from src.api.routers.user import user_routes
-from src.infrastructure.database import connection_factory_base
+from src.infrastructure.logging import log_context
+
+injector = Injector([AppModule()])
 
 
 @asynccontextmanager
@@ -20,14 +25,12 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         app: The FastAPI application instance.
 
     Yields:
-        None. On shutdown, disposes database connections.
+        None. On shutdown, disposes the database engine (singletons are not
+        covered by the request-scope teardown).
     """
     yield
-
-    connection_factory = container.injector.get(
-        connection_factory_base.ConnectionFactoryBase
-    )
-    await connection_factory.close()
+    engine = app.state.injector.get(AsyncEngine)
+    await engine.dispose()
 
 
 app = FastAPI(
@@ -36,16 +39,38 @@ app = FastAPI(
     version="1.0.0",
     lifespan=lifespan,
 )
+app.state.injector = injector
 
-app.add_middleware(InjectorMiddleware, injector=container.injector)
-attach_injector(app, container.injector)
+
+@app.middleware("http")
+async def request_context(
+    request: Request,
+    call_next: Callable[[Request], Awaitable[Response]],
+) -> Response:
+    """Open the DI request scope and the log-correlation context.
+
+    Every request-scoped dependency resolved while handling this request is
+    cached for the request and disposed when it ends. request_id is set here;
+    user_id is cleared so a value can never leak between requests handled in
+    the same task, then populated by the JWT guard once the caller is
+    authenticated.
+    """
+    request_id_token = log_context.request_id_var.set(str(uuid.uuid4()))
+    user_id_token = log_context.user_id_var.set(None)
+    try:
+        async with async_request_scope():
+            return await call_next(request)
+    finally:
+        log_context.user_id_var.reset(user_id_token)
+        log_context.request_id_var.reset(request_id_token)
+
 
 app.include_router(auth_routes.router)
 app.include_router(user_routes.router)
 
 
 @app.get("/")
-async def root():
+async def root() -> dict[str, str]:
     """Return application information with links to API documentation.
 
     Returns:
@@ -59,7 +84,7 @@ async def root():
 
 
 @app.get("/health")
-async def health_check():
+async def health_check() -> dict[str, str]:
     """Return the application health status.
 
     Returns:

@@ -1,17 +1,21 @@
-"""Abstract base class for the user repository."""
+"""User repository port (structural interface)."""
 
-from abc import ABC, abstractmethod
+from typing import Protocol
 
-from src.domain.entities.user import user as user_module
+from src.domain.entities.user.user import User
 from src.domain.enums import operation_results, user_enum
 
 
-class UserRepositoryBase(ABC):
-    """Abstract base class for user repository."""
+class UserRepository(Protocol):
+    """Port for user persistence.
 
-    @abstractmethod
+    A ``typing.Protocol`` rather than an ABC: implementations satisfy it
+    structurally and do not need to import or subclass it, keeping the
+    dependency pointing inward without coupling the adapter to the port.
+    """
+
     async def create(
-        self, user: user_module.User
+        self, user: User
     ) -> tuple[operation_results.CreateResult, int | None]:
         """Persist a new user entity.
 
@@ -22,10 +26,9 @@ class UserRepositoryBase(ABC):
             A tuple of (result, id). id is the newly created user id on
             success, None on any failure.
         """
-        pass
+        ...
 
-    @abstractmethod
-    async def get_by_id(self, user_id: int) -> user_module.User | None:
+    async def get_by_id(self, user_id: int) -> User | None:
         """Retrieve a user entity by its unique identifier.
 
         Args:
@@ -34,18 +37,16 @@ class UserRepositoryBase(ABC):
         Returns:
             The User entity if found, None otherwise.
         """
-        pass
+        ...
 
-    @abstractmethod
-    async def get_all(self) -> list[user_module.User]:
+    async def get_all(self) -> list[User]:
         """Retrieve all user entities.
 
         Returns:
             A list of all User entities.
         """
-        pass
+        ...
 
-    @abstractmethod
     async def update_role(
         self, user_id: int, role: user_enum.UserRole
     ) -> operation_results.UpdateResult:
@@ -58,10 +59,9 @@ class UserRepositoryBase(ABC):
         Returns:
             An UpdateResult enum indicating the outcome of the operation.
         """
-        pass
+        ...
 
-    @abstractmethod
-    async def get_by_username(self, username: str) -> user_module.User | None:
+    async def get_by_username(self, username: str) -> User | None:
         """Retrieve a user entity by its username.
 
         Args:
@@ -70,9 +70,8 @@ class UserRepositoryBase(ABC):
         Returns:
             The User entity if found, None otherwise.
         """
-        pass
+        ...
 
-    @abstractmethod
     async def delete(self, user_id: int) -> operation_results.DeleteResult:
         """Delete a user entity by its unique identifier.
 
@@ -82,4 +81,4 @@ class UserRepositoryBase(ABC):
         Returns:
             A DeleteResult enum indicating the outcome of the operation.
         """
-        pass
+        ...

@@ -1,10 +1,10 @@
 ---
 name: fastapi-clean-architecture-template
-description: Scaffold a new project following Clean Architecture principles on FastAPI — strict 4-layer structure (Domain, Application, Infrastructure, API) with unidirectional dependencies, repository pattern, result-enum error handling, and fastapi-injector DI. Supports PostgreSQL, MongoDB, SQLite; JWT, OAuth2, API key auth; optional Redis cache.
+description: Scaffold a new project following Clean Architecture principles on FastAPI — strict 4-layer structure (Domain, Application, Infrastructure, API) with unidirectional dependencies, ports as typing.Protocol, the repository pattern, result-enum error handling, and typed declarative dependency injection (injector + TypedBinder: one binding per line with explicit singleton/request scopes, conformance checked by mypy). Supports PostgreSQL, MongoDB, SQLite; JWT, OAuth2, API key auth; optional Redis cache.
 argument-hint: "<project-name> [--db postgres|mongodb|sqlite] [--auth jwt|oauth2|apikey] [--cache none|redis] [--no-docker]"
 disable-model-invocation: true
 metadata:
-  version: "1.1.0"
+  version: "2.0.0"
 ---
 
 # FastAPI Clean Architecture — Scaffold Skill
@@ -39,14 +39,13 @@ Parse all flags. Apply defaults for any flag not provided.
 ├── src/
 │   ├── __init__.py
 │   ├── main.py
-│   ├── container.py
 │   ├── config/settings.py
 │   ├── domain/
 │   │   ├── entities/
 │   │   ├── enums/operation_results.py
 │   │   └── repositories/
 │   ├── application/
-│   │   ├── services/
+│   │   ├── services/          # Protocol ports
 │   │   └── use_cases/
 │   ├── infrastructure/
 │   │   ├── auth/
@@ -54,10 +53,10 @@ Parse all flags. Apply defaults for any flag not provided.
 │   │   │   └── models/__init__.py
 │   │   └── repositories/
 │   └── api/
-│       ├── dependencies/
+│       ├── dependencies/      # request_scope.py, typed_binder.py, injected.py, providers.py (AppModule), guards
 │       ├── routers/
 │       └── schemas/
-│           ├── base_schema.py
+│           ├── operation_schema.py
 │           └── operation_schema.py
 ├── tests/
 │   ├── application/use_cases/
@@ -68,94 +67,99 @@ Parse all flags. Apply defaults for any flag not provided.
 └── AGENT.md
 ```
 
-Add `alembic/` + `alembic.ini` for `postgres` or `sqlite`. Add `Dockerfile` + `docker-compose.yml` unless `--no-docker`.
+There is **no `container.py`** — the composition root is `src/api/dependencies/providers.py`. Add `alembic/` + `alembic.ini` for `postgres` or `sqlite`. Add `Dockerfile` + `docker-compose.yml` unless `--no-docker`.
 
 ### Step 3 — Generate shared files
 
 Generate these regardless of stack. Use concise, idiomatic Python — no unnecessary comments.
 
 - **`operation_results.py`**: Three `StrEnum` classes — `CreateResult`, `UpdateResult`, `DeleteResult`. Values: `success`, `failure`, `concurrency_error`, `unique_constraint_error` on all three; add `not_found` to `UpdateResult` and `DeleteResult`.
-- **`base_schema.py`**: Pydantic `BaseModel` subclass `APIModelBase` with `alias_generator=to_camel` and `populate_by_name=True`.
-- **`operation_schema.py`**: Three `APIModelBase` subclasses — `CreateOperationResponse(id: int | None)`, `UpdateOperationResponse(message: str)`, `DeleteOperationResponse(message: str)`.
-- **`result_status_maps.py`**: Three functions — `create_response`, `update_response`, `delete_response` — each mapping the corresponding result enum to a `JSONResponse` with the correct HTTP status code (201 success-create, 200 success-update/delete, 404 not-found, 409 conflict, 500 failure).
+- **`src/application/dto_base.py`**: Pydantic `BaseModel` subclass `DTOBase` with `alias_generator=to_camel`, `populate_by_name=True`, `frozen=True`. Every DTO inherits it and doubles as the API request/response body — do NOT generate per-entity `Request`/`Response` schemas or API converters.
+- **`operation_schema.py`**: Three `DTOBase` subclasses — `CreateOperationResponse(result, message, id: int | None)`, `UpdateOperationResponse(result, message)`, `DeleteOperationResponse(result, message)`.
+- **`result_status_maps.py`**: `*_STATUS_MAP` and `*_MESSAGE_MAP` dicts mapping each result enum to its HTTP status (201 success-create, 200 success-update/delete, 404 not-found, 409 conflict, 500 failure) and message. Routes look these up, set `response.status_code`, and return the response model — never hand-build a `JSONResponse`.
 
 ### Step 4 — Generate database layer
 
 #### `postgres` or `sqlite`
 
-Four files following the SQLAlchemy 2.0 async session pattern:
-
-- **`connection_factory_base.py`** (application layer): abstract `get_session()` async context manager and `close()`.
-- **`connection_factory.py`** (infrastructure): creates `AsyncEngine` + `async_sessionmaker`. `get_session()` checks a `ContextVar[AsyncSession | None]` called `_active_session` — yields the active session if set, otherwise opens a new one with its own commit/rollback.
-- **`transaction_manager_base.py`** (application layer): abstract `begin_transaction()` async context manager.
-- **`transaction_manager.py`** (infrastructure): injects `ConnectionFactoryBase`; `begin_transaction()` sets `_active_session` ContextVar, delegates to the connection factory, handles commit/rollback.
 - **`base.py`**: SQLAlchemy `DeclarativeBase` subclass.
+- **`session.py`** (infrastructure): `create_engine(settings) -> AsyncEngine` and `create_session_factory(engine) -> async_sessionmaker[AsyncSession]` (with `expire_on_commit=False`). No connection-factory object, no `ContextVar`.
 
-Driver: `asyncpg` for postgres (`postgresql+asyncpg://`), `aiosqlite` for sqlite (`sqlite+aiosqlite:///`).
+The engine + session factory are singleton `@provider` methods on `AppModule` (the engine disposed in `lifespan` shutdown); the session is a request-scoped `@provider`. Repository adapters receive the `AsyncSession` by constructor injection and never commit or roll back — mutations `flush()` and map errors to result enums. Driver: `asyncpg` for postgres (`postgresql+asyncpg://`), `aiosqlite` for sqlite (`sqlite+aiosqlite:///`).
+
+Also generate the unit-of-work pair:
+
+- **`transaction_context.py`** (application services): `Transaction` and `TransactionContext` Protocols — `begin()` returns an async context manager yielding a `Transaction` with `commit()`; rollback-unless-committed semantics.
+- **`sqlalchemy_transaction_context.py`** (infrastructure/database): adapter over the request-scoped session.
+
+Mutating use cases inject `TransactionContext`, wrap repository calls in `async with ...begin() as transaction:`, and call `await transaction.commit()` only when every operation succeeded. Calls spanning several repositories inside one block are atomic — they share the request session.
 
 #### `mongodb`
 
-- **`mongo_client_base.py`** (application layer): abstract `get_database()`.
-- **`mongo_client.py`** (infrastructure): wraps `motor.motor_asyncio.AsyncIOMotorClient`. No session or transaction manager needed.
+- **`mongo_client.py`** (infrastructure): wraps `motor.motor_asyncio.AsyncIOMotorClient`, created in `lifespan` and stored on `app.state`. A `get_database` dependency provides it. No session or transaction manager needed.
 
 No Alembic for MongoDB.
 
 ### Step 5 — Generate auth layer
 
+Ports are `typing.Protocol`s in `src/application/services/`; adapters are mechanism-qualified classes in `src/infrastructure/`.
+
 #### `jwt`
 
-- `PasswordHasherBase` / `PasswordHasher` — bcrypt via passlib.
-- `TokenServiceBase` / `TokenService` — python-jose; issues access + refresh JWTs from settings.
-- `UserContextBase` / `UserContext` — request-scoped; `populate()` raises `RuntimeError` on second call; scalar properties only (`user_id`, `role`).
-- `jwt_dependency.py` — decodes JWT, calls `user_context.populate()`, returns `TokenClaimsDTO`.
-- Auth use case + DTO + routes under `src/application/use_cases/auth/` and `src/api/routers/auth/`.
+- `PasswordHasher` port / `BcryptPasswordHasher` adapter — bcrypt via passlib.
+- `TokenService` port / `JwtTokenService` adapter — PyJWT; issues access + refresh JWTs from settings.
+- `Logger` port / `JsonLogger` adapter — structured logger; request correlation (`request_id`, `user_id`) via context vars in `infrastructure/logging/log_context.py`.
+- `UserContext` port / `RequestUserContext` adapter — request-scoped holder of the caller's identity; `populate()` once by the guard (second call raises), unpopulated reads raise. Inject into use cases needing the caller (auditing, roles/permissions).
+- `jwt_dependency.py` — `get_current_user` decodes the JWT, populates `UserContext`, records the user id in the logging context, returns `TokenClaimsDTO`. Protect routers with `dependencies=[Depends(get_current_user)]`.
+- Auth use case + DTOs + routes under `src/application/use_cases/auth/` and `src/api/routers/auth/`.
 
 #### `oauth2`
 
-- `OAuthServiceBase` / `OAuthService` — exchanges provider token via `httpx`.
-- Keep `UserContextBase` / `UserContext` and JWT guard for internal session tokens issued after OAuth exchange.
-- No `PasswordHasher`.
+- `OAuthService` port / adapter — exchanges provider token via `httpx`.
+- Keep the JWT guard for internal session tokens issued after OAuth exchange. No `PasswordHasher`.
 
 #### `apikey`
 
-- `APIKeyServiceBase` / `APIKeyService` — validates key against DB.
+- `APIKeyService` port / adapter — validates key against DB.
 - Guard in `src/api/dependencies/api_key_dependency.py`.
-- No `UserContextBase` unless user identity is needed.
 
 ### Step 6 — Generate cache layer (redis only)
 
-- `CacheServiceBase` (application layer): abstract `get()`, `set()`, `delete()`.
-- `RedisService` (infrastructure): `redis.asyncio` client, singleton scope, `close()` method.
-- Bind as singleton in `container.py`; call `close()` in `lifespan` shutdown.
+- `CacheService` port (application layer): `get()`, `set()`, `delete()`.
+- `RedisCacheService` adapter (infrastructure): `redis.asyncio` client created in `lifespan`, disposed on shutdown.
+- Bind it with `bind_typed(CacheService).to(RedisCacheService, scope=singleton)` in `AppModule`; dispose the client in `lifespan` shutdown alongside the engine.
 
 ### Step 7 — Generate `settings.py`
 
-`pydantic-settings` `BaseSettings`. Include only fields for the resolved stack:
+`pydantic-settings` `BaseSettings` plus an `@lru_cache def get_settings() -> Settings`. Include only fields for the resolved stack:
 
 - Always: `APP_NAME`, `DEBUG`
 - postgres/sqlite: `DATABASE_URL`, `IS_SQL_ECHO_ENABLED: bool = False`
 - mongodb: `MONGODB_URL`, `MONGODB_DB_NAME`
-- jwt/oauth2: `SECRET_KEY`, `ACCESS_TOKEN_EXPIRE_MINUTES = 30`, `REFRESH_TOKEN_EXPIRE_DAYS = 7`
+- jwt/oauth2: `JWT_SECRET_KEY`, `ACCESS_TOKEN_EXPIRE_MINUTES = 30`, `REFRESH_TOKEN_EXPIRE_DAYS = 7`
 - redis: `REDIS_URL`
 
 ### Step 8 — Generate `main.py`
 
-Key ordering requirement — strictly in this order:
-1. Create `Injector([AppModule()])`
-2. Create `FastAPI(lifespan=lifespan)`
-3. `app.add_middleware(InjectorMiddleware, injector=injector)`
-4. `attach_injector(app, injector)`
-5. `app.include_router(...)` for each router
+- `injector = Injector([AppModule()])` at module level; `app.state.injector = injector`.
+- `lifespan`: dispose the engine on shutdown (`await app.state.injector.get(AsyncEngine).dispose()`).
+- `FastAPI(lifespan=lifespan)`; a `request_context` middleware that enters `async_request_scope()` and scopes the `request_id`/`user_id` context vars per request.
+- `app.include_router(...)` for each router.
 
-`lifespan` shutdown block closes all singletons that have a `close()` method.
+Copy `request_scope.py`, `typed_binder.py`, and `injected.py` verbatim from `FastAPI/API_PostgressDB/src/api/dependencies/`.
 
-### Step 9 — Generate `container.py`
+### Step 9 — Generate the composition root
 
-`injector.Module` subclass `AppModule` with a `configure(binder)` method. Bind every Base/implementation pair. Use `singleton` scope only for `ConnectionFactory`, external service clients, and `RedisService`.
+`AppModule` in `src/api/dependencies/providers.py` is the composition root — one declarative line per binding via `TypedBinder`, constructors auto-wired via `@inject`:
+- Stateless singletons (`PasswordHasher`, `TokenService`, `Logger`, cache): `typed_binder.bind_typed(PasswordHasher).to(BcryptPasswordHasher, scope=singleton)`.
+- Engine, session factory: singleton `@provider` methods; the session: a request-scoped `@provider` method (disposed via `aclose()` by the scope teardown).
+- `bind_typed(<Entity>Repository).to(Sqlalchemy<Entity>Repository, scope=request)` and `bind_typed(TransactionContext).to(SqlAlchemyTransactionContext, scope=request)` — same request session, so repositories and the transaction context share one transaction.
+- `bind_self_typed(<Entity>UseCase, scope=request)` — dependencies resolved automatically.
+- Add `@inject` to every implementation whose `__init__` takes dependencies.
 
 ### Step 10 — Generate `pyproject.toml`
 
-Base dependencies: `fastapi>=0.115`, `fastapi-injector>=0.6`, `injector>=0.22`, `pydantic>=2.0`, `pydantic-settings>=2.0`, `uvicorn[standard]>=0.30`.
+Base dependencies: `fastapi>=0.115`, `injector>=0.22`, `pydantic>=2.0`, `pydantic-settings>=2.0`, `uvicorn[standard]>=0.30`. (No `fastapi-injector`, no `dishka` — the request scope and typed binder are in-house.)
 
 Stack additions:
 
@@ -164,8 +168,8 @@ Stack additions:
 | postgres | `sqlalchemy[asyncio]>=2.0`, `asyncpg>=0.29`, `alembic>=1.13` |
 | sqlite | `sqlalchemy[asyncio]>=2.0`, `aiosqlite>=0.20`, `alembic>=1.13` |
 | mongodb | `motor>=3.4` |
-| jwt | `python-jose[cryptography]>=3.3`, `passlib[bcrypt]>=1.7` |
-| oauth2 | `httpx>=0.27`, `python-jose[cryptography]>=3.3` |
+| jwt | `PyJWT>=2.10`, `passlib[bcrypt]>=1.7` |
+| oauth2 | `httpx>=0.27`, `PyJWT>=2.10` |
 | redis | `redis[asyncio]>=5.0` |
 
 Dev: `pytest>=8.0`, `pytest-asyncio>=0.23`, `httpx>=0.27`, `ruff>=0.4`.

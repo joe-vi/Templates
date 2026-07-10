@@ -111,9 +111,9 @@ def run_tests(base: str) -> None:
         r = client.post("/api/v1/auth/login", json={"username": "admin", "password": "AdminPass123"})
         if _check("POST /auth/login  (valid credentials)", r, 200):
             body = r.json()
-            access_token: str = body["access_token"]
-            refresh_token: str = body["refresh_token"]
-            assert body.get("token_type") == "bearer", "token_type must be 'bearer'"
+            access_token: str = body["accessToken"]
+            refresh_token: str = body["refreshToken"]
+            assert body.get("tokenType") == "bearer", "tokenType must be 'bearer'"
         else:
             print(f"\n{RED}Cannot continue without a valid access token.{RESET}")
             return
@@ -141,7 +141,7 @@ def run_tests(base: str) -> None:
 
         r = client.post("/api/v1/auth/refresh", json={"refresh_token": refresh_token})
         if _check("POST /auth/refresh  (valid refresh token)", r, 200):
-            access_token = r.json()["access_token"]   # keep the newest token
+            access_token = r.json()["accessToken"]   # keep the newest token
 
         _check(
             "POST /auth/refresh  (invalid token)  →  401",
