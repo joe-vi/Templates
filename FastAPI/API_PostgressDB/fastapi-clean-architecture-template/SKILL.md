@@ -110,7 +110,8 @@ Ports are `typing.Protocol`s in `src/application/services/`; adapters are mechan
 - `PasswordHasher` port / `BcryptPasswordHasher` adapter — bcrypt via passlib.
 - `TokenService` port / `JwtTokenService` adapter — PyJWT; issues access + refresh JWTs from settings.
 - `Logger` port / `JsonLogger` adapter — structured logger; request correlation (`request_id`, `user_id`) via context vars in `infrastructure/logging/log_context.py`.
-- `jwt_dependency.py` — `get_current_user` decodes the JWT, records the user id in the logging context, returns `TokenClaimsDTO`. Protect routers with `dependencies=[Depends(get_current_user)]`.
+- `UserContext` port / `RequestUserContext` adapter — request-scoped holder of the caller's identity; `populate()` once by the guard (second call raises), unpopulated reads raise. Inject into use cases needing the caller (auditing, roles/permissions).
+- `jwt_dependency.py` — `get_current_user` decodes the JWT, populates `UserContext`, records the user id in the logging context, returns `TokenClaimsDTO`. Protect routers with `dependencies=[Depends(get_current_user)]`.
 - Auth use case + DTOs + routes under `src/application/use_cases/auth/` and `src/api/routers/auth/`.
 
 #### `oauth2`

@@ -21,8 +21,8 @@ validation — a missing binding fails at runtime on first resolution.
 
 ## Naming
 
-- Ports are `typing.Protocol`s with the clean name — `UserRepository`, `PasswordHasher`, `TokenService`, `Logger`. No `Base` suffix.
-- Adapters are mechanism-qualified — `SqlAlchemyUserRepository`, `BcryptPasswordHasher`, `JwtTokenService`, `JsonLogger`.
+- Ports are `typing.Protocol`s with the clean name — `UserRepository`, `PasswordHasher`, `TokenService`, `Logger`, `UserContext`. No `Base` suffix.
+- Adapters are mechanism-qualified — `SqlAlchemyUserRepository`, `BcryptPasswordHasher`, `JwtTokenService`, `JsonLogger`, `RequestUserContext`.
 - Use cases are plain concrete classes (`UserUseCase`, `AuthUseCase`) — no separate interface.
 - DTOs: frozen dataclasses, `DTO` suffix; return `list[UserDTO]` directly, never a wrapper DTO.
 - API schemas: `Request` / `Response` suffix; all inherit `APIModelBase`.

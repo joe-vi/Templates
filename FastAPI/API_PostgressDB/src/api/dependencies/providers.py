@@ -23,12 +23,14 @@ from src.application.services.logger import Logger
 from src.application.services.password_hasher import PasswordHasher
 from src.application.services.token_service import TokenService
 from src.application.services.transaction_context import TransactionContext
+from src.application.services.user_context import UserContext
 from src.application.use_cases.auth.auth_use_case import AuthUseCase
 from src.application.use_cases.user.user_use_case import UserUseCase
 from src.config.settings import Settings, get_settings
 from src.domain.repositories.user.user_repository import UserRepository
 from src.infrastructure.auth.bcrypt_password_hasher import BcryptPasswordHasher
 from src.infrastructure.auth.jwt_token_service import JwtTokenService
+from src.infrastructure.auth.request_user_context import RequestUserContext
 from src.infrastructure.database.session import (
     create_engine,
     create_session_factory,
@@ -59,6 +61,9 @@ class AppModule(Module):
         typed_binder.bind_typed(Logger).to(JsonLogger, scope=singleton)
 
         # Per-request collaborators — auto-wired from constructor type hints.
+        typed_binder.bind_typed(UserContext).to(
+            RequestUserContext, scope=request
+        )
         typed_binder.bind_typed(UserRepository).to(
             SqlAlchemyUserRepository, scope=request
         )

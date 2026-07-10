@@ -28,10 +28,10 @@ src/
 │   │   ├── <entity>_dto.py
 │   │   ├── <entity>_converter.py       # module functions, not a class
 │   │   └── <entity>_use_case.py        # concrete class, no separate ABC
-│   └── services/<service>.py           # Protocol ports (password_hasher, token_service, logger, transaction_context)
+│   └── services/<service>.py           # Protocol ports (password_hasher, token_service, logger, transaction_context, user_context)
 ├── infrastructure/
 │   ├── repositories/<entity>/sqlalchemy_<entity>_repository.py   # adapter (mechanism-qualified name)
-│   ├── auth/{bcrypt_password_hasher.py, jwt_token_service.py}
+│   ├── auth/{bcrypt_password_hasher.py, jwt_token_service.py, request_user_context.py}
 │   ├── logging/{json_logger.py, log_context.py}
 │   └── database/{base.py, session.py, sqlalchemy_transaction_context.py, models/<entity>_model.py}
 └── api/
@@ -52,8 +52,8 @@ src/
 ## 2. Naming Conventions
 
 ### Classes
-- **Ports are `typing.Protocol`s with the clean, central name** — `UserRepository`, `PasswordHasher`, `TokenService`, `Logger`. No `Base` suffix.
-- **Adapters (implementations) are qualified by their mechanism** — `SqlAlchemyUserRepository`, `BcryptPasswordHasher`, `JwtTokenService`, `JsonLogger`.
+- **Ports are `typing.Protocol`s with the clean, central name** — `UserRepository`, `PasswordHasher`, `TokenService`, `Logger`, `UserContext`. No `Base` suffix.
+- **Adapters (implementations) are qualified by their mechanism** — `SqlAlchemyUserRepository`, `BcryptPasswordHasher`, `JwtTokenService`, `JsonLogger`, `RequestUserContext`.
 - Use cases are plain concrete classes (`UserUseCase`, `AuthUseCase`) — no separate interface; there is only ever one implementation and routes/tests depend on the concrete class.
 - Entities: singular nouns — `User`, `Order`.
 - Status enums: singular `StrEnum` (`UserRole`, `UserStatus`).
@@ -105,8 +105,9 @@ src/
 - Converters are **module-level functions**, not classes of static methods. `user_converter.to_dto(...)`, `to_entity(...)`, etc.
 
 ### Authentication & current user
-- `get_current_user` (in `src/api/dependencies/jwt_dependency.py`) decodes the Bearer JWT, raises 401 on failure, records the user id in the logging context, and returns a `TokenClaimsDTO`.
-- Protect a whole router with `dependencies=[Depends(get_current_user)]` on the `APIRouter`. Components needing the caller's identity depend on `get_current_user`.
+- `get_current_user` (in `src/api/dependencies/jwt_dependency.py`) decodes the Bearer JWT, raises 401 on failure, populates the request-scoped `UserContext`, records the user id in the logging context, and returns a `TokenClaimsDTO`.
+- Protect a whole router with `dependencies=[Depends(get_current_user)]` on the `APIRouter`. A route handler that needs the claims directly declares `claims: TokenClaimsDTO = Depends(get_current_user)`.
+- **Request-scoped user context**: the `UserContext` port (`src/application/services/user_context.py`; adapter `RequestUserContext`, bound at `request` scope) holds the caller's identity for the request. Inject it into use cases or services that need the caller — auditing, ownership checks, roles/permissions — instead of threading claims through every signature. `populate()` is called exactly once by the guard (a second call raises `RuntimeError`); reading it unpopulated raises `RuntimeError`, so it is only valid on guarded routes. Read scalar values from it and pass those to repositories — never pass the context object itself to a repository.
 - Request correlation for logs (`request_id`, `user_id`) is carried in context variables in `src/infrastructure/logging/log_context.py` — set by the request-id middleware and the guard. Context variables are appropriate here because they carry cross-cutting observability metadata, not control-flow or transactional state.
 
 ### Routes & responses

@@ -28,8 +28,8 @@ binding fails at runtime on first resolution (accepted).
 ## Critical Rules (Quick Reference)
 
 ### Naming
-- **Ports are `typing.Protocol`s with clean names** (`UserRepository`, `PasswordHasher`, `TokenService`, `Logger`) — no `Base` suffix.
-- **Adapters are mechanism-qualified** (`SqlAlchemyUserRepository`, `BcryptPasswordHasher`, `JwtTokenService`, `JsonLogger`).
+- **Ports are `typing.Protocol`s with clean names** (`UserRepository`, `PasswordHasher`, `TokenService`, `Logger`, `UserContext`) — no `Base` suffix.
+- **Adapters are mechanism-qualified** (`SqlAlchemyUserRepository`, `BcryptPasswordHasher`, `JwtTokenService`, `JsonLogger`, `RequestUserContext`).
 - Use cases are plain concrete classes (`UserUseCase`, `AuthUseCase`) — no separate interface.
 - Operation result enums are generic and shared: `CreateResult`, `UpdateResult`, `DeleteResult`.
 - DTOs: frozen dataclasses with `DTO` suffix; use `list[UserDTO]` directly.
@@ -57,7 +57,8 @@ binding fails at runtime on first resolution (accepted).
 - For result-dependent status, inject `response: Response`, set `response.status_code = result_status_maps.<OP>_STATUS_MAP[result]`, return the model. Use `HTTPException` for not-found / auth failures.
 
 ### Auth
-- `get_current_user` decodes the Bearer JWT, raises 401, records the user id in the logging context, returns `TokenClaimsDTO`. Protect routers with `dependencies=[Depends(get_current_user)]`.
+- `get_current_user` decodes the Bearer JWT, raises 401, populates the request-scoped `UserContext`, records the user id in the logging context, returns `TokenClaimsDTO`. Protect routers with `dependencies=[Depends(get_current_user)]`.
+- `UserContext` port (adapter `RequestUserContext`, `request` scope): inject into use cases/services needing the caller's identity (auditing, roles/permissions). `populate()` once by the guard — second call raises; unpopulated reads raise. Pass scalar values to repositories, never the context object.
 - Log correlation (`request_id`, `user_id`) lives in context vars in `src/infrastructure/logging/log_context.py` (set by the request-id middleware and the guard).
 
 ### Database

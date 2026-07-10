@@ -51,7 +51,8 @@ Invoke-WebRequest -Uri "https://github.com/joe-vi/Templates/archive/refs/heads/m
 │   │   │   ├── logger.py                    # Logger
 │   │   │   ├── password_hasher.py           # PasswordHasher
 │   │   │   ├── token_service.py             # TokenService
-│   │   │   └── transaction_context.py       # TransactionContext (unit of work)
+│   │   │   ├── transaction_context.py       # TransactionContext (unit of work)
+│   │   │   └── user_context.py              # UserContext (caller identity)
 │   │   └── use_cases/
 │   │       ├── auth/
 │   │       │   ├── auth_dto.py
@@ -63,7 +64,8 @@ Invoke-WebRequest -Uri "https://github.com/joe-vi/Templates/archive/refs/heads/m
 │   ├── infrastructure/                     # Adapters (imports Domain + Application)
 │   │   ├── auth/
 │   │   │   ├── bcrypt_password_hasher.py   # bcrypt via passlib
-│   │   │   └── jwt_token_service.py        # PyJWT access + refresh tokens
+│   │   │   ├── jwt_token_service.py        # PyJWT access + refresh tokens
+│   │   │   └── request_user_context.py     # Request-scoped caller identity
 │   │   ├── database/
 │   │   │   ├── base.py                     # SQLAlchemy DeclarativeBase
 │   │   │   ├── session.py                  # create_engine / create_session_factory
@@ -101,6 +103,8 @@ Invoke-WebRequest -Uri "https://github.com/joe-vi/Templates/archive/refs/heads/m
 │   │           ├── test_user_converter.py
 │   │           └── test_user_use_case.py   # Use case tests via AsyncMock ports
 │   └── infrastructure/
+│       ├── auth/
+│       │   └── test_request_user_context.py  # Identity holder semantics + scope isolation
 │       └── database/
 │           └── test_sqlalchemy_transaction_context.py  # Unit-of-work atomicity (in-memory SQLite)
 ├── alembic/                                # Database migration scripts
@@ -122,14 +126,14 @@ Invoke-WebRequest -Uri "https://github.com/joe-vi/Templates/archive/refs/heads/m
 ### 2. Application Layer (`src/application/`)
 - **Use Cases**: Plain concrete classes holding the business logic (`UserUseCase`, `AuthUseCase`)
 - **DTOs**: Frozen dataclasses with `DTO` suffix
-- **Service Ports**: `PasswordHasher`, `TokenService`, `Logger`, `TransactionContext` (Protocols)
+- **Service Ports**: `PasswordHasher`, `TokenService`, `Logger`, `TransactionContext`, `UserContext` (Protocols)
 - **Converters**: Module-level functions for entity ↔ DTO mapping
 - **Rule**: Imports Domain only
 
 ### 3. Infrastructure Layer (`src/infrastructure/`)
 - **Database**: `session.py` builds the engine + `async_sessionmaker`; the session is provided per request (no factory object, no shared `ContextVar`)
 - **Repository Adapters**: `SqlAlchemyUserRepository` takes an `AsyncSession`; mutations flush and map DB errors to result enums — they never commit; the use case owns the boundary via `SqlAlchemyTransactionContext` (commit on all-success, rollback otherwise)
-- **Auth/Logging Adapters**: `BcryptPasswordHasher`, `JwtTokenService`, `JsonLogger`
+- **Auth/Logging Adapters**: `BcryptPasswordHasher`, `JwtTokenService`, `JsonLogger`, `RequestUserContext` (request-scoped caller identity, populated once by the JWT guard)
 - **Rule**: Implements (structurally satisfies) the ports from the Domain and Application layers
 
 ### 4. API Layer (`src/api/`)

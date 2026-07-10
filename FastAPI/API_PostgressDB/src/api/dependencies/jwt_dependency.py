@@ -7,6 +7,7 @@ from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
 from src.api.dependencies.injection import Injected
 from src.application.services.token_service import TokenService
+from src.application.services.user_context import UserContext
 from src.application.use_cases.auth import auth_dto
 from src.infrastructure.logging import log_context
 
@@ -16,13 +17,16 @@ _security = HTTPBearer()
 async def get_current_user(
     credentials: Annotated[HTTPAuthorizationCredentials, Depends(_security)],
     token_service: Annotated[TokenService, Injected(TokenService)],
+    user_context: Annotated[UserContext, Injected(UserContext)],
 ) -> auth_dto.TokenClaimsDTO:
     """Validate the Bearer JWT access token and return its claims.
 
-    Decodes the token, raising 401 on any failure, and records the
-    authenticated user id in the logging context so it appears on every log
-    line for the rest of the request. Components needing the caller's identity
-    depend on this function and receive the returned ``TokenClaimsDTO``.
+    Decodes the token, raising 401 on any failure, then populates the
+    request-scoped ``UserContext`` (so any injected use case or service can
+    read the caller's identity) and records the user id in the logging
+    context so it appears on every log line for the rest of the request.
+    Route handlers can also receive the returned ``TokenClaimsDTO`` directly
+    via ``Depends(get_current_user)``.
 
     Args:
         credentials: The HTTP Bearer credentials from the Authorization header.
@@ -43,6 +47,7 @@ async def get_current_user(
             headers={"WWW-Authenticate": "Bearer"},
         )
 
+    user_context.populate(token_claims.user_id, token_claims.role)
     log_context.user_id_var.set(token_claims.user_id)
 
     return token_claims
