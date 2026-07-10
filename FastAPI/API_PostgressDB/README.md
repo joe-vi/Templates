@@ -91,7 +91,7 @@ Invoke-WebRequest -Uri "https://github.com/joe-vi/Templates/archive/refs/heads/m
 │   │   ├── schemas/
 │   │   │   └── operation_schema.py         # Shared response envelope
 │   │   └── result_status_maps.py           # Operation result → HTTP status + message maps
-│   └── main.py                             # FastAPI app, lifespan (engine), request-id middleware, routers
+│   └── main.py                             # FastAPI app, lifespan (engine), request_context middleware (DI scope + log vars), routers
 ├── tests/
 │   ├── api/
 │   │   └── routers/
@@ -131,7 +131,7 @@ Invoke-WebRequest -Uri "https://github.com/joe-vi/Templates/archive/refs/heads/m
 - **Rule**: Imports Domain only
 
 ### 3. Infrastructure Layer (`src/infrastructure/`)
-- **Database**: `session.py` builds the engine + `async_sessionmaker`; the session is provided per request (no factory object, no shared `ContextVar`)
+- **Database**: `session.py` builds the engine + `async_sessionmaker`; the session is provided per request (no custom factory wrapper, no shared `ContextVar`)
 - **Repository Adapters**: `SqlAlchemyUserRepository` takes an `AsyncSession`; mutations flush and map DB errors to result enums — they never commit; the use case owns the boundary via `SqlAlchemyTransactionContext` (commit on all-success, rollback otherwise)
 - **Auth/Logging Adapters**: `BcryptPasswordHasher`, `JwtTokenService`, `JsonLogger`, `RequestUserContext` (request-scoped caller identity, populated once by the JWT guard)
 - **Rule**: Implements (structurally satisfies) the ports from the Domain and Application layers

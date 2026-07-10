@@ -84,7 +84,6 @@ Generate these regardless of stack. Use concise, idiomatic Python — no unneces
 
 - **`base.py`**: SQLAlchemy `DeclarativeBase` subclass.
 - **`session.py`** (infrastructure): `create_engine(settings) -> AsyncEngine` and `create_session_factory(engine) -> async_sessionmaker[AsyncSession]` (with `expire_on_commit=False`). No connection-factory object, no `ContextVar`.
-- The `AsyncSession` is a `Scope.REQUEST` generator provider in `AppProvider` (`async with factory() as session: yield session`) — no separate dependency module.
 
 The engine + session factory are singleton `@provider` methods on `AppModule` (the engine disposed in `lifespan` shutdown); the session is a request-scoped `@provider`. Repository adapters receive the `AsyncSession` by constructor injection and never commit or roll back — mutations `flush()` and map errors to result enums. Driver: `asyncpg` for postgres (`postgresql+asyncpg://`), `aiosqlite` for sqlite (`sqlite+aiosqlite:///`).
 
@@ -128,7 +127,7 @@ Ports are `typing.Protocol`s in `src/application/services/`; adapters are mechan
 
 - `CacheService` port (application layer): `get()`, `set()`, `delete()`.
 - `RedisCacheService` adapter (infrastructure): `redis.asyncio` client created in `lifespan`, disposed on shutdown.
-- Bind it at `Scope.APP` in `AppProvider` (generator provider so cleanup runs at `container.close()`).
+- Bind it with `bind_typed(CacheService).to(RedisCacheService, scope=singleton)` in `AppModule`; dispose the client in `lifespan` shutdown alongside the engine.
 
 ### Step 7 — Generate `settings.py`
 

@@ -44,7 +44,7 @@ src/
     ├── routers/<entity>/<entity>_routes.py   # takes/returns DTOs — no schemas/converters
     ├── schemas/operation_schema.py   # generic result envelopes (inherit DTOBase)
     └── result_status_maps.py  # result enum -> HTTP status + message maps
-└── main.py                    # app, lifespan (engine), request-id middleware, routers
+└── main.py                    # app, lifespan (engine), request_context middleware (DI scope + log vars), routers
 ```
 
 **Rule**: For every new entity, create `src/{layer}/{type}/{entity}/` folders across all layers. Never scatter entity files into flat shared directories.
@@ -110,7 +110,7 @@ src/
 - `get_current_user` (in `src/api/dependencies/jwt_dependency.py`) decodes the Bearer JWT, raises 401 on failure, populates the request-scoped `UserContext`, records the user id in the logging context, and returns a `TokenClaimsDTO`.
 - Protect a whole router with `dependencies=[Depends(get_current_user)]` on the `APIRouter`. A route handler that needs the claims directly declares `claims: TokenClaimsDTO = Depends(get_current_user)`.
 - **Request-scoped user context**: the `UserContext` port (`src/application/services/user_context.py`; adapter `RequestUserContext`, bound at `request` scope) holds the caller's identity for the request. Inject it into use cases or services that need the caller — auditing, ownership checks, roles/permissions — instead of threading claims through every signature. `populate()` is called exactly once by the guard (a second call raises `RuntimeError`); reading it unpopulated raises `RuntimeError`, so it is only valid on guarded routes. Read scalar values from it and pass those to repositories — never pass the context object itself to a repository.
-- Request correlation for logs (`request_id`, `user_id`) is carried in context variables in `src/infrastructure/logging/log_context.py` — set by the request-id middleware and the guard. Context variables are appropriate here because they carry cross-cutting observability metadata, not control-flow or transactional state.
+- Request correlation for logs (`request_id`, `user_id`) is carried in context variables in `src/infrastructure/logging/log_context.py` — set by the `request_context` middleware and the guard. Context variables are appropriate here because they carry cross-cutting observability metadata, not control-flow or transactional state.
 
 ### Routes & responses
 - Routes return the **response model object**; FastAPI serialises it (camelCase, via `response_model`). **Never** return a hand-built `JSONResponse(model.model_dump())` — that bypasses `response_model` and the alias generator.
@@ -200,7 +200,7 @@ Tests live in `tests/` and mirror `src/`.
 |-------|------|-------|
 | Application | `<entity>_use_case.py` | Yes — mock the repository port |
 | Application | `<entity>_converter.py` | Yes |
-| API | `<entity>_routes.py` | Yes — override providers |
+| API | `<entity>_routes.py` | Yes — bind mock instances in a `TestModule` |
 | Infrastructure | repository adapter | No — needs a live DB (integration only) |
 | Infrastructure | `SqlAlchemyTransactionContext` | Yes — integration test against in-memory SQLite (aiosqlite) proving commit/rollback atomicity |
 

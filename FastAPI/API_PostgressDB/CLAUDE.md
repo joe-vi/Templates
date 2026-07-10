@@ -59,7 +59,7 @@ binding fails at runtime on first resolution (accepted).
 ### Auth
 - `get_current_user` decodes the Bearer JWT, raises 401, populates the request-scoped `UserContext`, records the user id in the logging context, returns `TokenClaimsDTO`. Protect routers with `dependencies=[Depends(get_current_user)]`.
 - `UserContext` port (adapter `RequestUserContext`, `request` scope): inject into use cases/services needing the caller's identity (auditing, roles/permissions). `populate()` once by the guard — second call raises; unpopulated reads raise. Pass scalar values to repositories, never the context object.
-- Log correlation (`request_id`, `user_id`) lives in context vars in `src/infrastructure/logging/log_context.py` (set by the request-id middleware and the guard).
+- Log correlation (`request_id`, `user_id`) lives in context vars in `src/infrastructure/logging/log_context.py` (set by the `request_context` middleware and the guard).
 
 ### Database
 - All constraints **must** have an explicit `name` (`uq_`, `fk_`, `ck_`, `ix_` prefix).
@@ -75,7 +75,7 @@ binding fails at runtime on first resolution (accepted).
 
 ### Testing
 - Use case tests: `AsyncMock(spec=UserRepository)` for the repository port.
-- Route tests: minimal `FastAPI()` + `app.dependency_overrides` for the use-case provider and `get_current_user` — never import `src/main.py`.
+- Route tests: minimal `FastAPI()` + mock instances bound in a `TestModule` on `app.state.injector`; `app.dependency_overrides` for `get_current_user` — never import `src/main.py`.
 - `asyncio_mode = "auto"` is configured (no `@pytest.mark.asyncio`).
 
 ### Anti-Patterns (Never)

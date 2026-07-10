@@ -49,8 +49,8 @@ validation — a missing binding fails at runtime on first resolution.
 
 ## Session, transactions & repository pattern
 
-- The engine + `async_sessionmaker` are `Scope.APP` providers; `container.close()` in `lifespan` disposes the engine.
-- The `AsyncSession` is a `Scope.REQUEST` generator provider — every repository and the transaction context in one request share it, and the scope closes it. No module-global session state, no `ContextVar` for sessions.
+- The engine + `async_sessionmaker` are singleton `@provider` methods on `AppModule`; the engine is disposed in `lifespan` shutdown.
+- The `AsyncSession` is a request-scoped `@provider` method — every repository and the transaction context in one request share it, and the scope teardown closes it via `aclose()`. Repositories receive the session by constructor, never via ambient state.
 - Repository adapters receive the `AsyncSession` by constructor and never commit or roll back. One CRUD operation per method.
 - Mutations `flush()`/`execute()` and map DB exceptions to result enums: `IntegrityError` → `UNIQUE_CONSTRAINT_ERROR`; `DBAPIError` whose `__cause__` is a deadlock → `CONCURRENCY_ERROR`; others → `FAILURE`. Read methods just query. `flush()` populates `id`/server defaults via RETURNING — no `session.refresh()`.
 - The use case owns the transaction boundary via the `TransactionContext` port (adapter `SqlAlchemyTransactionContext`): wrap mutations in `async with self._transaction_context.begin() as transaction:` and call `await transaction.commit()` only when every operation succeeded. Rollback-unless-committed.
