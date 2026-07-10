@@ -8,8 +8,8 @@ from fastapi import FastAPI, Request, Response
 from injector import Injector
 from sqlalchemy.ext.asyncio import AsyncEngine
 
-from src.api.dependencies.injection import async_request_scope
 from src.api.dependencies.providers import AppModule
+from src.api.dependencies.request_scope import async_request_scope
 from src.api.routers.auth import auth_routes
 from src.api.routers.user import user_routes
 from src.infrastructure.logging import log_context

@@ -1,15 +1,22 @@
-"""API routes for user CRUD operations."""
+"""API routes for user CRUD operations.
+
+Routes accept and return application DTOs directly: ``DTOBase`` gives them
+camelCase aliases on the wire, so no separate API schemas or converters are
+needed. FastAPI validates request bodies against the DTO and serialises
+responses via ``response_model``.
+"""
 
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, Response, status
+from fastapi import APIRouter, Body, Depends, HTTPException, Response, status
 
 from src.api import result_status_maps
-from src.api.dependencies.injection import Injected
+from src.api.dependencies.injected import Injected
 from src.api.dependencies.jwt_dependency import get_current_user
-from src.api.routers.user import user_converter, user_schema
 from src.api.schemas import operation_schema
+from src.application.use_cases.user import user_dto
 from src.application.use_cases.user.user_use_case import UserUseCase
+from src.domain.enums import user_enum
 
 router = APIRouter(
     prefix="/api/v1",
@@ -38,21 +45,20 @@ UseCaseDep = Annotated[UserUseCase, Injected(UserUseCase)]
     },
 )
 async def create_user(
-    user_data: user_schema.UserCreateRequest,
+    create_user_dto: user_dto.CreateUserDTO,
     response: Response,
     use_case: UseCaseDep,
 ) -> operation_schema.CreateOperationResponse:
     """Create a new user.
 
     Args:
-        user_data: The request body containing the user data.
+        create_user_dto: The request body containing the user data.
         response: The response object, used to set the result status code.
         use_case: The injected user use case.
 
     Returns:
         A CreateOperationResponse with the result enum and new user id.
     """
-    create_user_dto = user_converter.to_create_dto(user_data)
     result, entity_id = await use_case.create_user(create_user_dto)
     response.status_code = result_status_maps.CREATE_STATUS_MAP[result]
     return operation_schema.CreateOperationResponse(
@@ -64,7 +70,7 @@ async def create_user(
 
 @router.get(
     "/users/{user_id}",
-    response_model=user_schema.UserResponse,
+    response_model=user_dto.UserDTO,
     responses={
         status.HTTP_401_UNAUTHORIZED: {
             "description": "Missing or invalid JWT token"
@@ -75,7 +81,7 @@ async def create_user(
 async def get_user(
     user_id: int,
     use_case: UseCaseDep,
-) -> user_schema.UserResponse:
+) -> user_dto.UserDTO:
     """Get a user by its unique identifier.
 
     Args:
@@ -83,25 +89,25 @@ async def get_user(
         use_case: The injected user use case.
 
     Returns:
-        A UserResponse representing the found user.
+        A UserDTO representing the found user.
 
     Raises:
         HTTPException: 404 if the user is not found.
     """
-    user_dto = await use_case.get_user(user_id)
+    found_user = await use_case.get_user(user_id)
 
-    if user_dto is None:
+    if found_user is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"User with id {user_id} not found",
         )
 
-    return user_converter.to_response(user_dto)
+    return found_user
 
 
 @router.get(
     "/users",
-    response_model=list[user_schema.UserResponse],
+    response_model=list[user_dto.UserDTO],
     responses={
         status.HTTP_401_UNAUTHORIZED: {
             "description": "Missing or invalid JWT token"
@@ -110,17 +116,16 @@ async def get_user(
 )
 async def get_all_users(
     use_case: UseCaseDep,
-) -> list[user_schema.UserResponse]:
+) -> list[user_dto.UserDTO]:
     """Get all users.
 
     Args:
         use_case: The injected user use case.
 
     Returns:
-        A list of UserResponse representing all users.
+        A list of UserDTO representing all users.
     """
-    user_list_dto = await use_case.get_all_users()
-    return user_converter.to_response_list(user_list_dto)
+    return await use_case.get_all_users()
 
 
 @router.patch(
@@ -140,22 +145,30 @@ async def get_all_users(
 )
 async def update_user_role(
     user_id: int,
-    role_data: user_schema.UserUpdateRoleRequest,
+    role: Annotated[
+        user_enum.UserRole,
+        Body(embed=True, description="The new role to assign to the user"),
+    ],
     response: Response,
     use_case: UseCaseDep,
 ) -> operation_schema.UpdateOperationResponse:
     """Update the role of a user.
 
+    The user id comes from the path and the role from the request body
+    (``{"role": ...}``); the two are combined into the use-case DTO here.
+
     Args:
         user_id: The unique identifier of the user to update.
-        role_data: The request body containing the new role.
+        role: The new role, from the request body.
         response: The response object, used to set the result status code.
         use_case: The injected user use case.
 
     Returns:
         An UpdateOperationResponse with the result enum indicating the outcome.
     """
-    update_user_role_dto = user_converter.to_update_role_dto(user_id, role_data)
+    update_user_role_dto = user_dto.UpdateUserRoleDTO(
+        user_id=user_id, role=role
+    )
     result = await use_case.update_user_role(update_user_role_dto)
     response.status_code = result_status_maps.UPDATE_STATUS_MAP[result]
     return operation_schema.UpdateOperationResponse(

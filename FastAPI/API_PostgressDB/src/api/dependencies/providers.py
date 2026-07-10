@@ -18,7 +18,8 @@ Scopes:
 from injector import Binder, Module, provider, singleton
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 
-from src.api.dependencies.injection import TypedBinder, request
+from src.api.dependencies.request_scope import request
+from src.api.dependencies.typed_binder import TypedBinder
 from src.application.services.logger import Logger
 from src.application.services.password_hasher import PasswordHasher
 from src.application.services.token_service import TokenService

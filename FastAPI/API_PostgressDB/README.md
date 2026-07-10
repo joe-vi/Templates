@@ -80,14 +80,15 @@ Invoke-WebRequest -Uri "https://github.com/joe-vi/Templates/archive/refs/heads/m
 │   │           └── sqlalchemy_user_repository.py   # Async CRUD adapter
 │   ├── api/                                # Routes, schemas, dependency providers
 │   │   ├── dependencies/
-│   │   │   ├── injection.py                # RequestScope, TypedBinder, Injected()
+│   │   │   ├── request_scope.py            # RequestScope + disposal context managers
+│   │   │   ├── typed_binder.py             # TypedBinder (mypy-checked bindings)
+│   │   │   ├── injected.py                 # Injected() route-side accessor
 │   │   │   ├── providers.py                # composition root: AppModule (ports → adapters, scopes)
 │   │   │   └── jwt_dependency.py           # JWT guard (get_current_user)
 │   │   ├── routers/
-│   │   │   ├── auth/{auth_converter,auth_routes,auth_schema}.py
-│   │   │   └── user/{user_converter,user_routes,user_schema}.py
+│   │   │   ├── auth/auth_routes.py         # Routes take/return DTOs directly
+│   │   │   └── user/user_routes.py
 │   │   ├── schemas/
-│   │   │   ├── base_schema.py              # APIModelBase — camelCase JSON base for all schemas
 │   │   │   └── operation_schema.py         # Shared response envelope
 │   │   └── result_status_maps.py           # Operation result → HTTP status + message maps
 │   └── main.py                             # FastAPI app, lifespan (engine), request-id middleware, routers
@@ -95,7 +96,6 @@ Invoke-WebRequest -Uri "https://github.com/joe-vi/Templates/archive/refs/heads/m
 │   ├── api/
 │   │   └── routers/
 │   │       └── user/
-│   │           ├── test_user_converter.py
 │   │           └── test_user_routes.py     # Route tests via an injector TestModule
 │   ├── application/
 │   │   └── use_cases/
@@ -139,7 +139,7 @@ Invoke-WebRequest -Uri "https://github.com/joe-vi/Templates/archive/refs/heads/m
 ### 4. API Layer (`src/api/`)
 - **Routes**: FastAPI endpoints that depend on the concrete use case via `Annotated[UserUseCase, Injected(UserUseCase)]` and **return response models** (FastAPI serialises them to camelCase)
 - **Dependencies**: `providers.py` is the composition root (ports → adapters); `database.py` yields the request-scoped session; `jwt_dependency.py` is the JWT guard
-- **Schemas**: Pydantic request/response models; all inherit `APIModelBase` (camelCase JSON, snake_case Python attributes)
+- **Bodies**: routes accept and return application DTOs directly — `DTOBase` gives camelCase JSON on the wire (and in OpenAPI) with snake_case Python attributes; only the generic operation envelopes live in `api/schemas/`
 - **Rule**: Wires adapters to ports in `dependencies/`; routes never call repositories directly
 
 ## Installation
@@ -284,7 +284,7 @@ uv run alembic downgrade -1                              # Roll back one step
 1. **Domain**: Add entity in `src/domain/entities/<name>/` and a repository **Protocol** port in `src/domain/repositories/<name>/<name>_repository.py` (clean name, e.g. `OrderRepository`)
 2. **Application**: Add DTO, converter functions, and a concrete use case in `src/application/use_cases/<name>/` — inject `TransactionContext`, wrap mutations in `begin()`, commit only on success (several repository calls in one block are atomic)
 3. **Infrastructure**: Add ORM model in `src/infrastructure/database/models/` and a `sqlalchemy_<name>_repository.py` adapter (takes an `AsyncSession`) in `src/infrastructure/repositories/<name>/`
-4. **API**: Add Pydantic schemas (inheriting `APIModelBase`), converter functions, and routes in `src/api/routers/<name>/` that return response models
+4. **API**: Add routes in `src/api/routers/<name>/` that accept and return the DTOs directly (`response_model=<Entity>DTO`) — no per-entity schemas or converters
 5. **Bindings**: Add one line per binding to `AppModule.configure()` in `src/api/dependencies/providers.py` (constructors auto-wired via `@inject`; a wrong implementation is a mypy error):
    ```python
    typed_binder.bind_typed(OrderRepository).to(

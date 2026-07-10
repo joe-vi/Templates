@@ -3,11 +3,8 @@
 import pytest
 from injector import Binder, Injector, Module
 
-from src.api.dependencies.injection import (
-    TypedBinder,
-    request,
-    request_scope,
-)
+from src.api.dependencies.request_scope import request, request_scope
+from src.api.dependencies.typed_binder import TypedBinder
 from src.application.services.user_context import UserContext
 from src.domain.enums import user_enum
 from src.infrastructure.auth.request_user_context import RequestUserContext

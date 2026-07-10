@@ -53,10 +53,10 @@ Parse all flags. Apply defaults for any flag not provided.
 │   │   │   └── models/__init__.py
 │   │   └── repositories/
 │   └── api/
-│       ├── dependencies/      # injection.py (scope + TypedBinder), providers.py (AppModule), guards
+│       ├── dependencies/      # request_scope.py, typed_binder.py, injected.py, providers.py (AppModule), guards
 │       ├── routers/
 │       └── schemas/
-│           ├── base_schema.py
+│           ├── operation_schema.py
 │           └── operation_schema.py
 ├── tests/
 │   ├── application/use_cases/
@@ -74,8 +74,8 @@ There is **no `container.py`** — the composition root is `src/api/dependencies
 Generate these regardless of stack. Use concise, idiomatic Python — no unnecessary comments.
 
 - **`operation_results.py`**: Three `StrEnum` classes — `CreateResult`, `UpdateResult`, `DeleteResult`. Values: `success`, `failure`, `concurrency_error`, `unique_constraint_error` on all three; add `not_found` to `UpdateResult` and `DeleteResult`.
-- **`base_schema.py`**: Pydantic `BaseModel` subclass `APIModelBase` with `alias_generator=to_camel` and `populate_by_name=True`.
-- **`operation_schema.py`**: Three `APIModelBase` subclasses — `CreateOperationResponse(result, message, id: int | None)`, `UpdateOperationResponse(result, message)`, `DeleteOperationResponse(result, message)`.
+- **`src/application/dto_base.py`**: Pydantic `BaseModel` subclass `DTOBase` with `alias_generator=to_camel`, `populate_by_name=True`, `frozen=True`. Every DTO inherits it and doubles as the API request/response body — do NOT generate per-entity `Request`/`Response` schemas or API converters.
+- **`operation_schema.py`**: Three `DTOBase` subclasses — `CreateOperationResponse(result, message, id: int | None)`, `UpdateOperationResponse(result, message)`, `DeleteOperationResponse(result, message)`.
 - **`result_status_maps.py`**: `*_STATUS_MAP` and `*_MESSAGE_MAP` dicts mapping each result enum to its HTTP status (201 success-create, 200 success-update/delete, 404 not-found, 409 conflict, 500 failure) and message. Routes look these up, set `response.status_code`, and return the response model — never hand-build a `JSONResponse`.
 
 ### Step 4 — Generate database layer
@@ -86,7 +86,7 @@ Generate these regardless of stack. Use concise, idiomatic Python — no unneces
 - **`session.py`** (infrastructure): `create_engine(settings) -> AsyncEngine` and `create_session_factory(engine) -> async_sessionmaker[AsyncSession]` (with `expire_on_commit=False`). No connection-factory object, no `ContextVar`.
 - The `AsyncSession` is a `Scope.REQUEST` generator provider in `AppProvider` (`async with factory() as session: yield session`) — no separate dependency module.
 
-The engine + session factory are `Scope.APP` providers (the engine as a generator provider so `container.close()` disposes it on shutdown). Repository adapters receive the `AsyncSession` by constructor injection and never commit or roll back — mutations `flush()` and map errors to result enums. Driver: `asyncpg` for postgres (`postgresql+asyncpg://`), `aiosqlite` for sqlite (`sqlite+aiosqlite:///`).
+The engine + session factory are singleton `@provider` methods on `AppModule` (the engine disposed in `lifespan` shutdown); the session is a request-scoped `@provider`. Repository adapters receive the `AsyncSession` by constructor injection and never commit or roll back — mutations `flush()` and map errors to result enums. Driver: `asyncpg` for postgres (`postgresql+asyncpg://`), `aiosqlite` for sqlite (`sqlite+aiosqlite:///`).
 
 Also generate the unit-of-work pair:
 
@@ -147,7 +147,7 @@ Ports are `typing.Protocol`s in `src/application/services/`; adapters are mechan
 - `FastAPI(lifespan=lifespan)`; a `request_context` middleware that enters `async_request_scope()` and scopes the `request_id`/`user_id` context vars per request.
 - `app.include_router(...)` for each router.
 
-Copy `injection.py` (RequestScope, request_scope context managers, TypedBinder, Injected) verbatim from `FastAPI/API_PostgressDB/src/api/dependencies/injection.py`.
+Copy `request_scope.py`, `typed_binder.py`, and `injected.py` verbatim from `FastAPI/API_PostgressDB/src/api/dependencies/`.
 
 ### Step 9 — Generate the composition root
 

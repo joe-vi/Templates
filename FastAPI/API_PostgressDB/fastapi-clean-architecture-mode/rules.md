@@ -15,7 +15,8 @@ API  →  Infrastructure  →  Application  →  Domain
 
 The composition root is `AppModule` in `src/api/dependencies/providers.py`,
 built on `injector` plus the in-house `TypedBinder` and request scope
-(`injection.py`): one line binds implementation, port, and scope, and a
+(`request_scope.py`, `typed_binder.py`, `injected.py`): one line binds
+implementation, port, and scope, and a
 mismatched implementation is a mypy error at that line. No graph-completeness
 validation — a missing binding fails at runtime on first resolution.
 
@@ -24,8 +25,8 @@ validation — a missing binding fails at runtime on first resolution.
 - Ports are `typing.Protocol`s with the clean name — `UserRepository`, `PasswordHasher`, `TokenService`, `Logger`, `UserContext`. No `Base` suffix.
 - Adapters are mechanism-qualified — `SqlAlchemyUserRepository`, `BcryptPasswordHasher`, `JwtTokenService`, `JsonLogger`, `RequestUserContext`.
 - Use cases are plain concrete classes (`UserUseCase`, `AuthUseCase`) — no separate interface.
-- DTOs: frozen dataclasses, `DTO` suffix; return `list[UserDTO]` directly, never a wrapper DTO.
-- API schemas: `Request` / `Response` suffix; all inherit `APIModelBase`.
+- DTOs: Pydantic models inheriting `DTOBase` (frozen, camelCase aliases on the wire), `DTO` suffix; validation lives on the DTOs; return `list[UserDTO]` directly, never a wrapper DTO.
+- No per-entity API schemas or API converters: routes accept/return DTOs directly; only the generic operation envelopes remain in `api/schemas/` (also `DTOBase`).
 - Converters: module-level functions, never classes of static methods.
 - Enums: `StrEnum`, lowercase values, all in `src/domain/enums/`.
 - Result enums: always generic — `CreateResult`, `UpdateResult`, `DeleteResult`; never entity-specific.

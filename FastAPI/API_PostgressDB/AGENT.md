@@ -9,9 +9,9 @@ Dependencies flow **inward only**: API → Infrastructure → Application → Do
 | Domain | `src/domain/` | Entities, repository ports (Protocols), enums | Nothing |
 | Application | `src/application/` | Use cases, DTOs, converters, service ports (Protocols) | Domain only |
 | Infrastructure | `src/infrastructure/` | DB models, repository adapters, auth/logging adapters, engine/session | Domain + Application |
-| API | `src/api/` | Routes, request/response schemas, API converters, **dependency providers** | Application + Infrastructure (only in `dependencies/`) |
+| API | `src/api/` | Routes (accept/return DTOs), operation envelopes, **dependency providers** | Application + Infrastructure (only in `dependencies/`) |
 
-The composition root is `AppModule` in `src/api/dependencies/providers.py`, built on the **injector** library with two in-house pieces (`src/api/dependencies/injection.py`): a ContextVar-backed **request scope** with automatic disposal, and the **`TypedBinder`** facade, which makes every binding a one-liner — implementation, port, and scope — where a mismatched implementation is a mypy error at that line. There is no graph-completeness validation: a missing binding surfaces as a runtime error on first resolution (accepted trade-off).
+The composition root is `AppModule` in `src/api/dependencies/providers.py`, built on the **injector** library with in-house pieces in `src/api/dependencies/` (`request_scope.py`, `typed_binder.py`, `injected.py`): a ContextVar-backed **request scope** with automatic disposal, and the **`TypedBinder`** facade, which makes every binding a one-liner — implementation, port, and scope — where a mismatched implementation is a mypy error at that line. There is no graph-completeness validation: a missing binding surfaces as a runtime error on first resolution (accepted trade-off).
 
 ### File Organisation
 
@@ -36,11 +36,13 @@ src/
 │   └── database/{base.py, session.py, sqlalchemy_transaction_context.py, models/<entity>_model.py}
 └── api/
     ├── dependencies/
-    │   ├── injection.py       # RequestScope, request_scope(), TypedBinder, Injected()
+    │   ├── request_scope.py   # RequestScope, request_scope()/async_request_scope(), disposal
+    │   ├── typed_binder.py    # TypedBinder (mypy-checked bindings)
+    │   ├── injected.py        # Injected() route-side accessor
     │   ├── providers.py       # composition root: AppModule (ports -> adapters, scopes)
     │   └── jwt_dependency.py  # get_current_user guard
-    ├── routers/<entity>/{<entity>_schema.py, <entity>_converter.py, <entity>_routes.py}
-    ├── schemas/{base_schema.py, operation_schema.py}
+    ├── routers/<entity>/<entity>_routes.py   # takes/returns DTOs — no schemas/converters
+    ├── schemas/operation_schema.py   # generic result envelopes (inherit DTOBase)
     └── result_status_maps.py  # result enum -> HTTP status + message maps
 └── main.py                    # app, lifespan (engine), request-id middleware, routers
 ```
@@ -58,9 +60,9 @@ src/
 - Entities: singular nouns — `User`, `Order`.
 - Status enums: singular `StrEnum` (`UserRole`, `UserStatus`).
 - Operation result enums: generic and shared — `CreateResult`, `UpdateResult`, `DeleteResult`. Never entity-specific. `LoginResult` is the one permitted auth-specific enum.
-- DTOs: frozen dataclasses with `DTO` suffix. Return `list[UserDTO]` directly; never a wrapper collection DTO.
-- API schemas: `Request` suffix for inputs, `Response` suffix for outputs; all inherit from `APIModelBase` (`src/api/schemas/base_schema.py`).
-- `APIModelBase`: serialises to camelCase JSON, accepts both camelCase and snake_case on input.
+- DTOs: Pydantic models inheriting `DTOBase` (frozen; camelCase on the wire, snake_case in code) with `DTO` suffix; they are the API request/response bodies, so field validation (`EmailStr`, `min_length`, ...) lives on them. Return `list[UserDTO]` directly; never a wrapper collection DTO.
+- **No per-entity API schemas**: routes accept and return the application DTOs directly (`response_model=UserDTO`). Only the generic operation envelopes (`CreateOperationResponse`, ...) live in `src/api/schemas/operation_schema.py`, and they inherit `DTOBase` too.
+- `DTOBase` (`src/application/dto_base.py`): the base for every DTO and envelope — serialises to camelCase JSON (drives responses **and** the OpenAPI schema), accepts both camelCase and snake_case on input, and is frozen.
 
 ### Variables & Properties
 - Collections: plural; sets: `_set` suffix; dicts: `_map` suffix.
@@ -79,7 +81,7 @@ src/
 ### Dependency Injection (injector + TypedBinder)
 - The composition root is `AppModule` in `src/api/dependencies/providers.py`. One line binds implementation, port, and scope via the typed facade:
   `typed_binder.bind_typed(UserRepository).to(SqlAlchemyUserRepository, scope=request)` — and binding an implementation that does not satisfy the port is a **mypy error at that line**. Concrete classes with no port use `bind_self_typed(UserUseCase, scope=request)`.
-- **Scopes are explicit**: `singleton` (from `injector`) for process-wide objects (engine, `PasswordHasher`, `TokenService`, `Logger`); `request` (from `injection.py`) for per-request objects (session, repositories, transaction context, use cases). Everything in one request shares the same instances; the request scope's state lives in a `ContextVar`, isolated per request under asyncio.
+- **Scopes are explicit**: `singleton` (from `injector`) for process-wide objects (engine, `PasswordHasher`, `TokenService`, `Logger`); `request` (from `request_scope.py`) for per-request objects (session, repositories, transaction context, use cases). Everything in one request shares the same instances; the request scope's state lives in a `ContextVar`, isolated per request under asyncio.
 - **Every implementation whose `__init__` takes dependencies carries `@inject`** (from `injector`) so the graph auto-wires from type hints. Omitting it fails at resolution with a `TypeError`.
 - Construction that needs logic lives in `@provider` methods on `AppModule` (`provide_settings`, `provide_engine`, `provide_session_factory`, `provide_session`).
 - **Disposal**: on request end the scope disposes its objects in reverse creation order — `aclose()` preferred, an async `close()` is awaited, failures are logged without blocking other teardowns. The session is closed this way. The engine (a singleton) is disposed explicitly in `main.lifespan` shutdown.
@@ -167,8 +169,8 @@ Never set these in Python code:
 
 1. **Domain**: enums in `src/domain/enums/<entity>_enum.py`; entity dataclass in `src/domain/entities/<entity>/`; repository **Protocol** in `src/domain/repositories/<entity>/<entity>_repository.py`.
 2. **Infrastructure**: ORM model in `src/infrastructure/database/models/<entity>_model.py` (re-export from `models/__init__.py`); adapter `sqlalchemy_<entity>_repository.py` taking an `AsyncSession`.
-3. **Application**: frozen DTOs, converter **functions**, concrete use case in `src/application/use_cases/<entity>/`. Mutating use cases inject `TransactionContext` and wrap repository calls in a `begin()` block, committing only on success.
-4. **API**: Pydantic schemas (inherit `APIModelBase`), converter functions, routes returning models (`Annotated[UseCase, Injected(UseCase)]`); add one `bind_typed(...).to(...)`/`bind_self_typed(...)` line per new binding to `AppModule.configure()`; include the router in `main.py`.
+3. **Application**: `DTOBase` DTOs (with validation), converter **functions**, concrete use case in `src/application/use_cases/<entity>/`. Mutating use cases inject `TransactionContext` and wrap repository calls in a `begin()` block, committing only on success.
+4. **API**: routes accepting and returning the DTOs directly (`Annotated[UseCase, Injected(UseCase)]`, `response_model=<Entity>DTO`); add one `bind_typed(...).to(...)`/`bind_self_typed(...)` line per new binding to `AppModule.configure()`; include the router in `main.py`. No per-entity schemas or API converters.
 
 ---
 
@@ -198,7 +200,6 @@ Tests live in `tests/` and mirror `src/`.
 |-------|------|-------|
 | Application | `<entity>_use_case.py` | Yes — mock the repository port |
 | Application | `<entity>_converter.py` | Yes |
-| API | `<entity>_converter.py` | Yes |
 | API | `<entity>_routes.py` | Yes — override providers |
 | Infrastructure | repository adapter | No — needs a live DB (integration only) |
 | Infrastructure | `SqlAlchemyTransactionContext` | Yes — integration test against in-memory SQLite (aiosqlite) proving commit/rollback atomicity |

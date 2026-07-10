@@ -65,7 +65,7 @@ Check:
 Read all files in `src/api/`.
 
 Check:
-- **Naming**: schemas end with `Request` or `Response` and inherit `APIModelBase`; converters are module functions
+- **Naming**: DTOs inherit `DTOBase` and double as request/response bodies (no per-entity `Request`/`Response` schemas, no API converters); the entity↔DTO converters are module functions
 - **DI**:
   - Composition root is `AppModule.configure()` in `src/api/dependencies/providers.py` — one `bind_typed(Port).to(Impl, scope=...)` line per binding via `TypedBinder`; flag raw `binder.bind(...)` calls for port bindings (they skip conformance checking) and any `fastapi-injector` usage
   - Every implementation whose `__init__` takes dependencies carries `@inject`; flag missing ones (runtime `TypeError`)
@@ -81,7 +81,7 @@ Read `src/main.py` and `src/api/dependencies/`.
 
 Check:
 - **Injector**: `Injector([AppModule()])` at module level, stored on `app.state.injector`; the `request_context` middleware enters `async_request_scope()` per request; `lifespan` disposes the engine on shutdown
-- **Legacy DI**: flag any `fastapi-injector` package usage (`InjectorMiddleware`, `attach_injector`) — this template uses its own `injection.py`
+- **Legacy DI**: flag any `fastapi-injector` package usage (`InjectorMiddleware`, `attach_injector`) — this template uses its own `request_scope.py`/`typed_binder.py`/`injected.py`
 - **Bindings**: every port bound via `TypedBinder` with an explicit scope; the session is a request-scoped `@provider`; singletons holding connections are disposed in `lifespan`
 
 ### Phase 6 — Global checks

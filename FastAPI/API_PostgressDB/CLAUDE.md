@@ -14,7 +14,7 @@ API → Infrastructure → Application → Domain   (dependencies point inward o
 
 Domain never imports from any other layer. The composition root is `AppModule` in
 `src/api/dependencies/providers.py` (injector + in-house `TypedBinder`/request scope in
-`injection.py`) — one line binds implementation, port, and scope, and a mismatched
+`typed_binder.py`/`request_scope.py`) — one line binds implementation, port, and scope, and a mismatched
 implementation is a mypy error at that line. No graph-completeness validation: a missing
 binding fails at runtime on first resolution (accepted).
 
@@ -32,8 +32,8 @@ binding fails at runtime on first resolution (accepted).
 - **Adapters are mechanism-qualified** (`SqlAlchemyUserRepository`, `BcryptPasswordHasher`, `JwtTokenService`, `JsonLogger`, `RequestUserContext`).
 - Use cases are plain concrete classes (`UserUseCase`, `AuthUseCase`) — no separate interface.
 - Operation result enums are generic and shared: `CreateResult`, `UpdateResult`, `DeleteResult`.
-- DTOs: frozen dataclasses with `DTO` suffix; use `list[UserDTO]` directly.
-- API schemas: `Request`/`Response` suffix; all inherit `APIModelBase` (camelCase JSON, accepts either case in).
+- DTOs: Pydantic models inheriting `DTOBase` (`src/application/dto_base.py`; frozen, camelCase aliases on the wire) with `DTO` suffix; validation rules live on the DTOs; use `list[UserDTO]` directly.
+- **No per-entity API schemas or API converters**: routes accept/return DTOs directly (`response_model=UserDTO`); only the generic operation envelopes in `api/schemas/operation_schema.py` remain (also `DTOBase`).
 - Converters are **module functions**, not static-method classes.
 - Booleans read like questions (`is_active`); no abbreviations (`repository` not `repo`).
 

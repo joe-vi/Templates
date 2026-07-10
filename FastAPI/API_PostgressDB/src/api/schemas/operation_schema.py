@@ -1,12 +1,12 @@
-"""Shared Pydantic response schemas for CRUD operation results."""
+"""Shared Pydantic response envelopes for CRUD operation results."""
 
 from pydantic import Field
 
-from src.api.schemas import base_schema
+from src.application.dto_base import DTOBase
 from src.domain.enums import operation_results
 
 
-class CreateOperationResponse(base_schema.APIModelBase):
+class CreateOperationResponse(DTOBase):
     """Standard API response for any create operation.
 
     Reusable across all entities — return from any POST endpoint.
@@ -23,7 +23,7 @@ class CreateOperationResponse(base_schema.APIModelBase):
     )
 
 
-class UpdateOperationResponse(base_schema.APIModelBase):
+class UpdateOperationResponse(DTOBase):
     """Standard API response for any update operation.
 
     Reusable across all entities — return from any PUT/PATCH endpoint.
@@ -35,7 +35,7 @@ class UpdateOperationResponse(base_schema.APIModelBase):
     )
 
 
-class DeleteOperationResponse(base_schema.APIModelBase):
+class DeleteOperationResponse(DTOBase):
     """Standard API response for any delete operation.
 
     Reusable across all entities — return from any DELETE endpoint.

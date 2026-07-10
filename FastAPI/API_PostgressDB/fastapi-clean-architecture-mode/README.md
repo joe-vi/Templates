@@ -49,7 +49,7 @@ Domain has zero external dependencies. Every other layer may only import from th
 **Naming discipline**
 - Ports are `Protocol`s with clean names (`UserRepository`); adapters are mechanism-qualified (`SqlAlchemyUserRepository`)
 - DTOs: frozen dataclasses, `DTO` suffix; `list[UserDTO]` returned directly, no wrapper DTOs
-- Converters are module functions; API schemas use `Request`/`Response` suffix and inherit `APIModelBase`
+- Converters are module functions (entity ↔ DTO only); DTOs inherit `DTOBase` and double as the API request/response bodies — no per-entity schemas
 - Result enums: always generic (`CreateResult`, not `CreateUserResult`)
 
 **New entity layer order**

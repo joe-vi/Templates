@@ -2,7 +2,7 @@
 
 Routes look these up, set ``response.status_code``, and return the operation
 response *model* — letting FastAPI serialise it (consistently camelCase via
-``APIModelBase``) instead of hand-building a ``JSONResponse``.
+``DTOBase``) instead of hand-building a ``JSONResponse``.
 """
 
 from fastapi import status
