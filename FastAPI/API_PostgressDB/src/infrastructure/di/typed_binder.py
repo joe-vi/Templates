@@ -1,11 +1,3 @@
-"""Statically-typed facade over the injector Binder.
-
-Passing an implementation that does not satisfy its port is a type-checker
-error at the call site (dev time and CI). There is no runtime conformance
-check, and no graph-completeness check: a missing binding surfaces as a
-runtime error on first resolution.
-"""
-
 from __future__ import annotations
 
 from typing import Any
@@ -39,10 +31,13 @@ class TypedBinder:
     """Statically-typed facade over an injector Binder.
 
         typed_binder = TypedBinder(binder)
-        typed_binder.bind_typed(UserRepository).to(
-            SqlAlchemyUserRepository, scope=request
-        )
-        typed_binder.bind_self_typed(UserUseCase, scope=request)
+        typed_binder.bind_typed(UserRepository).to(SqlAlchemyUserRepository, scope=request)
+        typed_binder.bind_self_typed(StandaloneService, scope=request)
+
+    Passing an implementation that does not satisfy its port is a
+    type-checker error at the call site (dev time and CI). There is no
+    runtime conformance check, and no graph-completeness check: a missing
+    binding surfaces as a runtime error on first resolution.
 
     ``bind_typed`` returns a small builder whose ``to``/``to_many`` methods
     record the binding. The type variable P is solved solely from the

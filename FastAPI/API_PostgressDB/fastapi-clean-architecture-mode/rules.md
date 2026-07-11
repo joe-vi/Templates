@@ -14,17 +14,26 @@ API  →  Infrastructure  →  Application  →  Domain
 | API | `src/api/` | Application + Infrastructure (adapters wired only in `dependencies/`) |
 
 The composition root is `AppModule` in `src/api/dependencies/providers.py`,
-built on `injector` plus the in-house `TypedBinder` and request scope
-(`request_scope.py`, `typed_binder.py`, `injected.py`): one line binds
-implementation, port, and scope, and a
-mismatched implementation is a mypy error at that line. No graph-completeness
-validation — a missing binding fails at runtime on first resolution.
+built on `injector` plus the in-house DI machinery in `src/infrastructure/di/`
+(`request_scope.py`, `typed_binder.py`) and the FastAPI accessor
+`src/api/dependencies/injected.py`: one line binds implementation, port, and
+scope, and a mismatched implementation is a pyrefly error at that line. No
+graph-completeness validation — a missing binding fails at runtime on first
+resolution.
+
+## Domain-Driven Design
+
+- Entities are aggregate roots with behaviour: invariants enforced in `__post_init__` (raise `ValueError`), state transitions via intention-revealing methods (`User.activate()`, `User.deactivate()`, `User.is_active`). Never an anemic domain — business rules for one aggregate live on the entity; use cases orchestrate only.
+- One repository port per aggregate root, defined in Domain. A targeted single-column update is acceptable only when no domain rule guards the change; otherwise load → entity behaviour → persist.
+- Ubiquitous language everywhere. Domain imports only stdlib (`dataclasses`, `enum`, `typing`).
+- DTO validation guards input shape at the boundary; entity invariants are the last line of defence.
+- Domain entities get pure unit tests (`tests/domain/`) — no mocks, no I/O.
 
 ## Naming
 
 - Ports are `typing.Protocol`s with the clean name — `UserRepository`, `PasswordHasher`, `TokenService`, `Logger`, `UserContext`. No `Base` suffix.
 - Adapters are mechanism-qualified — `SqlAlchemyUserRepository`, `BcryptPasswordHasher`, `JwtTokenService`, `JsonLogger`, `RequestUserContext`.
-- Use cases are plain concrete classes (`UserUseCase`, `AuthUseCase`) — no separate interface.
+- Use cases are plain concrete classes (`UserUseCase`, `AuthUseCase`) — no separate interface; routes and tests depend on the concrete class.
 - DTOs: Pydantic models inheriting `DTOBase` (frozen, camelCase aliases on the wire), `DTO` suffix; validation lives on the DTOs; return `list[UserDTO]` directly, never a wrapper DTO.
 - No per-entity API schemas or API converters: routes accept/return DTOs directly; only the generic operation envelopes remain in `api/schemas/` (also `DTOBase`).
 - Converters: module-level functions, never classes of static methods.
@@ -32,18 +41,26 @@ validation — a missing binding fails at runtime on first resolution.
 - Result enums: always generic — `CreateResult`, `UpdateResult`, `DeleteResult`; never entity-specific.
 - Booleans: `is_active`, `has_items`, `can_update` — never bare nouns. No abbreviations.
 
+## Documentation (single source, IDE hover)
+
+- No module docstrings or top-of-file comments anywhere.
+- The contract is documented once, on the port: Protocol classes/methods carry full Google-style docstrings. Adapters explicitly subclass their port (`class SqlAlchemyUserRepository(UserRepository):`) and inherit them — never repeat method docstrings in adapters; IDE hover resolves the port docs through the MRO.
+- Adapter classes keep a short class docstring for mechanism-specific notes only; no `__init__` docstrings.
+- Classes with no port — the use cases — carry their own method docstrings: they are the single source.
+- Standalone public functions (converters, providers, guards, routes) keep their own docstrings; route docstrings become OpenAPI descriptions.
+
 ## Ports & adapters (dependency inversion via Protocol)
 
 - A port is a `typing.Protocol` defining required methods; it lives where it is consumed (repository ports in Domain, service ports in `src/application/services/`).
-- An adapter is a plain class that structurally satisfies the port — it does not import or subclass it.
+- An adapter **explicitly subclasses its port** — inheriting the documented contract and giving pyrefly override checking at the class itself. Conformance is additionally checked at the binding line by `TypedBinder`.
 - Use cases take ports as constructor parameters; providers supply the concrete adapter.
 
 ## Dependency injection (injector + TypedBinder)
 
-- Wire everything in `AppModule.configure()` via `TypedBinder` — one line per binding: `typed_binder.bind_typed(UserRepository).to(SqlAlchemyUserRepository, scope=request)`; concrete classes use `bind_self_typed(UserUseCase, scope=request)`. A wrong implementation is a mypy error.
+- Wire everything in `AppModule.configure()` via `TypedBinder` — one line per binding: `typed_binder.bind_typed(UserRepository).to(SqlAlchemyUserRepository, scope=request)`, concrete classes (use cases) use `bind_self_typed(UserUseCase, scope=request)`. A wrong implementation is a pyrefly error.
 - Explicit scopes: `singleton` (engine, stateless services), `request` (session, repositories, transaction context, use cases). Request-scope state lives in a ContextVar; entered per request by the middleware in `main.py`; disposes objects on exit (LIFO, `aclose()` preferred, async `close()` awaited).
 - `@inject` required on every implementation whose `__init__` takes dependencies. Construction logic lives in `@provider` methods on `AppModule`.
-- Routes/guards: `Annotated[UseCase, Injected(UseCase)]` — a thin Depends over `app.state.injector`.
+- Routes/guards: `Annotated[UserUseCase, Injected(UserUseCase)]` — a thin Depends over `app.state.injector`.
 - No graph-completeness validation: a missing binding fails at runtime on first resolution.
 - Tests: bind mock instances in a `TestModule`, set `app.state.injector = Injector([TestModule()])`; `app.dependency_overrides` for plain guards.
 
@@ -68,10 +85,15 @@ validation — a missing binding fails at runtime on first resolution.
 
 ## Adding a new entity — layer order
 
-1. Domain: enum → entity → repository **Protocol** port.
-2. Infrastructure: DB model → `sqlalchemy_<entity>_repository.py` adapter (takes `AsyncSession`).
+1. Domain: enum → aggregate root (invariants + behaviour) → repository **Protocol** port.
+2. Infrastructure: DB model → `sqlalchemy_<entity>_repository.py` adapter (subclasses the port, takes `AsyncSession`).
 3. Application: DTO → converter functions → concrete use case (inject `TransactionContext` for mutations; commit only on success).
-4. API: schema → converter functions → routes (return models); add providers in `dependencies/providers.py`; include router in `main.py`.
+4. API: routes depending on the use case (return models); add bindings in `dependencies/providers.py`; include router in `main.py`.
+5. Tests: entity tests (no mocks), use case tests (mock ports), route tests (bind a mock use case instance in a `TestModule`).
+
+## Code style
+
+Max line length: 140 characters (`skip-magic-trailing-comma = true`).
 
 ## After every change
 

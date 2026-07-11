@@ -1,6 +1,6 @@
 # fastapi-clean-architecture-template
 
-A Claude Code skill that scaffolds a **FastAPI + Clean Architecture** project. The tech stack is configurable; the architecture is not — strict 4-layer structure, unidirectional dependencies, ports-and-adapters, the repository pattern, and result-enum error handling are enforced on every scaffold.
+A Claude Code skill that scaffolds a **FastAPI + Clean Architecture + DDD** project. The tech stack is configurable; the architecture is not — strict 4-layer structure, unidirectional dependencies, rich domain entities, ports-and-adapters, the repository pattern, and result-enum error handling are enforced on every scaffold.
 
 > **Related skills**
 > - [`fastapi-clean-architecture-review`](../fastapi-clean-architecture-review/) — audit an existing project for architecture violations
@@ -33,19 +33,20 @@ API  →  Infrastructure  →  Application  →  Domain
 
 | Layer | Location | Responsibility | Can import from |
 |-------|----------|----------------|-----------------|
-| Domain | `src/domain/` | Entities, repository ports (Protocols), result enums | Nothing |
+| Domain | `src/domain/` | Aggregate roots (invariants + behaviour), repository ports (Protocols), result enums | Nothing |
 | Application | `src/application/` | Use cases, DTOs, converter functions, service ports (Protocols) | Domain only |
-| Infrastructure | `src/infrastructure/` | DB models, repository/auth adapters, engine + session | Domain + Application |
-| API | `src/api/` | Routes, Pydantic schemas, converters, dependency providers | Application + Infrastructure (in `dependencies/`) |
+| Infrastructure | `src/infrastructure/` | DB models, repository/auth adapters, engine + session, DI machinery (`di/`) | Domain + Application |
+| API | `src/api/` | Routes, operation envelopes, composition root | Application + Infrastructure (in `dependencies/`) |
 
 Key architectural patterns enforced on every scaffold regardless of tech stack:
 
+- **Rich domain (DDD)** — entities enforce their invariants at construction and expose intention-revealing behaviour; never anemic field bags
 - **Repository pattern** — one CRUD operation per method; mutation methods return result enums (`CreateResult`, `UpdateResult`, `DeleteResult`), never raise exceptions to use cases; repositories never commit — the use case owns the transaction boundary
 - **Unit of work** — mutating use cases wrap repository calls in `TransactionContext.begin()` and commit only on all-success; multi-repository operations inside one block are atomic (rollback-unless-committed)
-- **Ports & adapters** — use cases depend on `typing.Protocol` ports; adapters (mechanism-qualified, e.g. `SqlAlchemyUserRepository`) structurally satisfy them; `AppModule` in `src/api/dependencies/providers.py` wires them via the typed binder
-- **Typed declarative DI (injector + TypedBinder)** — one line binds implementation, port, and scope; a mismatched implementation is a mypy error at the binding line; constructors auto-wired via `@inject`
+- **Ports & adapters** — use cases depend on `typing.Protocol` ports; adapters (mechanism-qualified, e.g. `SqlAlchemyUserRepository`) explicitly subclass their port and inherit its docstrings — the contract is documented once and IDE hover shows it everywhere; `AppModule` in `src/api/dependencies/providers.py` wires them via the typed binder
+- **Typed declarative DI (injector + TypedBinder)** — one line binds implementation, port, and scope; a mismatched implementation is a pyrefly error at the binding line; constructors auto-wired via `@inject`
 - **Request-scoped sessions** — one `AsyncSession` per request (request-scoped provider, disposed automatically on request end), shared by every adapter in that request
-- **Strict naming** — ports are clean-named Protocols, adapters mechanism-qualified, DTOs end with `DTO`, schemas with `Request`/`Response`; operation result enums are always generic (`CreateResult`, not `CreateUserResult`)
+- **Strict naming** — ports are clean-named Protocols, adapters mechanism-qualified, use cases are plain concrete classes, DTOs end with `DTO` and double as request/response bodies (no per-entity schemas); operation result enums are always generic (`CreateResult`, not `CreateUserResult`)
 - **Responses** — routes return the response model and let FastAPI serialise it (camelCase); they never hand-build `JSONResponse`
 - **DB-generated fields** — `id`, `created_at` are never set in Python; all constraints are explicitly named for safe migrations
 
@@ -65,11 +66,11 @@ The only things that change between stacks are `src/infrastructure/` adapters an
 ```
 my-api/
 ├── src/
-│   ├── domain/          # Entities, repository ports (Protocols), result enums — no external deps
+│   ├── domain/          # Aggregate roots (invariants + behaviour), repository ports, result enums — no external deps
 │   ├── application/     # Use cases, DTOs, service ports (Protocols) — imports Domain only
-│   ├── infrastructure/  # DB models, repository/auth adapters, engine + session — stack-specific
-│   └── api/             # FastAPI routes, schemas, dependency providers
-├── tests/
+│   ├── infrastructure/  # DB models, repository/auth adapters, engine + session, DI machinery — stack-specific
+│   └── api/             # FastAPI routes, operation envelopes, composition root
+├── tests/               # domain (no mocks), use cases (mocked ports), routes (mocked use case)
 ├── CLAUDE.md            # Enforces all architecture rules on every future session automatically
 ├── AGENT.md             # Full architecture reference for developers
 ├── pyproject.toml

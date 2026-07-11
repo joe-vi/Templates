@@ -1,5 +1,3 @@
-"""Route-side dependency accessor for the application injector."""
-
 from typing import Any, cast
 
 from fastapi import Depends, Request

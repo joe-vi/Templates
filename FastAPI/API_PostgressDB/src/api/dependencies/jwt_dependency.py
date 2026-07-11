@@ -1,5 +1,3 @@
-"""FastAPI dependency for JWT Bearer token validation."""
-
 from typing import Annotated
 
 from fastapi import Depends, HTTPException, status
@@ -31,6 +29,7 @@ async def get_current_user(
     Args:
         credentials: The HTTP Bearer credentials from the Authorization header.
         token_service: The token service used to decode the JWT.
+        user_context: The request-scoped identity holder to populate.
 
     Returns:
         A TokenClaimsDTO containing the authenticated user's id and role.
@@ -42,9 +41,7 @@ async def get_current_user(
 
     if token_claims is None:
         raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid or expired token",
-            headers={"WWW-Authenticate": "Bearer"},
+            status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid or expired token", headers={"WWW-Authenticate": "Bearer"}
         )
 
     user_context.populate(token_claims.user_id, token_claims.role)

@@ -1,11 +1,10 @@
-"""Structured JSON logger adapter using the standard logging module."""
-
 import json
 import logging
 from datetime import UTC, datetime
 
 from injector import inject
 
+from src.application.services.logger import Logger
 from src.config.settings import Settings
 from src.infrastructure.logging import log_context
 
@@ -30,24 +29,16 @@ class _JsonFormatter(logging.Formatter):
         return json.dumps(log_entry)
 
 
-class JsonLogger:
-    """Structured JSON logger backed by the standard logging module.
+class JsonLogger(Logger):
+    """``Logger`` adapter emitting structured JSON via the stdlib logging module.
 
     Process-wide singleton. Request correlation (request id and authenticated
     user id) is read from context variables at log time, so the same logger
     instance produces correctly-scoped lines for every concurrent request.
-
-    To switch providers (e.g. structlog, Datadog), implement the ``Logger``
-    port with a new adapter and update the dependency provider.
     """
 
     @inject
     def __init__(self, settings: Settings) -> None:
-        """Initialize the logger with a JSON handler.
-
-        Args:
-            settings: Application settings containing the log level config.
-        """
         self._logger = logging.getLogger("app")
         self._logger.setLevel(settings.log_level.upper())
 
@@ -67,20 +58,10 @@ class JsonLogger:
         return fields
 
     def info(self, message: str, **extra: object) -> None:
-        self._logger.info(
-            message, extra={"extra": {**self._base_extra(), **extra}}
-        )
+        self._logger.info(message, extra={"extra": {**self._base_extra(), **extra}})
 
     def warning(self, message: str, **extra: object) -> None:
-        self._logger.warning(
-            message, extra={"extra": {**self._base_extra(), **extra}}
-        )
+        self._logger.warning(message, extra={"extra": {**self._base_extra(), **extra}})
 
-    def error(
-        self, message: str, exception: Exception | None = None, **extra: object
-    ) -> None:
-        self._logger.error(
-            message,
-            exc_info=exception,
-            extra={"extra": {**self._base_extra(), **extra}},
-        )
+    def error(self, message: str, exception: Exception | None = None, **extra: object) -> None:
+        self._logger.error(message, exc_info=exception, extra={"extra": {**self._base_extra(), **extra}})

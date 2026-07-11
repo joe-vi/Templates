@@ -1,10 +1,8 @@
-"""Operation result enumerations for CRUD and auth operations."""
-
 from enum import StrEnum
 
 
 class CreateResult(StrEnum):
-    """Represents the outcome of any create/add operation."""
+    """Outcome of any create/add operation, shared by all entities."""
 
     SUCCESS = "success"
     FAILURE = "failure"
@@ -13,7 +11,7 @@ class CreateResult(StrEnum):
 
 
 class UpdateResult(StrEnum):
-    """Represents the outcome of any update operation."""
+    """Outcome of any update operation, shared by all entities."""
 
     SUCCESS = "success"
     FAILURE = "failure"
@@ -23,7 +21,7 @@ class UpdateResult(StrEnum):
 
 
 class DeleteResult(StrEnum):
-    """Represents the outcome of any delete operation."""
+    """Outcome of any delete operation, shared by all entities."""
 
     SUCCESS = "success"
     FAILURE = "failure"
@@ -32,7 +30,7 @@ class DeleteResult(StrEnum):
 
 
 class LoginResult(StrEnum):
-    """Represents the outcome of a login or token refresh operation."""
+    """Outcome of a login or token refresh operation."""
 
     SUCCESS = "success"
     FAILURE = "failure"

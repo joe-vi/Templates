@@ -1,7 +1,5 @@
-"""FastAPI application entry point and lifecycle management."""
-
 import uuid
-from collections.abc import AsyncIterator, Awaitable, Callable
+from collections.abc import AsyncGenerator, Awaitable, Callable
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request, Response
@@ -9,24 +7,20 @@ from injector import Injector
 from sqlalchemy.ext.asyncio import AsyncEngine
 
 from src.api.dependencies.providers import AppModule
-from src.api.dependencies.request_scope import async_request_scope
 from src.api.routers.auth import auth_routes
 from src.api.routers.user import user_routes
+from src.infrastructure.di.request_scope import async_request_scope
 from src.infrastructure.logging import log_context
 
 injector = Injector([AppModule()])
 
 
 @asynccontextmanager
-async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
     """Manage the application startup and shutdown lifecycle.
 
-    Args:
-        app: The FastAPI application instance.
-
-    Yields:
-        None. On shutdown, disposes the database engine (singletons are not
-        covered by the request-scope teardown).
+    On shutdown, disposes the database engine (singletons are not covered by
+    the request-scope teardown).
     """
     yield
     engine = app.state.injector.get(AsyncEngine)
@@ -43,10 +37,7 @@ app.state.injector = injector
 
 
 @app.middleware("http")
-async def request_context(
-    request: Request,
-    call_next: Callable[[Request], Awaitable[Response]],
-) -> Response:
+async def request_context(request: Request, call_next: Callable[[Request], Awaitable[Response]]) -> Response:
     """Open the DI request scope and the log-correlation context.
 
     Every request-scoped dependency resolved while handling this request is
@@ -71,23 +62,11 @@ app.include_router(user_routes.router)
 
 @app.get("/")
 async def root() -> dict[str, str]:
-    """Return application information with links to API documentation.
-
-    Returns:
-        A dictionary containing a welcome message and documentation URLs.
-    """
-    return {
-        "message": "Welcome to FastAPI Clean Architecture Template",
-        "docs": "/docs",
-        "redoc": "/redoc",
-    }
+    """Return application information with links to API documentation."""
+    return {"message": "Welcome to FastAPI Clean Architecture Template", "docs": "/docs", "redoc": "/redoc"}
 
 
 @app.get("/health")
 async def health_check() -> dict[str, str]:
-    """Return the application health status.
-
-    Returns:
-        A dictionary containing the health status.
-    """
+    """Return the application health status."""
     return {"status": "healthy"}

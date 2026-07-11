@@ -1,15 +1,13 @@
-"""Structured logging port (structural interface)."""
-
 from typing import Protocol
 
 
 class Logger(Protocol):
     """Port for structured application logging.
 
-    Implement with a provider-specific adapter (e.g. built-in logging,
-    structlog, Datadog) and wire it in the dependency providers. Use cases
-    depend only on this protocol, so switching providers requires no changes
-    outside the infrastructure layer.
+    Implemented by a mechanism-qualified adapter (e.g. stdlib logging,
+    structlog, Datadog) that subclasses this protocol and inherits these
+    docstrings. Adapters are expected to attach per-request correlation
+    (request id, authenticated user id) to every entry.
     """
 
     def info(self, message: str, **extra: object) -> None:
@@ -30,9 +28,7 @@ class Logger(Protocol):
         """
         ...
 
-    def error(
-        self, message: str, exception: Exception | None = None, **extra: object
-    ) -> None:
+    def error(self, message: str, exception: Exception | None = None, **extra: object) -> None:
         """Log an error message.
 
         Args:

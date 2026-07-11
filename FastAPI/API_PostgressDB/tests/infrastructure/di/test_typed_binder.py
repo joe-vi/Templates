@@ -1,8 +1,6 @@
-"""Unit tests for the TypedBinder facade."""
-
 from injector import Binder, Injector, Module, singleton
 
-from src.api.dependencies.typed_binder import TypedBinder
+from src.infrastructure.di.typed_binder import TypedBinder
 
 
 class _Port:
