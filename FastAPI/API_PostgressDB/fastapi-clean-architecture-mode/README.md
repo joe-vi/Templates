@@ -1,6 +1,6 @@
 # fastapi-clean-architecture-mode
 
-A Claude Code skill that activates **Clean Architecture** rules for the current FastAPI session. Every file Claude writes or edits will follow strict layer boundaries, dependency inversion via `typing.Protocol` ports, the repository pattern with result enums, and typed declarative DI discipline (injector + TypedBinder) until the session ends.
+A Claude Code skill that activates **Clean Architecture + DDD** rules for the current FastAPI session. Every file Claude writes or edits will follow strict layer boundaries, rich-domain discipline (invariants and behaviour on aggregate roots), dependency inversion via `typing.Protocol` ports, single-source documentation on ports, the repository pattern with result enums, and typed declarative DI discipline (injector + TypedBinder) until the session ends.
 
 > **Related skills**
 > - [`fastapi-clean-architecture-template`](../fastapi-clean-architecture-template/) — scaffold a new project with Clean Architecture enforced from day one
@@ -30,8 +30,12 @@ API  →  Infrastructure  →  Application  →  Domain
 ```
 Domain has zero external dependencies. Every other layer may only import from the layer(s) inward of it. Violations are flagged before any code is written.
 
+**Domain-Driven Design**
+- Entities are aggregate roots with behaviour: invariants enforced at construction, state transitions via intention-revealing methods — never an anemic domain
+- One repository port per aggregate root; domain rules live on the entity, use cases orchestrate
+
 **Abstraction boundaries**
-- Use cases depend on `typing.Protocol` ports, never concrete adapters
+- Use cases are plain concrete classes depending on `typing.Protocol` ports, never concrete adapters; adapters explicitly subclass their port and inherit its docstrings (contracts documented once, IDE hover everywhere)
 - `AppModule.configure()` in `src/api/dependencies/providers.py` is the only place that wires adapters to ports (the composition root)
 - One line binds implementation, port, and scope via `TypedBinder`: `bind_typed(Port).to(Impl, scope=request)`; a mismatched implementation is a mypy error at that line; constructors are auto-wired via `@inject`
 
@@ -43,11 +47,12 @@ Domain has zero external dependencies. Every other layer may only import from th
 
 **Dependency injection (injector + TypedBinder)**
 - `AppModule` declares every binding with an explicit scope (`singleton` / `request`); implementations with constructor dependencies carry `@inject`
-- Routes and guards resolve via `Annotated[UseCase, Injected(UseCase)]`
+- Routes and guards resolve via `Annotated[UserUseCase, Injected(UserUseCase)]`
 - The request scope disposes its objects on request end (LIFO, `aclose()` preferred); tests bind mock instances in a `TestModule` on `app.state.injector`
 
-**Naming discipline**
-- Ports are `Protocol`s with clean names (`UserRepository`); adapters are mechanism-qualified (`SqlAlchemyUserRepository`)
+**Naming & documentation discipline**
+- Ports are `Protocol`s with clean names (`UserRepository`); adapters are mechanism-qualified (`SqlAlchemyUserRepository`); use cases are plain concrete classes (`UserUseCase`)
+- No module docstrings or top-of-file comments; contract docstrings live on the port only
 - DTOs: frozen Pydantic models inheriting `DTOBase` (camelCase on the wire), `DTO` suffix; `list[UserDTO]` returned directly, no wrapper DTOs
 - Converters are module functions (entity ↔ DTO only); DTOs inherit `DTOBase` and double as the API request/response bodies — no per-entity schemas
 - Result enums: always generic (`CreateResult`, not `CreateUserResult`)

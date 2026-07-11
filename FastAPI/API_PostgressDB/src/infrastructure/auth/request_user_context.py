@@ -1,25 +1,15 @@
-"""Request-scoped in-memory adapter for the user context port."""
-
+from src.application.services.user_context import UserContext
 from src.domain.enums import user_enum
 
-_NOT_POPULATED = (
-    "UserContext has not been populated — ensure the route is protected by "
-    "the get_current_user guard"
-)
-_ALREADY_POPULATED = (
-    "UserContext.populate() was called more than once in the same request"
-)
+_NOT_POPULATED = "UserContext has not been populated — ensure the route is protected by the get_current_user guard"
+_ALREADY_POPULATED = "UserContext.populate() was called more than once in the same request"
 
 
-class RequestUserContext:
-    """Mutable request-scoped holder of the authenticated caller's identity.
+class RequestUserContext(UserContext):
+    """``UserContext`` adapter: a mutable request-scoped identity holder.
 
     Bound at request scope, so every request starts with a fresh, empty
-    instance and every component resolved in the same request shares it. The
-    JWT guard calls populate() exactly once after validating the Bearer
-    token; a second call raises RuntimeError to prevent accidental identity
-    overwrites, and reading before populate() raises RuntimeError instead of
-    returning missing or stale data.
+    instance and every component resolved in the same request shares it.
     """
 
     def __init__(self) -> None:

@@ -1,13 +1,4 @@
 #!/usr/bin/env python3
-"""End-to-end API test script for the FastAPI Clean Architecture Template.
-
-Starts the FastAPI server, runs every endpoint scenario, then stops the server.
-
-Usage:
-    uv run python test_api.py
-    uv run python test_api.py --port 8001
-"""
-
 import argparse
 import subprocess
 import sys
@@ -58,12 +49,11 @@ def _section(title: str) -> None:
 # Server lifecycle
 # ---------------------------------------------------------------------------
 
+
 def _start_server(port: int) -> subprocess.Popen:
     print(f"{BOLD}Starting FastAPI server on port {port}…{RESET}")
     proc = subprocess.Popen(
-        ["uv", "run", "uvicorn", "src.main:app", "--host", "127.0.0.1", f"--port={port}"],
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
+        ["uv", "run", "uvicorn", "src.main:app", "--host", "127.0.0.1", f"--port={port}"], stdout=subprocess.PIPE, stderr=subprocess.PIPE
     )
     url = f"http://127.0.0.1:{port}/health"
     for _ in range(30):
@@ -93,9 +83,9 @@ def _stop_server(proc: subprocess.Popen) -> None:
 # Main test runner
 # ---------------------------------------------------------------------------
 
+
 def run_tests(base: str) -> None:
     with httpx.Client(base_url=base, timeout=10) as client:
-
         # ----------------------------------------------------------------
         # 1. Core health routes
         # ----------------------------------------------------------------
@@ -128,11 +118,7 @@ def run_tests(base: str) -> None:
             client.post("/api/v1/auth/login", json={"username": "nobody", "password": "pass"}),
             401,
         )
-        _check(
-            "POST /auth/login  (missing fields)  →  422",
-            client.post("/api/v1/auth/login", json={}),
-            422,
-        )
+        _check("POST /auth/login  (missing fields)  →  422", client.post("/api/v1/auth/login", json={}), 422)
 
         # ----------------------------------------------------------------
         # 3. Auth — token refresh
@@ -141,18 +127,14 @@ def run_tests(base: str) -> None:
 
         r = client.post("/api/v1/auth/refresh", json={"refresh_token": refresh_token})
         if _check("POST /auth/refresh  (valid refresh token)", r, 200):
-            access_token = r.json()["accessToken"]   # keep the newest token
+            access_token = r.json()["accessToken"]  # keep the newest token
 
         _check(
             "POST /auth/refresh  (invalid token)  →  401",
             client.post("/api/v1/auth/refresh", json={"refresh_token": "not.a.valid.token"}),
             401,
         )
-        _check(
-            "POST /auth/refresh  (missing field)  →  422",
-            client.post("/api/v1/auth/refresh", json={}),
-            422,
-        )
+        _check("POST /auth/refresh  (missing field)  →  422", client.post("/api/v1/auth/refresh", json={}), 422)
 
         # ----------------------------------------------------------------
         # 4. Users — authentication enforcement
@@ -160,16 +142,8 @@ def run_tests(base: str) -> None:
         _section("4. User routes — auth enforcement")
         auth = {"Authorization": f"Bearer {access_token}"}
 
-        _check(
-            "GET /users  (no auth header)  →  401",
-            client.get("/api/v1/users"),
-            401,
-        )
-        _check(
-            "GET /users  (invalid token)  →  401",
-            client.get("/api/v1/users", headers={"Authorization": "Bearer garbage"}),
-            401,
-        )
+        _check("GET /users  (no auth header)  →  401", client.get("/api/v1/users"), 401)
+        _check("GET /users  (invalid token)  →  401", client.get("/api/v1/users", headers={"Authorization": "Bearer garbage"}), 401)
 
         # ----------------------------------------------------------------
         # 5. Users — create
@@ -197,29 +171,17 @@ def run_tests(base: str) -> None:
         )
         _check(
             "POST /users  (invalid email format)  →  422",
-            client.post(
-                "/api/v1/users",
-                json={"email": "not-an-email", "username": "someone", "password": "TestPass123"},
-                headers=auth,
-            ),
+            client.post("/api/v1/users", json={"email": "not-an-email", "username": "someone", "password": "TestPass123"}, headers=auth),
             422,
         )
         _check(
             "POST /users  (password too short)  →  422",
-            client.post(
-                "/api/v1/users",
-                json={"email": "short@example.com", "username": "shortpw", "password": "abc"},
-                headers=auth,
-            ),
+            client.post("/api/v1/users", json={"email": "short@example.com", "username": "shortpw", "password": "abc"}, headers=auth),
             422,
         )
         _check(
             "POST /users  (missing username)  →  422",
-            client.post(
-                "/api/v1/users",
-                json={"email": "nouser@example.com", "password": "TestPass123"},
-                headers=auth,
-            ),
+            client.post("/api/v1/users", json={"email": "nouser@example.com", "password": "TestPass123"}, headers=auth),
             422,
         )
 
@@ -228,11 +190,7 @@ def run_tests(base: str) -> None:
         # ----------------------------------------------------------------
         _section("6. Users — read")
 
-        _check(
-            "GET /users  (authenticated)  →  200",
-            client.get("/api/v1/users", headers=auth),
-            200,
-        )
+        _check("GET /users  (authenticated)  →  200", client.get("/api/v1/users", headers=auth), 200)
 
         if new_user_id != -1:
             r = client.get(f"/api/v1/users/{new_user_id}", headers=auth)
@@ -241,11 +199,7 @@ def run_tests(base: str) -> None:
                 assert u["username"] == "testscript", f"unexpected username: {u['username']}"
                 assert u["role"] == "user", f"unexpected role: {u['role']}"
 
-        _check(
-            "GET /users/999999  (not found)  →  404",
-            client.get("/api/v1/users/999999", headers=auth),
-            404,
-        )
+        _check("GET /users/999999  (not found)  →  404", client.get("/api/v1/users/999999", headers=auth), 404)
 
         # ----------------------------------------------------------------
         # 7. Users — update role
@@ -278,36 +232,21 @@ def run_tests(base: str) -> None:
         _section("8. Users — delete")
 
         if new_user_id != -1:
-            _check(
-                f"DELETE /users/{new_user_id}  →  200",
-                client.delete(f"/api/v1/users/{new_user_id}", headers=auth),
-                200,
-            )
-            _check(
-                f"GET /users/{new_user_id}  (after delete)  →  404",
-                client.get(f"/api/v1/users/{new_user_id}", headers=auth),
-                404,
-            )
+            _check(f"DELETE /users/{new_user_id}  →  200", client.delete(f"/api/v1/users/{new_user_id}", headers=auth), 200)
+            _check(f"GET /users/{new_user_id}  (after delete)  →  404", client.get(f"/api/v1/users/{new_user_id}", headers=auth), 404)
 
-        _check(
-            "DELETE /users/999999  (not found)  →  404",
-            client.delete("/api/v1/users/999999", headers=auth),
-            404,
-        )
+        _check("DELETE /users/999999  (not found)  →  404", client.delete("/api/v1/users/999999", headers=auth), 404)
 
 
 # ---------------------------------------------------------------------------
 # Entry point
 # ---------------------------------------------------------------------------
 
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="End-to-end API test script")
     parser.add_argument("--port", type=int, default=8000, help="Port to run the server on (default: 8000)")
-    parser.add_argument(
-        "--no-start",
-        action="store_true",
-        help="Skip server start/stop; assume it is already running on --port",
-    )
+    parser.add_argument("--no-start", action="store_true", help="Skip server start/stop; assume it is already running on --port")
     args = parser.parse_args()
 
     base_url = f"http://127.0.0.1:{args.port}"

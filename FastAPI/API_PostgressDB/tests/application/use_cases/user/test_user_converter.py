@@ -1,5 +1,3 @@
-"""Unit tests for the user entity/DTO converter functions."""
-
 from datetime import datetime
 
 from src.application.use_cases.user import user_converter
@@ -114,9 +112,7 @@ class TestToDtoList:
 
 class TestToEntity:
     def test_sets_id_to_none(self):
-        create_user_dto = user_dto_module.CreateUserDTO(
-            email="alice@example.com", username="alice", password="TestPass123"
-        )
+        create_user_dto = user_dto_module.CreateUserDTO(email="alice@example.com", username="alice", password="TestPass123")
 
         user = user_converter.to_entity(create_user_dto, "hashed_password")
 
@@ -140,18 +136,14 @@ class TestToEntity:
         assert user.status == user_enum.UserStatus.INACTIVE
 
     def test_applies_default_role_when_not_provided(self):
-        create_user_dto = user_dto_module.CreateUserDTO(
-            email="bob@example.com", username="bob", password="TestPass123"
-        )
+        create_user_dto = user_dto_module.CreateUserDTO(email="bob@example.com", username="bob", password="TestPass123")
 
         user = user_converter.to_entity(create_user_dto, "hashed_password")
 
         assert user.role == user_enum.UserRole.USER
 
     def test_applies_default_status_when_not_provided(self):
-        create_user_dto = user_dto_module.CreateUserDTO(
-            email="bob@example.com", username="bob", password="TestPass123"
-        )
+        create_user_dto = user_dto_module.CreateUserDTO(email="bob@example.com", username="bob", password="TestPass123")
 
         user = user_converter.to_entity(create_user_dto, "hashed_password")
 

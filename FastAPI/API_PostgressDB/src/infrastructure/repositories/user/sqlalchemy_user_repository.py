@@ -1,5 +1,3 @@
-"""SQLAlchemy adapter implementing the user repository port."""
-
 from typing import Any, cast
 
 import asyncpg
@@ -10,11 +8,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.domain.entities.user.user import User
 from src.domain.enums import operation_results, user_enum
+from src.domain.repositories.user.user_repository import UserRepository
 from src.infrastructure.database.models import user_model
 
 
 def _to_entity(model: user_model.UserModel) -> User:
-    """Map a UserModel row to a domain User entity."""
     return User(
         id=model.id,
         email=model.email,
@@ -26,36 +24,22 @@ def _to_entity(model: user_model.UserModel) -> User:
     )
 
 
-class SqlAlchemyUserRepository:
-    """User repository backed by SQLAlchemy and PostgreSQL.
+class SqlAlchemyUserRepository(UserRepository):
+    """``UserRepository`` adapter backed by SQLAlchemy and PostgreSQL.
 
-    Receives the request-scoped ``AsyncSession`` by constructor injection
-    (wired in ``api.dependencies``). Mutations flush so database errors
-    surface here and are mapped to result enums — nothing propagates to the
-    use case. The repository never commits or rolls back: the transaction
-    boundary is owned by the use case via the ``TransactionContext`` port,
-    which is what lets several repository calls form one atomic unit of work.
+    Receives the request-scoped ``AsyncSession`` by constructor injection,
+    shared with every other adapter in the request. Mutations flush so
+    database errors surface here and are mapped to result enums; the
+    transaction boundary is owned by the use case via ``TransactionContext``.
     """
 
     @inject
     def __init__(self, session: AsyncSession) -> None:
-        """Initialize the repository.
-
-        Args:
-            session: The request-scoped async session, shared with every
-                other repository and the transaction context in this request.
-        """
         self._session = session
 
-    async def create(
-        self, user: User
-    ) -> tuple[operation_results.CreateResult, int | None]:
+    async def create(self, user: User) -> tuple[operation_results.CreateResult, int | None]:
         model = user_model.UserModel(
-            email=user.email,
-            username=user.username,
-            password_hash=user.hashed_password,
-            role=user.role,
-            status=user.status,
+            email=user.email, username=user.username, password_hash=user.hashed_password, role=user.role, status=user.status
         )
         self._session.add(model)
         try:
@@ -64,14 +48,9 @@ class SqlAlchemyUserRepository:
             # participate in a multi-operation unit of work.
             await self._session.flush()
         except IntegrityError:
-            return (
-                operation_results.CreateResult.UNIQUE_CONSTRAINT_ERROR,
-                None,
-            )
+            return (operation_results.CreateResult.UNIQUE_CONSTRAINT_ERROR, None)
         except DBAPIError as exc:
-            if isinstance(
-                exc.__cause__, asyncpg.exceptions.DeadlockDetectedError
-            ):
+            if isinstance(exc.__cause__, asyncpg.exceptions.DeadlockDetectedError):
                 return (operation_results.CreateResult.CONCURRENCY_ERROR, None)
             return (operation_results.CreateResult.FAILURE, None)
         except Exception:
@@ -80,11 +59,7 @@ class SqlAlchemyUserRepository:
         return (operation_results.CreateResult.SUCCESS, model.id)
 
     async def get_by_id(self, user_id: int) -> User | None:
-        query_result = await self._session.execute(
-            select(user_model.UserModel).where(
-                user_model.UserModel.id == user_id
-            )
-        )
+        query_result = await self._session.execute(select(user_model.UserModel).where(user_model.UserModel.id == user_id))
         model = query_result.scalar_one_or_none()
         return _to_entity(model) if model is not None else None
 
@@ -93,37 +68,21 @@ class SqlAlchemyUserRepository:
         return [_to_entity(model) for model in query_result.scalars().all()]
 
     async def get_by_username(self, username: str) -> User | None:
-        query_result = await self._session.execute(
-            select(user_model.UserModel).where(
-                user_model.UserModel.username == username
-            )
-        )
+        query_result = await self._session.execute(select(user_model.UserModel).where(user_model.UserModel.username == username))
         model = query_result.scalar_one_or_none()
         return _to_entity(model) if model is not None else None
 
-    async def update_role(
-        self, user_id: int, role: user_enum.UserRole
-    ) -> operation_results.UpdateResult:
+    async def update_role(self, user_id: int, role: user_enum.UserRole) -> operation_results.UpdateResult:
         try:
             # execute() returns CursorResult for UPDATE/DELETE at runtime;
             # the static type is Result, which lacks rowcount.
             update_result = cast(
                 "CursorResult[Any]",
-                await self._session.execute(
-                    update(user_model.UserModel)
-                    .where(user_model.UserModel.id == user_id)
-                    .values(role=role)
-                ),
+                await self._session.execute(update(user_model.UserModel).where(user_model.UserModel.id == user_id).values(role=role)),
             )
-            return (
-                operation_results.UpdateResult.SUCCESS
-                if update_result.rowcount > 0
-                else operation_results.UpdateResult.NOT_FOUND
-            )
+            return operation_results.UpdateResult.SUCCESS if update_result.rowcount > 0 else operation_results.UpdateResult.NOT_FOUND
         except DBAPIError as exc:
-            if isinstance(
-                exc.__cause__, asyncpg.exceptions.DeadlockDetectedError
-            ):
+            if isinstance(exc.__cause__, asyncpg.exceptions.DeadlockDetectedError):
                 return operation_results.UpdateResult.CONCURRENCY_ERROR
             return operation_results.UpdateResult.FAILURE
         except Exception:
@@ -132,22 +91,11 @@ class SqlAlchemyUserRepository:
     async def delete(self, user_id: int) -> operation_results.DeleteResult:
         try:
             delete_result = cast(
-                "CursorResult[Any]",
-                await self._session.execute(
-                    delete(user_model.UserModel).where(
-                        user_model.UserModel.id == user_id
-                    )
-                ),
+                "CursorResult[Any]", await self._session.execute(delete(user_model.UserModel).where(user_model.UserModel.id == user_id))
             )
-            return (
-                operation_results.DeleteResult.SUCCESS
-                if delete_result.rowcount > 0
-                else operation_results.DeleteResult.NOT_FOUND
-            )
+            return operation_results.DeleteResult.SUCCESS if delete_result.rowcount > 0 else operation_results.DeleteResult.NOT_FOUND
         except DBAPIError as exc:
-            if isinstance(
-                exc.__cause__, asyncpg.exceptions.DeadlockDetectedError
-            ):
+            if isinstance(exc.__cause__, asyncpg.exceptions.DeadlockDetectedError):
                 return operation_results.DeleteResult.CONCURRENCY_ERROR
             return operation_results.DeleteResult.FAILURE
         except Exception:

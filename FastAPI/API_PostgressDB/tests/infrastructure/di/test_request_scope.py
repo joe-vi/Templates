@@ -1,14 +1,7 @@
-"""Unit tests for the request scope machinery (disposal, isolation)."""
-
 import pytest
 from injector import Binder, Injector, Module
 
-from src.api.dependencies.request_scope import (
-    _request_cache,
-    async_request_scope,
-    request,
-    request_scope,
-)
+from src.infrastructure.di.request_scope import _request_cache, async_request_scope, request, request_scope
 
 
 class _AsyncCloseOnly:

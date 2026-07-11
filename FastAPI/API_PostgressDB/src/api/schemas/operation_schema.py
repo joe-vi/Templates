@@ -1,5 +1,3 @@
-"""Shared Pydantic response envelopes for CRUD operation results."""
-
 from pydantic import Field
 
 from src.application.dto_base import DTOBase
@@ -14,13 +12,8 @@ class CreateOperationResponse(DTOBase):
     """
 
     result: operation_results.CreateResult
-    message: str = Field(
-        description="Human-readable description of the operation outcome"
-    )
-    id: int | None = Field(
-        default=None,
-        description="Newly created entity id; None when operation failed",
-    )
+    message: str = Field(description="Human-readable description of the operation outcome")
+    id: int | None = Field(default=None, description="Newly created entity id; None when operation failed")
 
 
 class UpdateOperationResponse(DTOBase):
@@ -30,9 +23,7 @@ class UpdateOperationResponse(DTOBase):
     """
 
     result: operation_results.UpdateResult
-    message: str = Field(
-        description="Human-readable description of the operation outcome"
-    )
+    message: str = Field(description="Human-readable description of the operation outcome")
 
 
 class DeleteOperationResponse(DTOBase):
@@ -42,6 +33,4 @@ class DeleteOperationResponse(DTOBase):
     """
 
     result: operation_results.DeleteResult
-    message: str = Field(
-        description="Human-readable description of the operation outcome"
-    )
+    message: str = Field(description="Human-readable description of the operation outcome")

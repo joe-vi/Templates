@@ -1,13 +1,11 @@
-"""Unit tests for RequestUserContext and its request-scope binding."""
-
 import pytest
 from injector import Binder, Injector, Module
 
-from src.api.dependencies.request_scope import request, request_scope
-from src.api.dependencies.typed_binder import TypedBinder
 from src.application.services.user_context import UserContext
 from src.domain.enums import user_enum
 from src.infrastructure.auth.request_user_context import RequestUserContext
+from src.infrastructure.di.request_scope import request, request_scope
+from src.infrastructure.di.typed_binder import TypedBinder
 
 
 class TestPopulate:
@@ -56,9 +54,7 @@ class TestUnpopulatedAccess:
 
 class _WiringModule(Module):
     def configure(self, binder: Binder) -> None:
-        TypedBinder(binder).bind_typed(UserContext).to(
-            RequestUserContext, scope=request
-        )
+        TypedBinder(binder).bind_typed(UserContext).to(RequestUserContext, scope=request)
 
 
 class TestRequestScopeBinding:

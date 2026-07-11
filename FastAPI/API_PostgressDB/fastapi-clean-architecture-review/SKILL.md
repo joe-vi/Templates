@@ -1,19 +1,26 @@
 ---
 name: fastapi-clean-architecture-review
-description: Audit an existing FastAPI project for Clean Architecture compliance — verifies unidirectional layer dependencies, ports-as-Protocol boundaries, repository pattern correctness, typed declarative DI wiring (injector + TypedBinder, explicit scopes, mypy-checked binding conformance), naming conventions, DB constraint rules, and documentation standards. Reports every violation with file and line number.
+description: Audit an existing FastAPI project for Clean Architecture + DDD compliance — verifies unidirectional layer dependencies, rich (non-anemic) domain entities, ports-as-Protocol boundaries with single-source documentation, repository pattern correctness, typed declarative DI wiring (injector + TypedBinder, explicit scopes, mypy-checked binding conformance), naming conventions, DB constraint rules, and documentation standards. Reports every violation with file and line number.
 argument-hint: "[--fix]"
 disable-model-invocation: true
 metadata:
-  version: "2.0.0"
+  version: "3.0.0"
 ---
 
 # FastAPI Clean Architecture — Review Skill
 
-Audits the project in the current working directory for Clean Architecture compliance, reading one layer at a time. Every violation is reported with its file, line, the architectural rule broken, and how to fix it. Pass `--fix` to apply fixes automatically after reporting.
+Audits the project in the current working directory for Clean Architecture + DDD compliance, reading one layer at a time. Every violation is reported with its file, line, the architectural rule broken, and how to fix it. Pass `--fix` to apply fixes automatically after reporting.
 
 For scaffolding a new project use `/fastapi-clean-architecture-template`. To activate rules for the current session use `/fastapi-clean-architecture-mode`.
 
 ---
+
+## Documentation rules (applied in every phase)
+
+- **No module docstrings and no top-of-file comments** — flag any file that has them.
+- **The contract is documented once, on the port**: Protocol classes and methods carry full Google-style docstrings; adapters **explicitly subclass their port** and inherit them. Flag duplicated method docstrings on adapters, and flag adapters that do not subclass their port. Classes with no port — the use cases — carry their own method docstrings.
+- Implementation classes may keep a short class docstring with mechanism-specific notes only; `__init__` methods carry no docstrings.
+- Standalone public functions (converters, providers, guards, routes) carry their own docstrings.
 
 ## Workflow
 
@@ -24,9 +31,10 @@ Read and audit one layer at a time. Report findings as you go, then produce a fi
 Read all files in `src/domain/`.
 
 Check:
-- **Import direction**: no imports from `src/application/`, `src/infrastructure/`, or `src/api/`
-- **Naming**: entity classes are singular nouns; repository ports are `typing.Protocol`s with clean names (`UserRepository`, not `UserRepositoryBase`); enums use `StrEnum` with lowercase values and live in `src/domain/enums/`; no entity-specific result enums (e.g. `CreateUserResult` is a violation)
-- **Documentation**: every `.py` file has a module docstring; every class has a class docstring; port methods carry Google-style docstrings
+- **Import direction**: no imports from `src/application/`, `src/infrastructure/`, or `src/api/`; stdlib only (`dataclasses`, `enum`, `typing`)
+- **DDD richness**: entities are aggregate roots with behaviour — invariants enforced in `__post_init__` (raising `ValueError`) and intention-revealing state transitions (e.g. `activate()`/`deactivate()`, `is_active`). Flag anemic entities (bare field bags) and domain rules implemented in use cases that belong on the entity
+- **Naming**: entity classes are singular nouns; repository ports are `typing.Protocol`s with clean names (`UserRepository`, not `UserRepositoryBase`); one repository port per aggregate root; enums use `StrEnum` with lowercase values and live in `src/domain/enums/`; no entity-specific result enums (e.g. `CreateUserResult` is a violation)
+- **Documentation**: port methods carry Google-style docstrings (the single source); see documentation rules above
 
 ### Phase 2 — Application layer (`src/application/`)
 
@@ -34,11 +42,12 @@ Read all files in `src/application/`.
 
 Check:
 - **Import direction**: no imports from `src/infrastructure/` or `src/api/`
-- **Naming**: service ports are `Protocol`s with clean names (`PasswordHasher`, `TokenService`, `Logger`); use cases are plain concrete classes (no `Base` ABC); DTOs are frozen Pydantic models inheriting `DTOBase` with `DTO` suffix; no wrapper collection DTOs; return types use `list[UserDTO]` directly
+- **Use cases**: plain concrete classes (`UserUseCase`) — no separate ABC or Protocol interface
+- **Naming**: service ports are `Protocol`s with clean names (`PasswordHasher`, `TokenService`, `Logger`); DTOs are frozen Pydantic models inheriting `DTOBase` with `DTO` suffix; no wrapper collection DTOs; return types use `list[UserDTO]` directly
 - **Converters**: module-level functions, not classes of static methods
-- **Repository pattern**: use cases contain no exception handling for mutations — they forward repository results as-is; no direct session or DB access; no `@inject`
+- **Repository pattern**: use cases contain no exception handling for mutations — they forward repository results as-is; no direct session or DB access
 - **Transactions**: mutating use-case methods wrap repository calls in `TransactionContext.begin()` and call `transaction.commit()` only on the all-success path — flag any mutation outside a transaction block and any commit after a failed result
-- **Documentation**: same rules as Phase 1
+- **Documentation**: use case methods carry their own Google-style docstrings (no port to inherit from)
 
 ### Phase 3 — Infrastructure layer (`src/infrastructure/`)
 
@@ -46,7 +55,8 @@ Read all files in `src/infrastructure/`.
 
 Check:
 - **Import direction**: no imports from `src/api/`
-- **Naming**: adapters are mechanism-qualified (`SqlAlchemyUserRepository`, `BcryptPasswordHasher`, `JwtTokenService`, `JsonLogger`)
+- **Naming**: adapters are mechanism-qualified (`SqlAlchemyUserRepository`, `BcryptPasswordHasher`, `JwtTokenService`, `JsonLogger`) and explicitly subclass their ports
+- **DI machinery**: the injector extensions (`request_scope.py`, `typed_binder.py`) live in `src/infrastructure/di/` — flag them living inside `src/api/`
 - **Repository pattern**:
   - Each method performs exactly one CRUD operation — flag any method that combines read + write
   - Mutation methods catch DB exceptions internally and return result enums; nothing propagates
@@ -58,7 +68,7 @@ Check:
   - Constraints declared in `__table_args__` (except primary key)
   - `id`, `created_at` never set in Python code; `flush()` RETURNING populates them (flag `session.refresh()` after inserts)
   - `SQLAlchemyEnum` type defined at module level, not inline
-- **Documentation**: same rules as Phase 1
+- **Documentation**: adapters inherit port docs; see documentation rules above
 
 ### Phase 4 — API layer (`src/api/`)
 
@@ -69,11 +79,11 @@ Check:
 - **DI**:
   - Composition root is `AppModule.configure()` in `src/api/dependencies/providers.py` — one `bind_typed(Port).to(Impl, scope=...)` line per binding via `TypedBinder`; flag raw `binder.bind(...)` calls for port bindings (they skip conformance checking) and any `fastapi-injector` usage
   - Every implementation whose `__init__` takes dependencies carries `@inject`; flag missing ones (runtime `TypeError`)
-  - Routes depend on the concrete use case via `Annotated[UseCase, Injected(UseCase)]`
+  - Routes depend on the use case via `Annotated[UserUseCase, Injected(UserUseCase)]`
   - Guard functions live in `src/api/dependencies/`, not inside route files; `Depends(get_current_user)` declared on the `APIRouter`, not scattered in signatures
 - **Responses**: routes return the response model (FastAPI serialises it to camelCase). Flag any `JSONResponse(model.model_dump())` — it bypasses `response_model` and the alias generator. Dynamic status set via `response.status_code`.
-- **Code style**: lines over 80 chars (excluding `# noqa: E501`); `List[X]`, `Optional[X]`, `Dict[K,V]` instead of modern annotations; sync DB calls
-- **Documentation**: same rules as Phase 1
+- **Code style**: lines over 140 chars; `List[X]`, `Optional[X]`, `Dict[K,V]` instead of modern annotations; sync DB calls
+- **Documentation**: route docstrings describe endpoint behaviour (they become OpenAPI descriptions), not injected parameters
 
 ### Phase 5 — Entry point (`src/main.py`)
 
@@ -81,10 +91,17 @@ Read `src/main.py` and `src/api/dependencies/`.
 
 Check:
 - **Injector**: `Injector([AppModule()])` at module level, stored on `app.state.injector`; the `request_context` middleware enters `async_request_scope()` per request; `lifespan` disposes the engine on shutdown
-- **Legacy DI**: flag any `fastapi-injector` package usage (`InjectorMiddleware`, `attach_injector`) — this template uses its own `request_scope.py`/`typed_binder.py`/`injected.py`
+- **Legacy DI**: flag any `fastapi-injector` package usage (`InjectorMiddleware`, `attach_injector`) — this template uses its own `src/infrastructure/di/` machinery plus `injected.py`
 - **Bindings**: every port bound via `TypedBinder` with an explicit scope; the session is a request-scoped `@provider`; singletons holding connections are disposed in `lifespan`
 
-### Phase 6 — Global checks
+### Phase 6 — Tests (`tests/`)
+
+Check:
+- Domain entities have pure unit tests in `tests/domain/` (no mocks, no I/O)
+- Use case tests mock the ports (`AsyncMock(spec=UserRepository)`) and assert transaction boundaries via a fake `TransactionContext`
+- Route tests bind a mock use case instance in a `TestModule` on `app.state.injector` — flag tests importing `src/main.py`
+
+### Phase 7 — Global checks
 
 - **Boolean naming**: scan all files for boolean fields/variables not prefixed with `is_`, `has_`, or `can_`
 - **Abbreviations**: flag `repo`, `conn`, `svc`, `mgr`, `cfg` anywhere in identifiers
@@ -110,6 +127,7 @@ Check:
 - Infrastructure: ✅ / ⚠️ <N violations>
 - API:            ✅ / ⚠️ <N violations>
 - Main/Providers: ✅ / ⚠️ <N violations>
+- Tests:          ✅ / ⚠️ <N violations>
 - Global:         ✅ / ⚠️ <N violations>
 ```
 

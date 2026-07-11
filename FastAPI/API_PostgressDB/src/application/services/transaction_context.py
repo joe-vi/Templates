@@ -1,11 +1,3 @@
-"""Transaction context port (structural interface) for atomic operations.
-
-Restores use-case-owned transaction boundaries: every repository in a request
-shares one database session, so all repository calls inside a single
-``begin()`` block — across any number of repositories — join the same
-transaction and succeed or fail together.
-"""
-
 from contextlib import AbstractAsyncContextManager
 from typing import Protocol
 
@@ -24,6 +16,10 @@ class Transaction(Protocol):
 
 class TransactionContext(Protocol):
     """Port for atomic units of work spanning one or more repositories.
+
+    Every repository in a request shares one database session, so all
+    repository calls inside a single ``begin()`` block — across any number of
+    repositories — join the same transaction and succeed or fail together.
 
     Semantics are *rollback unless committed*: leaving the ``begin()`` block
     without having called ``commit()`` — whether by early return on a failure

@@ -1,6 +1,6 @@
 # FastAPI Clean Architecture Template
 
-A production-ready FastAPI application template built with Clean Architecture principles, PostgreSQL (via Docker), async SQLAlchemy, JWT authentication, and dependency injection.
+A production-ready FastAPI application template built with Clean Architecture and Domain-Driven Design principles, PostgreSQL (via Docker), async SQLAlchemy, JWT authentication, and dependency injection.
 
 ## Get This Template
 
@@ -19,12 +19,14 @@ Invoke-WebRequest -Uri "https://github.com/joe-vi/Templates/archive/refs/heads/m
 ## Features
 
 - **Clean Architecture**: Four-layer separation of concerns — Domain, Application, Infrastructure, API
+- **Domain-Driven Design**: Rich aggregate roots that enforce their own invariants and expose intention-revealing behaviour (`user.activate()`, `user.is_active`) — never an anemic domain
 - **Async Database**: Asynchronous PostgreSQL operations using SQLAlchemy 2.0+ and asyncpg
 - **JWT Authentication**: Access and refresh token pair with configurable expiry
 - **Dependency Injection**: `injector` with an in-house typed facade — one line binds implementation, port, and scope (`bind_typed(UserRepository).to(SqlAlchemyUserRepository, scope=request)`), constructors auto-wired via `@inject`, and a mismatched implementation is a mypy error at the binding line
 - **Request-Scoped Sessions**: A single `AsyncSession` per request (a request-scoped provider, disposed automatically on request end), shared by every adapter in that request
 - **Unit of Work**: Mutating use cases own the transaction boundary via the `TransactionContext` port — commit only on all-success, rollback-unless-committed; operations spanning several repositories inside one `begin()` block are atomic
-- **Ports & Adapters**: Collaborators are defined as `typing.Protocol` ports and implemented by mechanism-qualified adapters (`SqlAlchemyUserRepository`, `BcryptPasswordHasher`, `JwtTokenService`, `JsonLogger`)
+- **Ports & Adapters**: Collaborators are defined as `typing.Protocol` ports and implemented by mechanism-qualified adapters (`SqlAlchemyUserRepository`, `BcryptPasswordHasher`, `JwtTokenService`, `JsonLogger`) that subclass their port and inherit its docstrings, so every contract is documented exactly once and IDE hover shows it everywhere
+- **Fully Testable API Layer**: Route tests bind an `AsyncMock(spec=UserUseCase)` in a test injector module — no database or adapters involved
 - **Role-Based Access**: User roles (`admin`, `user`) and statuses (`active`, `inactive`) stored as lowercase enums
 - **Package Management**: Modern Python package management with `uv`
 - **Database Migrations**: Alembic for schema versioning; bootstrap admin user seeded via migration
@@ -36,10 +38,10 @@ Invoke-WebRequest -Uri "https://github.com/joe-vi/Templates/archive/refs/heads/m
 ├── src/
 │   ├── config/
 │   │   └── settings.py                     # Pydantic settings + cached get_settings()
-│   ├── domain/                             # Business entities, enums, repository ports (no external deps)
+│   ├── domain/                             # Aggregate roots, enums, repository ports (no external deps)
 │   │   ├── entities/
 │   │   │   └── user/
-│   │   │       └── user.py                 # User domain entity (dataclass)
+│   │   │       └── user.py                 # User aggregate root: invariants + behaviour
 │   │   ├── enums/
 │   │   │   ├── operation_results.py        # Generic CreateResult, UpdateResult, DeleteResult, LoginResult
 │   │   │   └── user_enum.py                # UserRole, UserStatus (StrEnum, lowercase values)
@@ -62,6 +64,9 @@ Invoke-WebRequest -Uri "https://github.com/joe-vi/Templates/archive/refs/heads/m
 │   │           ├── user_dto.py
 │   │           └── user_use_case.py        # UserUseCase (concrete)
 │   ├── infrastructure/                     # Adapters (imports Domain + Application)
+│   │   ├── di/
+│   │   │   ├── request_scope.py            # RequestScope + disposal context managers
+│   │   │   └── typed_binder.py             # TypedBinder (mypy-checked bindings)
 │   │   ├── auth/
 │   │   │   ├── bcrypt_password_hasher.py   # bcrypt via passlib
 │   │   │   ├── jwt_token_service.py        # PyJWT access + refresh tokens
@@ -78,10 +83,8 @@ Invoke-WebRequest -Uri "https://github.com/joe-vi/Templates/archive/refs/heads/m
 │   │   └── repositories/
 │   │       └── user/
 │   │           └── sqlalchemy_user_repository.py   # Async CRUD adapter
-│   ├── api/                                # Routes, schemas, dependency providers
+│   ├── api/                                # Routes, envelopes, composition root
 │   │   ├── dependencies/
-│   │   │   ├── request_scope.py            # RequestScope + disposal context managers
-│   │   │   ├── typed_binder.py             # TypedBinder (mypy-checked bindings)
 │   │   │   ├── injected.py                 # Injected() route-side accessor
 │   │   │   ├── providers.py                # composition root: AppModule (ports → adapters, scopes)
 │   │   │   └── jwt_dependency.py           # JWT guard (get_current_user)
@@ -93,10 +96,16 @@ Invoke-WebRequest -Uri "https://github.com/joe-vi/Templates/archive/refs/heads/m
 │   │   └── result_status_maps.py           # Operation result → HTTP status + message maps
 │   └── main.py                             # FastAPI app, lifespan (engine), request_context middleware (DI scope + log vars), routers
 ├── tests/
+│   ├── domain/
+│   │   └── entities/
+│   │       └── user/
+│   │           └── test_user.py            # Pure entity tests: invariants + behaviour (no mocks)
 │   ├── api/
 │   │   └── routers/
+│   │       ├── auth/
+│   │       │   └── test_auth_routes.py     # Route tests via a mocked AuthUseCase
 │   │       └── user/
-│   │           └── test_user_routes.py     # Route tests via an injector TestModule
+│   │           └── test_user_routes.py     # Route tests via a mocked UserUseCase
 │   ├── application/
 │   │   └── use_cases/
 │   │       └── user/
@@ -105,8 +114,11 @@ Invoke-WebRequest -Uri "https://github.com/joe-vi/Templates/archive/refs/heads/m
 │   └── infrastructure/
 │       ├── auth/
 │       │   └── test_request_user_context.py  # Identity holder semantics + scope isolation
-│       └── database/
-│           └── test_sqlalchemy_transaction_context.py  # Unit-of-work atomicity (in-memory SQLite)
+│       ├── database/
+│       │   └── test_sqlalchemy_transaction_context.py  # Unit-of-work atomicity (in-memory SQLite)
+│       └── di/
+│           ├── test_request_scope.py       # Scope isolation + disposal machinery
+│           └── test_typed_binder.py        # Binding facade wiring
 ├── alembic/                                # Database migration scripts
 ├── alembic.ini
 ├── docker-compose.yml                      # PostgreSQL 18
@@ -115,37 +127,38 @@ Invoke-WebRequest -Uri "https://github.com/joe-vi/Templates/archive/refs/heads/m
 └── README.md
 ```
 
-## Clean Architecture Layers
+## Clean Architecture + DDD Layers
 
 ### 1. Domain Layer (`src/domain/`)
-- **Entities**: Core business objects as dataclasses (`User`)
+- **Entities**: Aggregate roots as dataclasses with **invariants and behaviour** (`User` validates its email/username on construction and owns `activate()`/`deactivate()`/`is_active`)
 - **Enums**: `UserRole` (admin/user), `UserStatus` (active/inactive), generic operation result enums
-- **Repository Ports**: `typing.Protocol` interfaces with clean names (`UserRepository`)
-- **Rule**: No dependencies on any other layer
+- **Repository Ports**: `typing.Protocol` interfaces with clean names (`UserRepository`) — one per aggregate root
+- **Rule**: No dependencies on any other layer; business rules for one aggregate live on the entity
 
 ### 2. Application Layer (`src/application/`)
-- **Use Cases**: Plain concrete classes holding the business logic (`UserUseCase`, `AuthUseCase`)
+- **Use Cases**: Plain concrete classes holding the application logic (`UserUseCase`, `AuthUseCase`) — no separate interface; routes and tests depend on the class directly
 - **DTOs**: Frozen Pydantic models inheriting `DTOBase` with `DTO` suffix — they double as the API request/response bodies, so validation lives on them
 - **Service Ports**: `PasswordHasher`, `TokenService`, `Logger`, `TransactionContext`, `UserContext` (Protocols)
 - **Converters**: Module-level functions for entity ↔ DTO mapping
 - **Rule**: Imports Domain only
 
 ### 3. Infrastructure Layer (`src/infrastructure/`)
+- **DI machinery** (`di/`): the ContextVar-backed request scope and the mypy-checked `TypedBinder` — framework plumbing, FastAPI-agnostic
 - **Database**: `session.py` builds the engine + `async_sessionmaker`; the session is provided per request (no custom factory wrapper, no shared `ContextVar`)
-- **Repository Adapters**: `SqlAlchemyUserRepository` takes an `AsyncSession`; mutations flush and map DB errors to result enums — they never commit; the use case owns the boundary via `SqlAlchemyTransactionContext` (commit on all-success, rollback otherwise)
+- **Repository Adapters**: `SqlAlchemyUserRepository` subclasses the `UserRepository` port and takes an `AsyncSession`; mutations flush and map DB errors to result enums — they never commit; the use case owns the boundary via `SqlAlchemyTransactionContext` (commit on all-success, rollback otherwise)
 - **Auth/Logging Adapters**: `BcryptPasswordHasher`, `JwtTokenService`, `JsonLogger`, `RequestUserContext` (request-scoped caller identity, populated once by the JWT guard)
-- **Rule**: Implements (structurally satisfies) the ports from the Domain and Application layers
+- **Rule**: Adapters explicitly subclass their ports — the contract (and its docstrings) is defined once on the port and inherited everywhere
 
 ### 4. API Layer (`src/api/`)
-- **Routes**: FastAPI endpoints that depend on the concrete use case via `Annotated[UserUseCase, Injected(UserUseCase)]` and **return response models** (FastAPI serialises them to camelCase)
-- **Dependencies**: `providers.py` is the composition root (ports → adapters); `database.py` yields the request-scoped session; `jwt_dependency.py` is the JWT guard
+- **Routes**: FastAPI endpoints that depend on the use case via `Annotated[UserUseCase, Injected(UserUseCase)]` and **return response models** (FastAPI serialises them to camelCase)
+- **Dependencies**: `providers.py` is the composition root (ports → adapters); `jwt_dependency.py` is the JWT guard
 - **Bodies**: routes accept and return application DTOs directly — `DTOBase` gives camelCase JSON on the wire (and in OpenAPI) with snake_case Python attributes; only the generic operation envelopes live in `api/schemas/`
 - **Rule**: Wires adapters to ports in `dependencies/`; routes never call repositories directly
 
 ## Installation
 
 ### Prerequisites
-- Python 3.11+
+- Python 3.13+
 - Docker (for PostgreSQL)
 - [uv](https://github.com/astral-sh/uv) package manager
 
@@ -246,14 +259,12 @@ The API will be available at:
 uv run pytest
 ```
 
-### Code Formatting
-```bash
-uv run ruff format src/
-```
+### Code Formatting & Linting
 
-### Linting
+Line length is 140 characters; `skip-magic-trailing-comma` is enabled so the formatter uses the full width.
+
 ```bash
-uv run ruff check src/ --fix
+uv run ruff check src/ tests/ --fix && uv run ruff format src/ tests/
 ```
 
 ### Type Checking
@@ -281,27 +292,28 @@ uv run alembic downgrade -1                              # Roll back one step
 
 ## Adding New Features
 
-1. **Domain**: Add entity in `src/domain/entities/<name>/` and a repository **Protocol** port in `src/domain/repositories/<name>/<name>_repository.py` (clean name, e.g. `OrderRepository`)
-2. **Application**: Add DTO, converter functions, and a concrete use case in `src/application/use_cases/<name>/` — inject `TransactionContext`, wrap mutations in `begin()`, commit only on success (several repository calls in one block are atomic)
-3. **Infrastructure**: Add ORM model in `src/infrastructure/database/models/` and a `sqlalchemy_<name>_repository.py` adapter (takes an `AsyncSession`) in `src/infrastructure/repositories/<name>/`
-4. **API**: Add routes in `src/api/routers/<name>/` that accept and return the DTOs directly (`response_model=<Entity>DTO`) — no per-entity schemas or converters
+1. **Domain**: Add an aggregate root with invariants + behaviour in `src/domain/entities/<name>/` and a repository **Protocol** port in `src/domain/repositories/<name>/<name>_repository.py` (clean name, e.g. `OrderRepository`)
+2. **Application**: Add DTOs, converter functions, and a concrete use case in `src/application/use_cases/<name>/` — inject `TransactionContext`, wrap mutations in `begin()`, commit only on success (several repository calls in one block are atomic)
+3. **Infrastructure**: Add the ORM model in `src/infrastructure/database/models/` and a `sqlalchemy_<name>_repository.py` adapter (subclasses the port, takes an `AsyncSession`) in `src/infrastructure/repositories/<name>/`
+4. **API**: Add routes in `src/api/routers/<name>/` that depend on the use case and accept/return the DTOs directly (`response_model=<Entity>DTO`) — no per-entity schemas or converters
 5. **Bindings**: Add one line per binding to `AppModule.configure()` in `src/api/dependencies/providers.py` (constructors auto-wired via `@inject`; a wrong implementation is a mypy error):
    ```python
-   typed_binder.bind_typed(OrderRepository).to(
-       SqlAlchemyOrderRepository, scope=request
-   )
+   typed_binder.bind_typed(OrderRepository).to(SqlAlchemyOrderRepository, scope=request)
    typed_binder.bind_self_typed(OrderUseCase, scope=request)
    ```
 6. **Main**: Include the new router in `src/main.py`
 7. **Migration**: Generate and apply an Alembic migration for any new DB models
+8. **Tests**: Entity tests in `tests/domain/`, use case tests with mocked ports, route tests binding a mock use case instance in a `TestModule`
 
 ## Design Principles
 
 1. **Dependency Inversion**: Use cases depend on `Protocol` ports, not concrete adapters
-2. **Single Responsibility**: One use case per operation; one CRUD operation per repository method
-3. **Open/Closed**: Swap an adapter by changing the `return` in its provider function only
-4. **Interface Segregation**: Small, focused ports (Protocols) per collaborator
-5. **Async/Await**: Full async support for all database and I/O operations
+2. **Rich Domain**: Aggregate roots enforce invariants and own their state transitions — use cases orchestrate, they don't implement domain rules
+3. **Single Responsibility**: One use case per operation; one CRUD operation per repository method
+4. **Open/Closed**: Swap an adapter by changing one binding line in the composition root
+5. **Interface Segregation**: Small, focused ports (Protocols) per collaborator
+6. **Single-Source Documentation**: Contracts are documented once on the port; implementations inherit the docstrings via explicit subclassing
+7. **Async/Await**: Full async support for all database and I/O operations
 
 ## License
 

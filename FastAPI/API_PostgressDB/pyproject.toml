@@ -50,12 +50,18 @@ dev = [
 ]
 
 [tool.ruff]
-line-length = 80
+line-length = 140
 target-version = "py313"
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "N", "W", "UP"]
 ignore = []
+
+[tool.ruff.lint.isort]
+split-on-trailing-comma = false
+
+[tool.ruff.format]
+skip-magic-trailing-comma = true
 
 [tool.mypy]
 python_version = "3.13"

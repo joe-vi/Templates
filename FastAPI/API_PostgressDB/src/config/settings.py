@@ -1,5 +1,3 @@
-"""Application configuration loaded from environment variables."""
-
 from functools import lru_cache
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -9,9 +7,7 @@ from sqlalchemy.engine import URL
 class Settings(BaseSettings):
     """Application settings loaded from environment variables."""
 
-    model_config = SettingsConfigDict(
-        env_file=".env", env_file_encoding="utf-8"
-    )
+    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8")
 
     db_driver: str = "postgresql+asyncpg"
     db_user: str = "postgres"
@@ -45,9 +41,5 @@ class Settings(BaseSettings):
 
 @lru_cache
 def get_settings() -> Settings:
-    """Return the process-wide Settings singleton.
-
-    Cached so the environment is parsed once. Used as a FastAPI dependency and
-    by the application startup wiring.
-    """
+    """Return the process-wide Settings singleton (environment parsed once)."""
     return Settings()

@@ -1,14 +1,13 @@
-"""Password hashing port (structural interface)."""
-
 from typing import Protocol
 
 
 class PasswordHasher(Protocol):
     """Port for password hashing.
 
-    Implement with a provider-specific adapter (e.g. bcrypt, argon2) and wire
-    it in the dependency providers. Use cases depend only on this protocol, so
-    switching providers requires no changes outside the infrastructure layer.
+    Implemented by a mechanism-qualified adapter (e.g. bcrypt, argon2) that
+    subclasses this protocol and inherits these docstrings — document the
+    contract here only. Use cases depend on this port, so switching providers
+    requires no change outside the infrastructure layer.
     """
 
     def hash(self, password: str) -> str:
@@ -18,16 +17,16 @@ class PasswordHasher(Protocol):
             password: The plain-text password to hash.
 
         Returns:
-            The hashed password string.
+            The hashed password string, safe to store.
         """
         ...
 
     def verify(self, plain_password: str, hashed_password: str) -> bool:
-        """Verify a plain-text password against a hashed password.
+        """Verify a plain-text password against a stored hash.
 
         Args:
             plain_password: The plain-text password to verify.
-            hashed_password: The hashed password to compare against.
+            hashed_password: The stored hash to compare against.
 
         Returns:
             True if the password matches, False otherwise.

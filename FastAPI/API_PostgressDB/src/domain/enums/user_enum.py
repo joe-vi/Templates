@@ -1,17 +1,15 @@
-"""User-related domain enumerations."""
-
 from enum import StrEnum
 
 
 class UserStatus(StrEnum):
-    """Represents the lifecycle status of a user."""
+    """Lifecycle status of a user; only ``ACTIVE`` users may authenticate."""
 
     ACTIVE = "active"
     INACTIVE = "inactive"
 
 
 class UserRole(StrEnum):
-    """Represents the role of a user."""
+    """Authorization role of a user."""
 
     ADMIN = "admin"
     USER = "user"

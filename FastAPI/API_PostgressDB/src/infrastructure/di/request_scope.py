@@ -1,11 +1,3 @@
-"""Request scope for the injector library, with per-request disposal.
-
-State lives in a ``ContextVar`` (not on the ``Scope`` object, which injector
-keeps for its whole life), giving correct per-request isolation under both
-threads and asyncio tasks. ``request_scope()`` / ``async_request_scope()``
-open a per-request cache and dispose every request-scoped object on exit.
-"""
-
 from __future__ import annotations
 
 import contextvars
@@ -20,9 +12,7 @@ from injector import InstanceProvider, Provider, Scope, ScopeDecorator
 logger = logging.getLogger(__name__)
 
 
-_request_cache: contextvars.ContextVar[dict[type, Any]] = (
-    contextvars.ContextVar("injector_request_cache")
-)
+_request_cache: contextvars.ContextVar[dict[type, Any]] = contextvars.ContextVar("injector_request_cache")
 
 
 class RequestScope(Scope):
@@ -32,7 +22,9 @@ class RequestScope(Scope):
     single Scope instance for the injector's whole life, so storing state
     here would make it behave like a singleton shared by every request.
     State lives in a ContextVar instead, giving correct per-request isolation
-    under both threads and asyncio tasks.
+    under both threads and asyncio tasks. ``request_scope()`` /
+    ``async_request_scope()`` open a per-request cache and dispose every
+    request-scoped object on exit.
     """
 
     def get[T](self, key: type[T], provider: Provider[T]) -> Provider[T]:
@@ -40,10 +32,8 @@ class RequestScope(Scope):
             cache = _request_cache.get()
         except LookupError as exc:
             raise RuntimeError(
-                f"{key!r} is request-scoped but was resolved outside a "
-                "request scope. Enter one with `with request_scope():` "
-                "(sync) or `async with async_request_scope():` (async) "
-                "first."
+                f"{key!r} is request-scoped but was resolved outside a request scope. "
+                "Enter one with `with request_scope():` (sync) or `async with async_request_scope():` (async) first."
             ) from exc
         if key not in cache:
             cache[key] = provider.get(self.injector)
@@ -60,10 +50,7 @@ def _dispose_sync(instance: Any) -> None:
     if inspect.iscoroutinefunction(close):
         # A coroutine cannot be awaited from sync teardown; calling it would
         # silently create a never-awaited coroutine and leak the resource.
-        logger.warning(
-            "cannot dispose %r in a sync request scope: close() is async",
-            instance,
-        )
+        logger.warning("cannot dispose %r in a sync request scope: close() is async", instance)
         return
     close()
 
@@ -104,9 +91,7 @@ def request_scope() -> Iterator[None]:
                 try:
                     _dispose_sync(instance)
                 except Exception:
-                    logger.exception(
-                        "request-scoped teardown failed for %r", instance
-                    )
+                    logger.exception("request-scoped teardown failed for %r", instance)
         finally:
             _request_cache.reset(token)
 
@@ -131,8 +116,6 @@ async def async_request_scope() -> AsyncIterator[None]:
                 try:
                     await _dispose_async(instance)
                 except Exception:
-                    logger.exception(
-                        "request-scoped teardown failed for %r", instance
-                    )
+                    logger.exception("request-scoped teardown failed for %r", instance)
         finally:
             _request_cache.reset(token)

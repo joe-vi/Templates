@@ -1,5 +1,3 @@
-"""Request-scoped user context port (structural interface)."""
-
 from typing import Protocol
 
 from src.domain.enums import user_enum
