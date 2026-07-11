@@ -9,12 +9,7 @@ from src.domain.repositories.user.user_repository import UserRepository
 
 
 class LoginUseCase:
-    """Application logic for authenticating a user.
-
-    One use case class per operation: routes and tests depend on this class
-    directly (mock with ``AsyncMock(spec=LoginUseCase)``). Depends only on
-    ports; the concrete adapters are supplied by the composition root.
-    """
+    """Authenticates a user and issues a token pair."""
 
     @inject
     def __init__(

@@ -6,11 +6,7 @@ from src.domain.enums import operation_results
 
 
 class RefreshTokenUseCase:
-    """Application logic for rotating a refresh token.
-
-    One use case class per operation: the token exchange is stateless, so it
-    depends only on the ``TokenService`` port — no repository access.
-    """
+    """Issues a new token pair from a refresh token."""
 
     @inject
     def __init__(self, token_service: TokenService) -> None:

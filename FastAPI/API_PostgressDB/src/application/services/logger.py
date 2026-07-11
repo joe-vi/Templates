@@ -2,13 +2,7 @@ from typing import Protocol
 
 
 class Logger(Protocol):
-    """Port for structured application logging.
-
-    Implemented by a mechanism-qualified adapter (e.g. stdlib logging,
-    structlog, Datadog) that subclasses this protocol and inherits these
-    docstrings. Adapters are expected to attach per-request correlation
-    (request id, authenticated user id) to every entry.
-    """
+    """Port for structured application logging."""
 
     def info(self, message: str, **extra: object) -> None:
         """Log an informational message.

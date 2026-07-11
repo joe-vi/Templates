@@ -4,16 +4,7 @@ from src.domain.enums import user_enum
 
 
 class UserContext(Protocol):
-    """Port holding the authenticated caller's identity for one request.
-
-    Populated exactly once per request by the JWT guard after the Bearer
-    token is validated. Inject into any use case or service that needs the
-    caller's identity — auditing, ownership checks, role/permission checks —
-    instead of threading claims through every method signature.
-
-    Only valid on routes protected by the guard: reading an unpopulated
-    context raises RuntimeError.
-    """
+    """Port holding the authenticated caller's identity for one request."""
 
     @property
     def is_populated(self) -> bool:

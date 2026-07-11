@@ -9,9 +9,6 @@ def Injected[T](interface: type[T]) -> Any:  # noqa: N802 - mirrors Depends()
     Usage in a route or FastAPI dependency signature::
 
         use_case: Annotated[CreateUserUseCase, Injected(CreateUserUseCase)]
-
-    Resolution happens inside the request scope entered by the middleware in
-    ``main.py``, so request-scoped bindings work as expected.
     """
 
     async def resolve_dependency(request: Request) -> T:

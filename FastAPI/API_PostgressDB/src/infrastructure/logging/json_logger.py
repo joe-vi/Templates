@@ -30,12 +30,7 @@ class _JsonFormatter(logging.Formatter):
 
 
 class JsonLogger(Logger):
-    """``Logger`` adapter emitting structured JSON via the stdlib logging module.
-
-    Process-wide singleton. Request correlation (request id and authenticated
-    user id) is read from context variables at log time, so the same logger
-    instance produces correctly-scoped lines for every concurrent request.
-    """
+    """``Logger`` adapter emitting structured JSON via the stdlib logging module."""
 
     @inject
     def __init__(self, settings: Settings) -> None:

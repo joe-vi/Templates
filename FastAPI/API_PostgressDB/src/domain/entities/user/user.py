@@ -8,10 +8,8 @@ from src.domain.enums import user_enum
 class User:
     """Aggregate root representing a user of the system.
 
-    Carries both state and the behaviour that guards it: construction enforces the
-    entity's invariants, and lifecycle changes go through the intention-revealing
-    methods below rather than raw field assignment. ``id`` and ``created_at`` are
-    database-generated — ``None`` until the entity is persisted.
+    ``id`` and ``created_at`` are database-generated — ``None`` until the
+    entity is persisted.
     """
 
     id: int | None
@@ -23,7 +21,7 @@ class User:
     created_at: datetime | None = None
 
     def __post_init__(self) -> None:
-        """Enforce the entity's invariants at construction time.
+        """Validate the email and username.
 
         Raises:
             ValueError: If the email or username is blank, or the email has no

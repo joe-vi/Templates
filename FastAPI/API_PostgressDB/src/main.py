@@ -16,11 +16,7 @@ injector = Injector([AppModule()])
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
-    """Manage the application startup and shutdown lifecycle.
-
-    On shutdown, disposes the database engine (singletons are not covered by
-    the request-scope teardown).
-    """
+    """Manage the application startup and shutdown lifecycle."""
     yield
     engine = app.state.injector.get(AsyncEngine)
     await engine.dispose()
@@ -37,14 +33,7 @@ app.state.injector = injector
 
 @app.middleware("http")
 async def request_context(request: Request, call_next: Callable[[Request], Awaitable[Response]]) -> Response:
-    """Open the DI request scope and the log-correlation context.
-
-    Every request-scoped dependency resolved while handling this request is
-    cached for the request and disposed when it ends. request_id is set here;
-    user_id is cleared so a value can never leak between requests handled in
-    the same task, then populated by the JWT guard once the caller is
-    authenticated.
-    """
+    """Open the DI request scope and the log-correlation context."""
     request_id_token = log_context.request_id_var.set(str(uuid.uuid4()))
     user_id_token = log_context.user_id_var.set(None)
     try:

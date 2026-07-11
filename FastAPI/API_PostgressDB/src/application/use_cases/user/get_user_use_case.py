@@ -5,11 +5,7 @@ from src.domain.repositories.user.user_repository import UserRepository
 
 
 class GetUserUseCase:
-    """Application logic for reading a single user.
-
-    One use case class per operation: a pure read, so it depends only on the
-    repository port — no password hasher, no transaction context.
-    """
+    """Retrieves a single user."""
 
     @inject
     def __init__(self, repository: UserRepository) -> None:

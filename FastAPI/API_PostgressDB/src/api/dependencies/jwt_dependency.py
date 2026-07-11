@@ -19,13 +19,6 @@ async def get_current_user(
 ) -> auth_dto.TokenClaimsDTO:
     """Validate the Bearer JWT access token and return its claims.
 
-    Decodes the token, raising 401 on any failure, then populates the
-    request-scoped ``UserContext`` (so any injected use case or service can
-    read the caller's identity) and records the user id in the logging
-    context so it appears on every log line for the rest of the request.
-    Route handlers can also receive the returned ``TokenClaimsDTO`` directly
-    via ``Depends(get_current_user)``.
-
     Args:
         credentials: The HTTP Bearer credentials from the Authorization header.
         token_service: The token service used to decode the JWT.

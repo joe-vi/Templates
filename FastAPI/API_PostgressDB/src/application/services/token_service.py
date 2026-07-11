@@ -4,12 +4,7 @@ from src.application.use_cases.auth import auth_dto
 
 
 class TokenService(Protocol):
-    """Port for issuing and validating authentication tokens.
-
-    Implemented by a mechanism-qualified adapter (e.g. PyJWT, python-jose)
-    that subclasses this protocol and inherits these docstrings. Use cases and
-    the API guard depend on this port only.
-    """
+    """Port for issuing and validating authentication tokens."""
 
     def create_access_token(self, user_id: int, role: str) -> str:
         """Create a signed, short-lived access token.

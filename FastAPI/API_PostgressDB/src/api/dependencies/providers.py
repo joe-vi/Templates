@@ -27,22 +27,7 @@ from src.infrastructure.repositories.user.sqlalchemy_user_repository import SqlA
 
 
 class AppModule(Module):
-    """Composition root: binds every port to its adapter with an explicit scope.
-
-    ``TypedBinder`` makes each binding a one-liner declaring implementation,
-    port, and scope — and a binding whose implementation does not satisfy its
-    port is a type-checker error at that line. There is no graph-completeness
-    check: a missing binding surfaces as a runtime error on first resolution.
-
-    Scopes:
-        singleton — one instance for the process (engine, stateless services).
-        request   — one instance per HTTP request (session, repositories,
-                    transaction context, use cases). Everything in a request
-                    shares the same ``AsyncSession``, which is what makes a
-                    multi-repository ``TransactionContext.begin()`` block
-                    atomic. The request scope also disposes its objects on
-                    request end (the session is closed via ``aclose()``).
-    """
+    """Composition root: binds every port to its adapter with an explicit scope."""
 
     def configure(self, binder: Binder) -> None:
         """Declare all port–adapter bindings."""

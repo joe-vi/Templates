@@ -27,11 +27,7 @@ UseCaseDep = Annotated[CreateUserUseCase, Injected(CreateUserUseCase)]
 async def create_user(
     create_user_dto: user_dto.CreateUserDTO, response: Response, use_case: UseCaseDep
 ) -> operation_schema.CreateOperationResponse:
-    """Create a new user.
-
-    Returns a CreateOperationResponse whose result enum and HTTP status
-    reflect the outcome; the new user id is set on success.
-    """
+    """Create a new user."""
     result, entity_id = await use_case.execute(create_user_dto)
     response.status_code = result_status_maps.CREATE_STATUS_MAP[result]
     return operation_schema.CreateOperationResponse(result=result, message=result_status_maps.CREATE_MESSAGE_MAP[result], id=entity_id)

@@ -5,11 +5,7 @@ from src.domain.repositories.user.user_repository import UserRepository
 
 
 class GetAllUsersUseCase:
-    """Application logic for listing all users.
-
-    One use case class per operation: a pure read, so it depends only on the
-    repository port.
-    """
+    """Retrieves all users."""
 
     @inject
     def __init__(self, repository: UserRepository) -> None:

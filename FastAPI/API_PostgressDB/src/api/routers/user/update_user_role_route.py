@@ -31,11 +31,7 @@ async def update_user_role(
     response: Response,
     use_case: UseCaseDep,
 ) -> operation_schema.UpdateOperationResponse:
-    """Update the role of a user.
-
-    The user id comes from the path and the role from the request body
-    (``{"role": ...}``); the two are combined into the use-case DTO here.
-    """
+    """Update the role of a user."""
     update_user_role_dto = user_dto.UpdateUserRoleDTO(user_id=user_id, role=role)
     result = await use_case.execute(update_user_role_dto)
     response.status_code = result_status_maps.UPDATE_STATUS_MAP[result]

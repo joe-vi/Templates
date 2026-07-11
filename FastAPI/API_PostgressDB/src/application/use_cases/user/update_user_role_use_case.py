@@ -7,11 +7,7 @@ from src.domain.repositories.user.user_repository import UserRepository
 
 
 class UpdateUserRoleUseCase:
-    """Application logic for assigning a new role to a user.
-
-    One use case class per operation. The mutation runs inside a
-    ``TransactionContext`` block and commits only on success.
-    """
+    """Assigns a new role to a user."""
 
     @inject
     def __init__(self, repository: UserRepository, transaction_context: TransactionContext) -> None:

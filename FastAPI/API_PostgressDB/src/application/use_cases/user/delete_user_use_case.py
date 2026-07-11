@@ -6,11 +6,7 @@ from src.domain.repositories.user.user_repository import UserRepository
 
 
 class DeleteUserUseCase:
-    """Application logic for deleting a user.
-
-    One use case class per operation. The mutation runs inside a
-    ``TransactionContext`` block and commits only on success.
-    """
+    """Deletes a user."""
 
     @inject
     def __init__(self, repository: UserRepository, transaction_context: TransactionContext) -> None:

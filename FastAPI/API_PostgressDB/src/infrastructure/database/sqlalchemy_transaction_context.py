@@ -24,14 +24,7 @@ class SqlAlchemyTransaction(Transaction):
 
 
 class SqlAlchemyTransactionContext(TransactionContext):
-    """``TransactionContext`` adapter backed by the request-scoped ``AsyncSession``.
-
-    Repositories built for the same request hold this same session, so every
-    repository call inside a ``begin()`` block joins one transaction.
-    ``commit()`` is only reachable on the all-success path, so committing a
-    partially-failed unit of work is structurally impossible (unlike designs
-    that auto-commit on clean exit).
-    """
+    """``TransactionContext`` adapter backed by the request-scoped ``AsyncSession``."""
 
     @inject
     def __init__(self, session: AsyncSession) -> None:

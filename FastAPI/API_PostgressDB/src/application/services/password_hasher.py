@@ -2,13 +2,7 @@ from typing import Protocol
 
 
 class PasswordHasher(Protocol):
-    """Port for password hashing.
-
-    Implemented by a mechanism-qualified adapter (e.g. bcrypt, argon2) that
-    subclasses this protocol and inherits these docstrings — document the
-    contract here only. Use cases depend on this port, so switching providers
-    requires no change outside the infrastructure layer.
-    """
+    """Port for password hashing."""
 
     def hash(self, password: str) -> str:
         """Hash a plain-text password.

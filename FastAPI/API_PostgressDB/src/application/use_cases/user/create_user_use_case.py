@@ -8,13 +8,7 @@ from src.domain.repositories.user.user_repository import UserRepository
 
 
 class CreateUserUseCase:
-    """Application logic for creating a user.
-
-    One use case class per operation: each declares only the collaborators
-    that operation needs, and routes/tests depend on the concrete class
-    directly (mock with ``AsyncMock(spec=CreateUserUseCase)``). The mutation
-    runs inside a ``TransactionContext`` block and commits only on success.
-    """
+    """Creates a new user."""
 
     @inject
     def __init__(self, repository: UserRepository, password_hasher: PasswordHasher, transaction_context: TransactionContext) -> None:
