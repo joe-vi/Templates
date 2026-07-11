@@ -3,7 +3,7 @@ from __future__ import annotations
 import contextvars
 import inspect
 import logging
-from collections.abc import AsyncIterator, Iterator
+from collections.abc import AsyncGenerator, Generator
 from contextlib import asynccontextmanager, contextmanager
 from typing import Any
 
@@ -73,7 +73,7 @@ async def _dispose_async(instance: Any) -> None:
 
 
 @contextmanager
-def request_scope() -> Iterator[None]:
+def request_scope() -> Generator[None]:
     """Enter a per-request scope for synchronous (WSGI) code.
 
     On exit, every request-scoped object is disposed independently, in
@@ -97,7 +97,7 @@ def request_scope() -> Iterator[None]:
 
 
 @asynccontextmanager
-async def async_request_scope() -> AsyncIterator[None]:
+async def async_request_scope() -> AsyncGenerator[None]:
     """Enter a per-request scope for asynchronous (ASGI) code.
 
     Disposes request-scoped objects on exit, preferring an async ``aclose()``

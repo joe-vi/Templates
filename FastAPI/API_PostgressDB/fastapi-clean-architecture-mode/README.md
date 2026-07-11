@@ -37,7 +37,7 @@ Domain has zero external dependencies. Every other layer may only import from th
 **Abstraction boundaries**
 - Use cases are plain concrete classes depending on `typing.Protocol` ports, never concrete adapters; adapters explicitly subclass their port and inherit its docstrings (contracts documented once, IDE hover everywhere)
 - `AppModule.configure()` in `src/api/dependencies/providers.py` is the only place that wires adapters to ports (the composition root)
-- One line binds implementation, port, and scope via `TypedBinder`: `bind_typed(Port).to(Impl, scope=request)`; a mismatched implementation is a mypy error at that line; constructors are auto-wired via `@inject`
+- One line binds implementation, port, and scope via `TypedBinder`: `bind_typed(Port).to(Impl, scope=request)`; a mismatched implementation is a pyrefly error at that line; constructors are auto-wired via `@inject`
 
 **Repository pattern & unit of work**
 - One CRUD operation per method — orchestration belongs in use cases, not repositories

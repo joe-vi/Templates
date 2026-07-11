@@ -11,7 +11,7 @@ Dependencies flow **inward only**: API → Infrastructure → Application → Do
 | Infrastructure | `src/infrastructure/` | DB models, repository/auth/logging adapters, engine/session, DI machinery | Domain + Application |
 | API | `src/api/` | Routes (accept/return DTOs), operation envelopes, **composition root** | Application + Infrastructure (only in `dependencies/`) |
 
-The composition root is `AppModule` in `src/api/dependencies/providers.py`, built on the **injector** library with in-house machinery in `src/infrastructure/di/` (`request_scope.py`, `typed_binder.py`): a ContextVar-backed **request scope** with automatic disposal, and the **`TypedBinder`** facade, which makes every binding a one-liner — implementation, port, and scope — where a mismatched implementation is a mypy error at that line. The FastAPI-specific accessor `Injected()` lives in `src/api/dependencies/injected.py`. There is no graph-completeness validation: a missing binding surfaces as a runtime error on first resolution (accepted trade-off).
+The composition root is `AppModule` in `src/api/dependencies/providers.py`, built on the **injector** library with in-house machinery in `src/infrastructure/di/` (`request_scope.py`, `typed_binder.py`): a ContextVar-backed **request scope** with automatic disposal, and the **`TypedBinder`** facade, which makes every binding a one-liner — implementation, port, and scope — where a mismatched implementation is a pyrefly error at that line. The FastAPI-specific accessor `Injected()` lives in `src/api/dependencies/injected.py`. There is no graph-completeness validation: a missing binding surfaces as a runtime error on first resolution (accepted trade-off).
 
 ### File Organisation
 
@@ -87,12 +87,12 @@ The domain layer is the heart of the system and must never be anemic.
 
 ### Ports & Adapters (dependency inversion via Protocol)
 - A **port** is a `typing.Protocol` defining the methods a collaborator must provide. It lives where it is *consumed*: repository ports in `src/domain/`, service ports in `src/application/services/`.
-- An **adapter explicitly subclasses its port** (`class SqlAlchemyUserRepository(UserRepository):`). This is deliberate: the port's method docstrings are inherited, so the contract is documented **once** and IDEs show it on hover both at call sites and inside the implementation; mypy additionally checks every override against the port signature at the class itself. Conformance is still enforced structurally at the binding line by `TypedBinder`.
+- An **adapter explicitly subclasses its port** (`class SqlAlchemyUserRepository(UserRepository):`). This is deliberate: the port's method docstrings are inherited, so the contract is documented **once** and IDEs show it on hover both at call sites and inside the implementation; pyrefly additionally checks every override against the port signature at the class itself. Conformance is still enforced structurally at the binding line by `TypedBinder`.
 - Use cases depend on ports (constructor parameters typed as the Protocol). Providers supply the concrete adapter.
 
 ### Dependency Injection (injector + TypedBinder)
 - The composition root is `AppModule` in `src/api/dependencies/providers.py`. One line binds implementation, port, and scope via the typed facade:
-  `typed_binder.bind_typed(UserRepository).to(SqlAlchemyUserRepository, scope=request)` — and binding an implementation that does not satisfy the port is a **mypy error at that line**. Concrete classes with no port — the use cases — use `bind_self_typed(UserUseCase, scope=request)`.
+  `typed_binder.bind_typed(UserRepository).to(SqlAlchemyUserRepository, scope=request)` — and binding an implementation that does not satisfy the port is a **pyrefly error at that line**. Concrete classes with no port — the use cases — use `bind_self_typed(UserUseCase, scope=request)`.
 - **Scopes are explicit**: `singleton` (from `injector`) for process-wide objects (engine, `PasswordHasher`, `TokenService`, `Logger`); `request` (from `src/infrastructure/di/request_scope.py`) for per-request objects (session, repositories, transaction context, use cases). Everything in one request shares the same instances; the request scope's state lives in a `ContextVar`, isolated per request under asyncio.
 - **Every implementation whose `__init__` takes dependencies carries `@inject`** (from `injector`) so the graph auto-wires from type hints. Omitting it fails at resolution with a `TypeError`.
 - Construction that needs logic lives in `@provider` methods on `AppModule` (`provide_settings`, `provide_engine`, `provide_session_factory`, `provide_session`).
@@ -234,7 +234,7 @@ Tests live in `tests/` and mirror `src/`.
 - Classes with no port — the use cases — carry their own method docstrings: they are the single source for their contract.
 - Standalone public functions (converters, providers, guards, routes) carry their own docstrings — they have no port to inherit from. Route docstrings become OpenAPI descriptions: describe endpoint behaviour, not injected parameters.
 - Inline comments only for constraints the code cannot express (e.g. why `flush()` instead of `commit()`).
-- Max line length: **140 characters** (`skip-magic-trailing-comma = true`, so the formatter uses the full width). Run `uv run ruff check src/ tests/ --fix && uv run ruff format src/ tests/` after every change.
+- Max line length: **140 characters** (`skip-magic-trailing-comma = true`, so the formatter uses the full width). Run `uv run ruff check src/ tests/ --fix && uv run ruff format src/ tests/` after every change. Run `uv run pyrefly check` to type-check.
 - Always use `uv run`. Modern type annotations (`list[X]`, `X | None`). All DB I/O is async. API prefix: `/api/v1`.
 
 ---

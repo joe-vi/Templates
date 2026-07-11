@@ -13,7 +13,7 @@ imports from any other layer. The composition root is `AppModule` in
 `src/api/dependencies/providers.py`, built on injector plus the in-house DI machinery in
 `src/infrastructure/di/` (`request_scope.py`, `typed_binder.py`) and the FastAPI accessor
 `src/api/dependencies/injected.py`: one line binds implementation, port, and scope, and a
-mismatched implementation is a mypy error at that line. No graph-completeness validation — a
+mismatched implementation is a pyrefly error at that line. No graph-completeness validation — a
 missing binding fails at runtime on first resolution (accepted trade-off).
 
 - Domain (`src/domain/`): Entities (aggregate roots with invariants + behaviour), repository ports (Protocols), enums. No external deps.
@@ -48,7 +48,7 @@ missing binding fails at runtime on first resolution (accepted trade-off).
 - Standalone public functions (converters, providers, guards, routes) keep their own docstrings; route docstrings become OpenAPI descriptions.
 
 ### Dependency Injection (injector + TypedBinder)
-- Composition root: `AppModule.configure()` in `src/api/dependencies/providers.py` using the `TypedBinder` facade — one line per binding: `typed_binder.bind_typed(UserRepository).to(SqlAlchemyUserRepository, scope=request)`. A wrong implementation for a port is a mypy error at that line. Concrete classes (use cases): `bind_self_typed(UserUseCase, scope=request)`.
+- Composition root: `AppModule.configure()` in `src/api/dependencies/providers.py` using the `TypedBinder` facade — one line per binding: `typed_binder.bind_typed(UserRepository).to(SqlAlchemyUserRepository, scope=request)`. A wrong implementation for a port is a pyrefly error at that line. Concrete classes (use cases): `bind_self_typed(UserUseCase, scope=request)`.
 - Scopes: `singleton` (engine, stateless services) and `request` (session, repositories, transaction context, use cases). Request-scope state lives in a ContextVar; the scope is entered per request by the middleware in `main.py` and disposes its objects on exit (LIFO; `aclose()` preferred, async `close()` awaited).
 - `@inject` REQUIRED on every implementation whose `__init__` takes dependencies (injector auto-wires from type hints; omitting it is a runtime `TypeError`). Construction logic lives in `@provider` methods on `AppModule`.
 - Routes/guards resolve via `Annotated[UserUseCase, Injected(UserUseCase)]` — a thin Depends over `app.state.injector`.
@@ -81,7 +81,7 @@ missing binding fails at runtime on first resolution (accepted trade-off).
 - `StrEnum` (3.11+), lowercase values matching DB storage; all enums in `src/domain/enums/`.
 
 ### Code Style
-- Max line length: 140 characters (`skip-magic-trailing-comma = true` — the formatter uses the full width). Run `uv run ruff check src/ tests/ --fix && uv run ruff format src/ tests/` after every change.
+- Max line length: 140 characters (`skip-magic-trailing-comma = true` — the formatter uses the full width). Run `uv run ruff check src/ tests/ --fix && uv run ruff format src/ tests/` after every change. Run `uv run pyrefly check` to type-check.
 - Always use `uv run`. API prefix: `/api/v1`.
 
 ### Testing

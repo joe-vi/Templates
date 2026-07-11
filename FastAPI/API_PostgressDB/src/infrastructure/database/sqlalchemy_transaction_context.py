@@ -1,4 +1,4 @@
-from collections.abc import AsyncIterator
+from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 
 from injector import inject
@@ -38,7 +38,7 @@ class SqlAlchemyTransactionContext(TransactionContext):
         self._session = session
 
     @asynccontextmanager
-    async def begin(self) -> AsyncIterator[SqlAlchemyTransaction]:
+    async def begin(self) -> AsyncGenerator[SqlAlchemyTransaction]:
         transaction = SqlAlchemyTransaction(self._session)
         try:
             yield transaction

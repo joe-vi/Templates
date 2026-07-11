@@ -17,7 +17,7 @@ The composition root is `AppModule` in `src/api/dependencies/providers.py`,
 built on `injector` plus the in-house DI machinery in `src/infrastructure/di/`
 (`request_scope.py`, `typed_binder.py`) and the FastAPI accessor
 `src/api/dependencies/injected.py`: one line binds implementation, port, and
-scope, and a mismatched implementation is a mypy error at that line. No
+scope, and a mismatched implementation is a pyrefly error at that line. No
 graph-completeness validation — a missing binding fails at runtime on first
 resolution.
 
@@ -52,12 +52,12 @@ resolution.
 ## Ports & adapters (dependency inversion via Protocol)
 
 - A port is a `typing.Protocol` defining required methods; it lives where it is consumed (repository ports in Domain, service ports in `src/application/services/`).
-- An adapter **explicitly subclasses its port** — inheriting the documented contract and giving mypy override checking at the class itself. Conformance is additionally checked at the binding line by `TypedBinder`.
+- An adapter **explicitly subclasses its port** — inheriting the documented contract and giving pyrefly override checking at the class itself. Conformance is additionally checked at the binding line by `TypedBinder`.
 - Use cases take ports as constructor parameters; providers supply the concrete adapter.
 
 ## Dependency injection (injector + TypedBinder)
 
-- Wire everything in `AppModule.configure()` via `TypedBinder` — one line per binding: `typed_binder.bind_typed(UserRepository).to(SqlAlchemyUserRepository, scope=request)`, concrete classes (use cases) use `bind_self_typed(UserUseCase, scope=request)`. A wrong implementation is a mypy error.
+- Wire everything in `AppModule.configure()` via `TypedBinder` — one line per binding: `typed_binder.bind_typed(UserRepository).to(SqlAlchemyUserRepository, scope=request)`, concrete classes (use cases) use `bind_self_typed(UserUseCase, scope=request)`. A wrong implementation is a pyrefly error.
 - Explicit scopes: `singleton` (engine, stateless services), `request` (session, repositories, transaction context, use cases). Request-scope state lives in a ContextVar; entered per request by the middleware in `main.py`; disposes objects on exit (LIFO, `aclose()` preferred, async `close()` awaited).
 - `@inject` required on every implementation whose `__init__` takes dependencies. Construction logic lives in `@provider` methods on `AppModule`.
 - Routes/guards: `Annotated[UserUseCase, Injected(UserUseCase)]` — a thin Depends over `app.state.injector`.

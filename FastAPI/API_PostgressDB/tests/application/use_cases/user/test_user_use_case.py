@@ -1,4 +1,4 @@
-from collections.abc import AsyncIterator
+from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 from datetime import datetime
 from unittest.mock import AsyncMock, MagicMock
@@ -31,7 +31,7 @@ class FakeTransactionContext:
         self.is_rolled_back = False
 
     @asynccontextmanager
-    async def begin(self) -> AsyncIterator[FakeTransaction]:
+    async def begin(self) -> AsyncGenerator[FakeTransaction]:
         try:
             yield self.transaction
         finally:

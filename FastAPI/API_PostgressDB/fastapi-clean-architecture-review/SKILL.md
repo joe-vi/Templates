@@ -1,6 +1,6 @@
 ---
 name: fastapi-clean-architecture-review
-description: Audit an existing FastAPI project for Clean Architecture + DDD compliance — verifies unidirectional layer dependencies, rich (non-anemic) domain entities, ports-as-Protocol boundaries with single-source documentation, repository pattern correctness, typed declarative DI wiring (injector + TypedBinder, explicit scopes, mypy-checked binding conformance), naming conventions, DB constraint rules, and documentation standards. Reports every violation with file and line number.
+description: Audit an existing FastAPI project for Clean Architecture + DDD compliance — verifies unidirectional layer dependencies, rich (non-anemic) domain entities, ports-as-Protocol boundaries with single-source documentation, repository pattern correctness, typed declarative DI wiring (injector + TypedBinder, explicit scopes, pyrefly-checked binding conformance), naming conventions, DB constraint rules, and documentation standards. Reports every violation with file and line number.
 argument-hint: "[--fix]"
 disable-model-invocation: true
 metadata:

@@ -1,6 +1,6 @@
 ---
 name: fastapi-clean-architecture-mode
-description: Activate Clean Architecture + DDD rules for the current FastAPI session — enforces unidirectional layer dependencies, rich (non-anemic) domain entities, ports as typing.Protocol, single-source documentation on ports, the repository pattern with result enums, typed declarative dependency injection (injector + TypedBinder: one binding per line with explicit scopes, conformance checked by mypy), and all naming conventions on every file written or edited until the session ends.
+description: Activate Clean Architecture + DDD rules for the current FastAPI session — enforces unidirectional layer dependencies, rich (non-anemic) domain entities, ports as typing.Protocol, single-source documentation on ports, the repository pattern with result enums, typed declarative dependency injection (injector + TypedBinder: one binding per line with explicit scopes, conformance checked by pyrefly), and all naming conventions on every file written or edited until the session ends.
 disable-model-invocation: true
 metadata:
   version: "3.0.0"

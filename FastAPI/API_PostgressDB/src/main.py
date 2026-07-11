@@ -1,5 +1,5 @@
 import uuid
-from collections.abc import AsyncIterator, Awaitable, Callable
+from collections.abc import AsyncGenerator, Awaitable, Callable
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request, Response
@@ -16,7 +16,7 @@ injector = Injector([AppModule()])
 
 
 @asynccontextmanager
-async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
     """Manage the application startup and shutdown lifecycle.
 
     On shutdown, disposes the database engine (singletons are not covered by

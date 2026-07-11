@@ -26,7 +26,7 @@ dev = [
     "pytest-asyncio>=0.24.0",
     "httpx>=0.28.0",
     "ruff>=0.8.0",
-    "mypy>=1.13.0",
+    "pyrefly>=1.1.0",
     "aiosqlite>=0.20.0",
     "types-passlib>=1.7.7",
 ]
@@ -44,7 +44,7 @@ dev = [
     "pytest-asyncio>=0.24.0",
     "httpx>=0.28.0",
     "ruff>=0.8.0",
-    "mypy>=1.13.0",
+    "pyrefly>=1.1.0",
     "aiosqlite>=0.20.0",
     "types-passlib>=1.7.7",
 ]
@@ -63,27 +63,13 @@ split-on-trailing-comma = false
 [tool.ruff.format]
 skip-magic-trailing-comma = true
 
-[tool.mypy]
-python_version = "3.13"
-warn_return_any = true
-warn_unused_configs = true
-disallow_untyped_defs = true
-plugins = ["pydantic.mypy"]
-
-[[tool.mypy.overrides]]
-module = "asyncpg.*"
-ignore_missing_imports = true
-
-# TypedBinder's conformance check requires passing Protocol classes where
-# type[P] is expected; mypy's type-abstract rule rejects that even for
-# correct bindings. Disable only that code, only in the composition modules —
-# the arg-type conformance check (wrong implementation for a port) stays on.
-[[tool.mypy.overrides]]
-module = [
-    "src.api.dependencies.providers",
-    "src.api.dependencies.jwt_dependency",
-]
-disable_error_code = ["type-abstract"]
+[tool.pyrefly]
+python-version = "3.13"
+project-includes = ["src/**", "tests/**", "test_api.py"]
+# "legacy" is pyrefly's own recommended preset for codebases migrating from
+# mypy: it matches mypy's practical strictness without adopting pyrefly-only
+# checks (e.g. mandatory @override) that would be a separate, bigger change.
+preset = "legacy"
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"

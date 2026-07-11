@@ -22,7 +22,7 @@ Invoke-WebRequest -Uri "https://github.com/joe-vi/Templates/archive/refs/heads/m
 - **Domain-Driven Design**: Rich aggregate roots that enforce their own invariants and expose intention-revealing behaviour (`user.activate()`, `user.is_active`) — never an anemic domain
 - **Async Database**: Asynchronous PostgreSQL operations using SQLAlchemy 2.0+ and asyncpg
 - **JWT Authentication**: Access and refresh token pair with configurable expiry
-- **Dependency Injection**: `injector` with an in-house typed facade — one line binds implementation, port, and scope (`bind_typed(UserRepository).to(SqlAlchemyUserRepository, scope=request)`), constructors auto-wired via `@inject`, and a mismatched implementation is a mypy error at the binding line
+- **Dependency Injection**: `injector` with an in-house typed facade — one line binds implementation, port, and scope (`bind_typed(UserRepository).to(SqlAlchemyUserRepository, scope=request)`), constructors auto-wired via `@inject`, and a mismatched implementation is a pyrefly error at the binding line
 - **Request-Scoped Sessions**: A single `AsyncSession` per request (a request-scoped provider, disposed automatically on request end), shared by every adapter in that request
 - **Unit of Work**: Mutating use cases own the transaction boundary via the `TransactionContext` port — commit only on all-success, rollback-unless-committed; operations spanning several repositories inside one `begin()` block are atomic
 - **Ports & Adapters**: Collaborators are defined as `typing.Protocol` ports and implemented by mechanism-qualified adapters (`SqlAlchemyUserRepository`, `BcryptPasswordHasher`, `JwtTokenService`, `JsonLogger`) that subclass their port and inherit its docstrings, so every contract is documented exactly once and IDE hover shows it everywhere
@@ -66,7 +66,7 @@ Invoke-WebRequest -Uri "https://github.com/joe-vi/Templates/archive/refs/heads/m
 │   ├── infrastructure/                     # Adapters (imports Domain + Application)
 │   │   ├── di/
 │   │   │   ├── request_scope.py            # RequestScope + disposal context managers
-│   │   │   └── typed_binder.py             # TypedBinder (mypy-checked bindings)
+│   │   │   └── typed_binder.py             # TypedBinder (pyrefly-checked bindings)
 │   │   ├── auth/
 │   │   │   ├── bcrypt_password_hasher.py   # bcrypt via passlib
 │   │   │   ├── jwt_token_service.py        # PyJWT access + refresh tokens
@@ -143,7 +143,7 @@ Invoke-WebRequest -Uri "https://github.com/joe-vi/Templates/archive/refs/heads/m
 - **Rule**: Imports Domain only
 
 ### 3. Infrastructure Layer (`src/infrastructure/`)
-- **DI machinery** (`di/`): the ContextVar-backed request scope and the mypy-checked `TypedBinder` — framework plumbing, FastAPI-agnostic
+- **DI machinery** (`di/`): the ContextVar-backed request scope and the pyrefly-checked `TypedBinder` — framework plumbing, FastAPI-agnostic
 - **Database**: `session.py` builds the engine + `async_sessionmaker`; the session is provided per request (no custom factory wrapper, no shared `ContextVar`)
 - **Repository Adapters**: `SqlAlchemyUserRepository` subclasses the `UserRepository` port and takes an `AsyncSession`; mutations flush and map DB errors to result enums — they never commit; the use case owns the boundary via `SqlAlchemyTransactionContext` (commit on all-success, rollback otherwise)
 - **Auth/Logging Adapters**: `BcryptPasswordHasher`, `JwtTokenService`, `JsonLogger`, `RequestUserContext` (request-scoped caller identity, populated once by the JWT guard)
@@ -269,7 +269,7 @@ uv run ruff check src/ tests/ --fix && uv run ruff format src/ tests/
 
 ### Type Checking
 ```bash
-uv run mypy src/
+uv run pyrefly check
 ```
 
 ### Database — Docker
@@ -296,7 +296,7 @@ uv run alembic downgrade -1                              # Roll back one step
 2. **Application**: Add DTOs, converter functions, and a concrete use case in `src/application/use_cases/<name>/` — inject `TransactionContext`, wrap mutations in `begin()`, commit only on success (several repository calls in one block are atomic)
 3. **Infrastructure**: Add the ORM model in `src/infrastructure/database/models/` and a `sqlalchemy_<name>_repository.py` adapter (subclasses the port, takes an `AsyncSession`) in `src/infrastructure/repositories/<name>/`
 4. **API**: Add routes in `src/api/routers/<name>/` that depend on the use case and accept/return the DTOs directly (`response_model=<Entity>DTO`) — no per-entity schemas or converters
-5. **Bindings**: Add one line per binding to `AppModule.configure()` in `src/api/dependencies/providers.py` (constructors auto-wired via `@inject`; a wrong implementation is a mypy error):
+5. **Bindings**: Add one line per binding to `AppModule.configure()` in `src/api/dependencies/providers.py` (constructors auto-wired via `@inject`; a wrong implementation is a pyrefly error):
    ```python
    typed_binder.bind_typed(OrderRepository).to(SqlAlchemyOrderRepository, scope=request)
    typed_binder.bind_self_typed(OrderUseCase, scope=request)

@@ -1,6 +1,6 @@
 ---
 name: fastapi-clean-architecture-template
-description: Scaffold a new project following Clean Architecture + DDD principles on FastAPI — strict 4-layer structure (Domain, Application, Infrastructure, API) with unidirectional dependencies, rich domain entities with invariants and behaviour, ports as typing.Protocol, the repository pattern, result-enum error handling, and typed declarative dependency injection (injector + TypedBinder: one binding per line with explicit scopes, conformance checked by mypy). Supports PostgreSQL, MongoDB, SQLite; JWT, OAuth2, API key auth; optional Redis cache.
+description: Scaffold a new project following Clean Architecture + DDD principles on FastAPI — strict 4-layer structure (Domain, Application, Infrastructure, API) with unidirectional dependencies, rich domain entities with invariants and behaviour, ports as typing.Protocol, the repository pattern, result-enum error handling, and typed declarative dependency injection (injector + TypedBinder: one binding per line with explicit scopes, conformance checked by pyrefly). Supports PostgreSQL, MongoDB, SQLite; JWT, OAuth2, API key auth; optional Redis cache.
 argument-hint: "<project-name> [--db postgres|mongodb|sqlite] [--auth jwt|oauth2|apikey] [--cache none|redis] [--no-docker]"
 disable-model-invocation: true
 metadata:
@@ -184,9 +184,9 @@ Stack additions:
 | oauth2 | `httpx>=0.27`, `PyJWT>=2.10` |
 | redis | `redis[asyncio]>=5.0` |
 
-Dev: `pytest>=8.0`, `pytest-asyncio>=0.23`, `httpx>=0.27`, `ruff>=0.4`.
+Dev: `pytest>=8.0`, `pytest-asyncio>=0.23`, `httpx>=0.27`, `ruff>=0.4`, `pyrefly>=1.1.0`.
 
-`[tool.ruff]` with `line-length = 140`, `[tool.ruff.format]` with `skip-magic-trailing-comma = true`, `[tool.ruff.lint.isort]` with `split-on-trailing-comma = false`. `[tool.pytest.ini_options]` with `asyncio_mode = "auto"`.
+`[tool.ruff]` with `line-length = 140`, `[tool.ruff.format]` with `skip-magic-trailing-comma = true`, `[tool.ruff.lint.isort]` with `split-on-trailing-comma = false`. `[tool.pyrefly]` with `python-version` matching the target Python, `project-includes = ["src/**", "tests/**"]`, `preset = "legacy"` (pyrefly's own recommended preset for mypy-equivalent strictness — no plugin needed for Pydantic models, and no suppression required for passing Protocol classes as `type[P]` to `TypedBinder`). `[tool.pytest.ini_options]` with `asyncio_mode = "auto"`.
 
 ### Step 11 — Copy architecture docs
 
@@ -205,9 +205,9 @@ Only variables for the resolved stack with placeholder values. No real secrets.
 ### Step 14 — Validate
 
 ```bash
-uv run ruff check src/ --fix && uv run ruff format src/
+uv run ruff check src/ --fix && uv run ruff format src/ && uv run pyrefly check
 ```
 
 ### Step 15 — Summary
 
-Report: project name and path, resolved stack, file count by layer, ruff result, and next steps (install deps, copy `.env`, run migrations if applicable, start with `uvicorn src.main:app --reload`).
+Report: project name and path, resolved stack, file count by layer, ruff and pyrefly results, and next steps (install deps, copy `.env`, run migrations if applicable, start with `uvicorn src.main:app --reload`).
