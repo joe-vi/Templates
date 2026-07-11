@@ -6,8 +6,13 @@ from src.application.services.password_hasher import PasswordHasher
 from src.application.services.token_service import TokenService
 from src.application.services.transaction_context import TransactionContext
 from src.application.services.user_context import UserContext
-from src.application.use_cases.auth.auth_use_case import AuthUseCase
-from src.application.use_cases.user.user_use_case import UserUseCase
+from src.application.use_cases.auth.login_use_case import LoginUseCase
+from src.application.use_cases.auth.refresh_token_use_case import RefreshTokenUseCase
+from src.application.use_cases.user.create_user_use_case import CreateUserUseCase
+from src.application.use_cases.user.delete_user_use_case import DeleteUserUseCase
+from src.application.use_cases.user.get_all_users_use_case import GetAllUsersUseCase
+from src.application.use_cases.user.get_user_use_case import GetUserUseCase
+from src.application.use_cases.user.update_user_role_use_case import UpdateUserRoleUseCase
 from src.config.settings import Settings, get_settings
 from src.domain.repositories.user.user_repository import UserRepository
 from src.infrastructure.auth.bcrypt_password_hasher import BcryptPasswordHasher
@@ -52,8 +57,13 @@ class AppModule(Module):
         typed_binder.bind_typed(UserContext).to(RequestUserContext, scope=request)
         typed_binder.bind_typed(UserRepository).to(SqlAlchemyUserRepository, scope=request)
         typed_binder.bind_typed(TransactionContext).to(SqlAlchemyTransactionContext, scope=request)
-        typed_binder.bind_self_typed(UserUseCase, scope=request)
-        typed_binder.bind_self_typed(AuthUseCase, scope=request)
+        typed_binder.bind_self_typed(CreateUserUseCase, scope=request)
+        typed_binder.bind_self_typed(GetUserUseCase, scope=request)
+        typed_binder.bind_self_typed(GetAllUsersUseCase, scope=request)
+        typed_binder.bind_self_typed(UpdateUserRoleUseCase, scope=request)
+        typed_binder.bind_self_typed(DeleteUserUseCase, scope=request)
+        typed_binder.bind_self_typed(LoginUseCase, scope=request)
+        typed_binder.bind_self_typed(RefreshTokenUseCase, scope=request)
 
     @singleton
     @provider
