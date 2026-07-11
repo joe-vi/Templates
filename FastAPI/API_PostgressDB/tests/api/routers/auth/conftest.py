@@ -6,7 +6,7 @@ from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
 from injector import Binder, Injector, Module
 
-from src.api.routers import auth
+from src.api.routers.auth.router import router as auth_router
 from src.application.use_cases.auth import auth_dto
 from src.application.use_cases.auth.login_use_case import LoginUseCase
 from src.application.use_cases.auth.refresh_token_use_case import RefreshTokenUseCase
@@ -37,7 +37,7 @@ def test_app(mock_login_use_case: AsyncMock, mock_refresh_token_use_case: AsyncM
             binder.bind(RefreshTokenUseCase, to=mock_refresh_token_use_case)
 
     app = FastAPI()
-    app.include_router(auth.router)
+    app.include_router(auth_router)
     app.state.injector = Injector([TestModule()])
     return app
 

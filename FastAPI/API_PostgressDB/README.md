@@ -93,16 +93,18 @@ Invoke-WebRequest -Uri "https://github.com/joe-vi/Templates/archive/refs/heads/m
 │   │   │   ├── injected.py                 # Injected() route-side accessor
 │   │   │   ├── providers.py                # composition root: AppModule (ports → adapters, scopes)
 │   │   │   └── jwt_dependency.py           # JWT guard (get_current_user)
-│   │   ├── routers/                        # One route module per operation; each entity's __init__.py
+│   │   ├── routers/                        # One route module per operation; each entity's router.py
 │   │   │   ├── auth/                       # aggregates them (prefix, tags, JWT guard declared once)
 │   │   │   │   ├── login_route.py          # Routes take/return DTOs directly
-│   │   │   │   └── refresh_token_route.py
+│   │   │   │   ├── refresh_token_route.py
+│   │   │   │   └── router.py               # aggregated APIRouter; __init__.py stays empty
 │   │   │   └── user/
 │   │   │       ├── create_user_route.py
 │   │   │       ├── get_user_route.py
 │   │   │       ├── get_all_users_route.py
 │   │   │       ├── update_user_role_route.py
-│   │   │       └── delete_user_route.py
+│   │   │       ├── delete_user_route.py
+│   │   │       └── router.py               # aggregated APIRouter; __init__.py stays empty
 │   │   ├── schemas/
 │   │   │   └── operation_schema.py         # Shared response envelope
 │   │   └── result_status_maps.py           # Operation result → HTTP status + message maps
@@ -174,7 +176,7 @@ Invoke-WebRequest -Uri "https://github.com/joe-vi/Templates/archive/refs/heads/m
 - **Rule**: Adapters explicitly subclass their ports — the contract (and its docstrings) is defined once on the port and inherited everywhere
 
 ### 4. API Layer (`src/api/`)
-- **Routes**: One FastAPI route module per operation, each depending on its use case via `Annotated[CreateUserUseCase, Injected(CreateUserUseCase)]` and **returning response models** (FastAPI serialises them to camelCase); the entity's `__init__.py` aggregates the operation routers with the prefix, tags, and JWT guard declared once
+- **Routes**: One FastAPI route module per operation, each depending on its use case via `Annotated[CreateUserUseCase, Injected(CreateUserUseCase)]` and **returning response models** (FastAPI serialises them to camelCase); the entity's `router.py` aggregates the operation routers with the prefix, tags, and JWT guard declared once (`__init__.py` stays empty)
 - **Dependencies**: `providers.py` is the composition root (ports → adapters); `jwt_dependency.py` is the JWT guard
 - **Bodies**: routes accept and return application DTOs directly — `DTOBase` gives camelCase JSON on the wire (and in OpenAPI) with snake_case Python attributes; only the generic operation envelopes live in `api/schemas/`
 - **Rule**: Wires adapters to ports in `dependencies/`; routes never call repositories directly
@@ -319,7 +321,7 @@ uv run alembic downgrade -1                              # Roll back one step
 1. **Domain**: Add an aggregate root with invariants + behaviour in `src/domain/entities/<name>/` and a repository **Protocol** port in `src/domain/repositories/<name>/<name>_repository.py` (clean name, e.g. `OrderRepository`)
 2. **Application**: Add DTOs, converter functions, and one concrete use case class per operation (single `execute` method) in `src/application/use_cases/<name>/` — mutating use cases inject `TransactionContext`, wrap the mutation in `begin()`, commit only on success (several repository calls in one block are atomic)
 3. **Infrastructure**: Add the ORM model in `src/infrastructure/database/models/` and a `sqlalchemy_<name>_repository.py` adapter (subclasses the port, takes an `AsyncSession`) in `src/infrastructure/repositories/<name>/`
-4. **API**: Add one route module per operation in `src/api/routers/<name>/`, aggregated into a single router in the package `__init__.py` (prefix, tags, guard declared once); routes depend on their use case and accept/return the DTOs directly (`response_model=<Entity>DTO`) — no per-entity schemas or converters
+4. **API**: Add one route module per operation in `src/api/routers/<name>/`, aggregated into a single router in `router.py` (prefix, tags, guard declared once); routes depend on their use case and accept/return the DTOs directly (`response_model=<Entity>DTO`) — no per-entity schemas or converters
 5. **Bindings**: Add one line per binding to `AppModule.configure()` in `src/api/dependencies/providers.py` (constructors auto-wired via `@inject`; a wrong implementation is a pyrefly error):
    ```python
    typed_binder.bind_typed(OrderRepository).to(SqlAlchemyOrderRepository, scope=request)

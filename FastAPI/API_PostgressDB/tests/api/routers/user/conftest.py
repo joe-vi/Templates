@@ -8,7 +8,7 @@ from httpx import ASGITransport, AsyncClient
 from injector import Binder, Injector, Module
 
 from src.api.dependencies import jwt_dependency
-from src.api.routers import user
+from src.api.routers.user.router import router as user_router
 from src.application.use_cases.auth import auth_dto
 from src.application.use_cases.user import user_dto as user_dto_module
 from src.application.use_cases.user.create_user_use_case import CreateUserUseCase
@@ -82,7 +82,7 @@ def test_app(
             binder.bind(DeleteUserUseCase, to=mock_delete_user_use_case)
 
     app = FastAPI()
-    app.include_router(user.router)
+    app.include_router(user_router)
     app.state.injector = Injector([TestModule()])
     app.dependency_overrides[jwt_dependency.get_current_user] = _mock_current_user
     return app

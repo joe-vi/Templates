@@ -7,7 +7,8 @@ from injector import Injector
 from sqlalchemy.ext.asyncio import AsyncEngine
 
 from src.api.dependencies.providers import AppModule
-from src.api.routers import auth, user
+from src.api.routers.auth.router import router as auth_router
+from src.api.routers.user.router import router as user_router
 from src.infrastructure.di.request_scope import async_request_scope
 from src.infrastructure.logging import log_context
 
@@ -44,8 +45,8 @@ async def request_context(request: Request, call_next: Callable[[Request], Await
         log_context.request_id_var.reset(request_id_token)
 
 
-app.include_router(auth.router)
-app.include_router(user.router)
+app.include_router(auth_router)
+app.include_router(user_router)
 
 
 @app.get("/")
