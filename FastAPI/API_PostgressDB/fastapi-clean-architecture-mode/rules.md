@@ -33,7 +33,7 @@ resolution.
 
 - Ports are `typing.Protocol`s with the clean name — `UserRepository`, `PasswordHasher`, `TokenService`, `Logger`, `UserContext`. No `Base` suffix.
 - Adapters are mechanism-qualified — `SqlAlchemyUserRepository`, `BcryptPasswordHasher`, `JwtTokenService`, `JsonLogger`, `RequestUserContext`.
-- Use cases are plain concrete classes (`UserUseCase`, `AuthUseCase`) — no separate interface; routes and tests depend on the concrete class.
+- Use cases are one plain concrete class per operation in its own file, each with a single `execute` method (`CreateUserUseCase`, `GetUserUseCase`, `LoginUseCase`, ...) — no separate interface; each declares only the ports its operation needs, and routes and tests depend on the concrete class.
 - DTOs: Pydantic models inheriting `DTOBase` (frozen, camelCase aliases on the wire), `DTO` suffix; validation lives on the DTOs; return `list[UserDTO]` directly, never a wrapper DTO.
 - No per-entity API schemas or API converters: routes accept/return DTOs directly; only the generic operation envelopes remain in `api/schemas/` (also `DTOBase`).
 - Converters: module-level functions, never classes of static methods.
@@ -57,10 +57,10 @@ resolution.
 
 ## Dependency injection (injector + TypedBinder)
 
-- Wire everything in `AppModule.configure()` via `TypedBinder` — one line per binding: `typed_binder.bind_typed(UserRepository).to(SqlAlchemyUserRepository, scope=request)`, concrete classes (use cases) use `bind_self_typed(UserUseCase, scope=request)`. A wrong implementation is a pyrefly error.
+- Wire everything in `AppModule.configure()` via `TypedBinder` — one line per binding: `typed_binder.bind_typed(UserRepository).to(SqlAlchemyUserRepository, scope=request)`, concrete classes (use cases) get one `bind_self_typed(CreateUserUseCase, scope=request)` line per operation. A wrong implementation is a pyrefly error.
 - Explicit scopes: `singleton` (engine, stateless services), `request` (session, repositories, transaction context, use cases). Request-scope state lives in a ContextVar; entered per request by the middleware in `main.py`; disposes objects on exit (LIFO, `aclose()` preferred, async `close()` awaited).
 - `@inject` required on every implementation whose `__init__` takes dependencies. Construction logic lives in `@provider` methods on `AppModule`.
-- Routes/guards: `Annotated[UserUseCase, Injected(UserUseCase)]` — a thin Depends over `app.state.injector`.
+- Routes/guards: `Annotated[CreateUserUseCase, Injected(CreateUserUseCase)]` — a thin Depends over `app.state.injector`.
 - No graph-completeness validation: a missing binding fails at runtime on first resolution.
 - Tests: bind mock instances in a `TestModule`, set `app.state.injector = Injector([TestModule()])`; `app.dependency_overrides` for plain guards.
 

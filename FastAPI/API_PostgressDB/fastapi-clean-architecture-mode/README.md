@@ -47,11 +47,11 @@ Domain has zero external dependencies. Every other layer may only import from th
 
 **Dependency injection (injector + TypedBinder)**
 - `AppModule` declares every binding with an explicit scope (`singleton` / `request`); implementations with constructor dependencies carry `@inject`
-- Routes and guards resolve via `Annotated[UserUseCase, Injected(UserUseCase)]`
+- Routes and guards resolve via `Annotated[CreateUserUseCase, Injected(CreateUserUseCase)]`
 - The request scope disposes its objects on request end (LIFO, `aclose()` preferred); tests bind mock instances in a `TestModule` on `app.state.injector`
 
 **Naming & documentation discipline**
-- Ports are `Protocol`s with clean names (`UserRepository`); adapters are mechanism-qualified (`SqlAlchemyUserRepository`); use cases are plain concrete classes (`UserUseCase`)
+- Ports are `Protocol`s with clean names (`UserRepository`); adapters are mechanism-qualified (`SqlAlchemyUserRepository`); use cases are one plain concrete class per operation with a single `execute` method (`CreateUserUseCase`)
 - No module docstrings or top-of-file comments; contract docstrings live on the port only
 - DTOs: frozen Pydantic models inheriting `DTOBase` (camelCase on the wire), `DTO` suffix; `list[UserDTO]` returned directly, no wrapper DTOs
 - Converters are module functions (entity ↔ DTO only); DTOs inherit `DTOBase` and double as the API request/response bodies — no per-entity schemas

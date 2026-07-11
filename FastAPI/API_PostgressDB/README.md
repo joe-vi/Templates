@@ -26,7 +26,7 @@ Invoke-WebRequest -Uri "https://github.com/joe-vi/Templates/archive/refs/heads/m
 - **Request-Scoped Sessions**: A single `AsyncSession` per request (a request-scoped provider, disposed automatically on request end), shared by every adapter in that request
 - **Unit of Work**: Mutating use cases own the transaction boundary via the `TransactionContext` port — commit only on all-success, rollback-unless-committed; operations spanning several repositories inside one `begin()` block are atomic
 - **Ports & Adapters**: Collaborators are defined as `typing.Protocol` ports and implemented by mechanism-qualified adapters (`SqlAlchemyUserRepository`, `BcryptPasswordHasher`, `JwtTokenService`, `JsonLogger`) that subclass their port and inherit its docstrings, so every contract is documented exactly once and IDE hover shows it everywhere
-- **Fully Testable API Layer**: Route tests bind an `AsyncMock(spec=UserUseCase)` in a test injector module — no database or adapters involved
+- **Fully Testable API Layer**: Route tests bind an `AsyncMock(spec=CreateUserUseCase)` in a test injector module — no database or adapters involved
 - **Role-Based Access**: User roles (`admin`, `user`) and statuses (`active`, `inactive`) stored as lowercase enums
 - **Package Management**: Modern Python package management with `uv`
 - **Database Migrations**: Alembic for schema versioning; bootstrap admin user seeded via migration
@@ -55,14 +55,19 @@ Invoke-WebRequest -Uri "https://github.com/joe-vi/Templates/archive/refs/heads/m
 │   │   │   ├── token_service.py             # TokenService
 │   │   │   ├── transaction_context.py       # TransactionContext (unit of work)
 │   │   │   └── user_context.py              # UserContext (caller identity)
-│   │   └── use_cases/
+│   │   └── use_cases/                      # One concrete use case class per operation, single execute()
 │   │       ├── auth/
 │   │       │   ├── auth_dto.py
-│   │       │   └── auth_use_case.py        # AuthUseCase (concrete)
+│   │       │   ├── login_use_case.py       # LoginUseCase
+│   │       │   └── refresh_token_use_case.py   # RefreshTokenUseCase
 │   │       └── user/
 │   │           ├── user_converter.py       # Entity ↔ DTO conversion (module functions)
 │   │           ├── user_dto.py
-│   │           └── user_use_case.py        # UserUseCase (concrete)
+│   │           ├── create_user_use_case.py # CreateUserUseCase
+│   │           ├── get_user_use_case.py    # GetUserUseCase
+│   │           ├── get_all_users_use_case.py   # GetAllUsersUseCase
+│   │           ├── update_user_role_use_case.py    # UpdateUserRoleUseCase
+│   │           └── delete_user_use_case.py # DeleteUserUseCase
 │   ├── infrastructure/                     # Adapters (imports Domain + Application)
 │   │   ├── di/
 │   │   │   ├── request_scope.py            # RequestScope + disposal context managers
@@ -88,9 +93,16 @@ Invoke-WebRequest -Uri "https://github.com/joe-vi/Templates/archive/refs/heads/m
 │   │   │   ├── injected.py                 # Injected() route-side accessor
 │   │   │   ├── providers.py                # composition root: AppModule (ports → adapters, scopes)
 │   │   │   └── jwt_dependency.py           # JWT guard (get_current_user)
-│   │   ├── routers/
-│   │   │   ├── auth/auth_routes.py         # Routes take/return DTOs directly
-│   │   │   └── user/user_routes.py
+│   │   ├── routers/                        # One route module per operation; each entity's __init__.py
+│   │   │   ├── auth/                       # aggregates them (prefix, tags, JWT guard declared once)
+│   │   │   │   ├── login_route.py          # Routes take/return DTOs directly
+│   │   │   │   └── refresh_token_route.py
+│   │   │   └── user/
+│   │   │       ├── create_user_route.py
+│   │   │       ├── get_user_route.py
+│   │   │       ├── get_all_users_route.py
+│   │   │       ├── update_user_role_route.py
+│   │   │       └── delete_user_route.py
 │   │   ├── schemas/
 │   │   │   └── operation_schema.py         # Shared response envelope
 │   │   └── result_status_maps.py           # Operation result → HTTP status + message maps
@@ -102,15 +114,27 @@ Invoke-WebRequest -Uri "https://github.com/joe-vi/Templates/archive/refs/heads/m
 │   │           └── test_user.py            # Pure entity tests: invariants + behaviour (no mocks)
 │   ├── api/
 │   │   └── routers/
-│   │       ├── auth/
-│   │       │   └── test_auth_routes.py     # Route tests via a mocked AuthUseCase
+│   │       ├── auth/                       # One test module per route; conftest.py binds the mocked
+│   │       │   ├── conftest.py             # use cases in a test injector module
+│   │       │   ├── test_login_route.py
+│   │       │   └── test_refresh_token_route.py
 │   │       └── user/
-│   │           └── test_user_routes.py     # Route tests via a mocked UserUseCase
+│   │           ├── conftest.py
+│   │           ├── test_create_user_route.py
+│   │           ├── test_get_user_route.py
+│   │           ├── test_get_all_users_route.py
+│   │           ├── test_update_user_role_route.py
+│   │           └── test_delete_user_route.py
 │   ├── application/
 │   │   └── use_cases/
-│   │       └── user/
+│   │       └── user/                       # One test module per use case, via AsyncMock ports
+│   │           ├── conftest.py             # Shared fakes (transaction context) + mock fixtures
 │   │           ├── test_user_converter.py
-│   │           └── test_user_use_case.py   # Use case tests via AsyncMock ports
+│   │           ├── test_create_user_use_case.py
+│   │           ├── test_get_user_use_case.py
+│   │           ├── test_get_all_users_use_case.py
+│   │           ├── test_update_user_role_use_case.py
+│   │           └── test_delete_user_use_case.py
 │   └── infrastructure/
 │       ├── auth/
 │       │   └── test_request_user_context.py  # Identity holder semantics + scope isolation
@@ -136,7 +160,7 @@ Invoke-WebRequest -Uri "https://github.com/joe-vi/Templates/archive/refs/heads/m
 - **Rule**: No dependencies on any other layer; business rules for one aggregate live on the entity
 
 ### 2. Application Layer (`src/application/`)
-- **Use Cases**: Plain concrete classes holding the application logic (`UserUseCase`, `AuthUseCase`) — no separate interface; routes and tests depend on the class directly
+- **Use Cases**: One plain concrete class per operation, each with a single `execute` method (`CreateUserUseCase`, `GetUserUseCase`, `LoginUseCase`, ...) — no separate interface; each declares only the ports its operation needs, and routes and tests depend on the class directly
 - **DTOs**: Frozen Pydantic models inheriting `DTOBase` with `DTO` suffix — they double as the API request/response bodies, so validation lives on them
 - **Service Ports**: `PasswordHasher`, `TokenService`, `Logger`, `TransactionContext`, `UserContext` (Protocols)
 - **Converters**: Module-level functions for entity ↔ DTO mapping
@@ -150,7 +174,7 @@ Invoke-WebRequest -Uri "https://github.com/joe-vi/Templates/archive/refs/heads/m
 - **Rule**: Adapters explicitly subclass their ports — the contract (and its docstrings) is defined once on the port and inherited everywhere
 
 ### 4. API Layer (`src/api/`)
-- **Routes**: FastAPI endpoints that depend on the use case via `Annotated[UserUseCase, Injected(UserUseCase)]` and **return response models** (FastAPI serialises them to camelCase)
+- **Routes**: One FastAPI route module per operation, each depending on its use case via `Annotated[CreateUserUseCase, Injected(CreateUserUseCase)]` and **returning response models** (FastAPI serialises them to camelCase); the entity's `__init__.py` aggregates the operation routers with the prefix, tags, and JWT guard declared once
 - **Dependencies**: `providers.py` is the composition root (ports → adapters); `jwt_dependency.py` is the JWT guard
 - **Bodies**: routes accept and return application DTOs directly — `DTOBase` gives camelCase JSON on the wire (and in OpenAPI) with snake_case Python attributes; only the generic operation envelopes live in `api/schemas/`
 - **Rule**: Wires adapters to ports in `dependencies/`; routes never call repositories directly
@@ -293,13 +317,13 @@ uv run alembic downgrade -1                              # Roll back one step
 ## Adding New Features
 
 1. **Domain**: Add an aggregate root with invariants + behaviour in `src/domain/entities/<name>/` and a repository **Protocol** port in `src/domain/repositories/<name>/<name>_repository.py` (clean name, e.g. `OrderRepository`)
-2. **Application**: Add DTOs, converter functions, and a concrete use case in `src/application/use_cases/<name>/` — inject `TransactionContext`, wrap mutations in `begin()`, commit only on success (several repository calls in one block are atomic)
+2. **Application**: Add DTOs, converter functions, and one concrete use case class per operation (single `execute` method) in `src/application/use_cases/<name>/` — mutating use cases inject `TransactionContext`, wrap the mutation in `begin()`, commit only on success (several repository calls in one block are atomic)
 3. **Infrastructure**: Add the ORM model in `src/infrastructure/database/models/` and a `sqlalchemy_<name>_repository.py` adapter (subclasses the port, takes an `AsyncSession`) in `src/infrastructure/repositories/<name>/`
-4. **API**: Add routes in `src/api/routers/<name>/` that depend on the use case and accept/return the DTOs directly (`response_model=<Entity>DTO`) — no per-entity schemas or converters
+4. **API**: Add one route module per operation in `src/api/routers/<name>/`, aggregated into a single router in the package `__init__.py` (prefix, tags, guard declared once); routes depend on their use case and accept/return the DTOs directly (`response_model=<Entity>DTO`) — no per-entity schemas or converters
 5. **Bindings**: Add one line per binding to `AppModule.configure()` in `src/api/dependencies/providers.py` (constructors auto-wired via `@inject`; a wrong implementation is a pyrefly error):
    ```python
    typed_binder.bind_typed(OrderRepository).to(SqlAlchemyOrderRepository, scope=request)
-   typed_binder.bind_self_typed(OrderUseCase, scope=request)
+   typed_binder.bind_self_typed(CreateOrderUseCase, scope=request)  # one line per operation use case
    ```
 6. **Main**: Include the new router in `src/main.py`
 7. **Migration**: Generate and apply an Alembic migration for any new DB models

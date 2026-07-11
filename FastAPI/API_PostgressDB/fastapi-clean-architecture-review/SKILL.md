@@ -42,7 +42,7 @@ Read all files in `src/application/`.
 
 Check:
 - **Import direction**: no imports from `src/infrastructure/` or `src/api/`
-- **Use cases**: plain concrete classes (`UserUseCase`) — no separate ABC or Protocol interface
+- **Use cases**: one plain concrete class per operation in its own file, each with a single `execute` method (`CreateUserUseCase`) — no separate ABC or Protocol interface; each declares only the ports its operation needs
 - **Naming**: service ports are `Protocol`s with clean names (`PasswordHasher`, `TokenService`, `Logger`); DTOs are frozen Pydantic models inheriting `DTOBase` with `DTO` suffix; no wrapper collection DTOs; return types use `list[UserDTO]` directly
 - **Converters**: module-level functions, not classes of static methods
 - **Repository pattern**: use cases contain no exception handling for mutations — they forward repository results as-is; no direct session or DB access
@@ -79,7 +79,7 @@ Check:
 - **DI**:
   - Composition root is `AppModule.configure()` in `src/api/dependencies/providers.py` — one `bind_typed(Port).to(Impl, scope=...)` line per binding via `TypedBinder`; flag raw `binder.bind(...)` calls for port bindings (they skip conformance checking) and any `fastapi-injector` usage
   - Every implementation whose `__init__` takes dependencies carries `@inject`; flag missing ones (runtime `TypeError`)
-  - Routes depend on the use case via `Annotated[UserUseCase, Injected(UserUseCase)]`
+  - Each route module covers one operation and depends on its use case via `Annotated[CreateUserUseCase, Injected(CreateUserUseCase)]`; the entity's router package `__init__.py` aggregates them (prefix, tags, guard declared once)
   - Guard functions live in `src/api/dependencies/`, not inside route files; `Depends(get_current_user)` declared on the `APIRouter`, not scattered in signatures
 - **Responses**: routes return the response model (FastAPI serialises it to camelCase). Flag any `JSONResponse(model.model_dump())` — it bypasses `response_model` and the alias generator. Dynamic status set via `response.status_code`.
 - **Code style**: lines over 140 chars; `List[X]`, `Optional[X]`, `Dict[K,V]` instead of modern annotations; sync DB calls

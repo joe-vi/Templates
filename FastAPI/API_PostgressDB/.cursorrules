@@ -33,7 +33,7 @@ missing binding fails at runtime on first resolution (accepted trade-off).
 ### Naming
 - Ports are `typing.Protocol`s with clean names (`UserRepository`, `PasswordHasher`, `TokenService`, `Logger`, `UserContext`) — NO `Base` suffix.
 - Adapters are mechanism-qualified (`SqlAlchemyUserRepository`, `BcryptPasswordHasher`, `JwtTokenService`, `JsonLogger`, `RequestUserContext`).
-- Use cases are plain concrete classes (`UserUseCase`, `AuthUseCase`) — no separate interface; routes and tests depend on the concrete class (mock with `AsyncMock(spec=UserUseCase)`).
+- Use cases are one plain concrete class per operation in its own file, each with a single `execute` method (`CreateUserUseCase`, `GetUserUseCase`, `LoginUseCase`, ...) — no separate interface; each declares only the ports its operation needs, and routes and tests depend on the concrete class (mock with `AsyncMock(spec=CreateUserUseCase)`).
 - Operation result enums are generic and shared: `CreateResult`, `UpdateResult`, `DeleteResult`.
 - DTOs: Pydantic models inheriting `DTOBase` (`src/application/dto_base.py`; frozen, camelCase aliases on the wire, accepts either case in), `DTO` suffix; validation rules (`EmailStr`, `min_length`, ...) live on the DTOs; return `list[UserDTO]` directly, never a wrapper DTO.
 - NO per-entity API schemas or API converters: routes accept/return DTOs directly (`response_model=UserDTO`); only the generic operation envelopes in `api/schemas/operation_schema.py` remain (also inherit `DTOBase`).
@@ -48,12 +48,12 @@ missing binding fails at runtime on first resolution (accepted trade-off).
 - Standalone public functions (converters, providers, guards, routes) keep their own docstrings; route docstrings become OpenAPI descriptions.
 
 ### Dependency Injection (injector + TypedBinder)
-- Composition root: `AppModule.configure()` in `src/api/dependencies/providers.py` using the `TypedBinder` facade — one line per binding: `typed_binder.bind_typed(UserRepository).to(SqlAlchemyUserRepository, scope=request)`. A wrong implementation for a port is a pyrefly error at that line. Concrete classes (use cases): `bind_self_typed(UserUseCase, scope=request)`.
+- Composition root: `AppModule.configure()` in `src/api/dependencies/providers.py` using the `TypedBinder` facade — one line per binding: `typed_binder.bind_typed(UserRepository).to(SqlAlchemyUserRepository, scope=request)`. A wrong implementation for a port is a pyrefly error at that line. Concrete classes (use cases): one `bind_self_typed(CreateUserUseCase, scope=request)` line per operation.
 - Scopes: `singleton` (engine, stateless services) and `request` (session, repositories, transaction context, use cases). Request-scope state lives in a ContextVar; the scope is entered per request by the middleware in `main.py` and disposes its objects on exit (LIFO; `aclose()` preferred, async `close()` awaited).
 - `@inject` REQUIRED on every implementation whose `__init__` takes dependencies (injector auto-wires from type hints; omitting it is a runtime `TypeError`). Construction logic lives in `@provider` methods on `AppModule`.
-- Routes/guards resolve via `Annotated[UserUseCase, Injected(UserUseCase)]` — a thin Depends over `app.state.injector`.
+- Routes/guards resolve via `Annotated[CreateUserUseCase, Injected(CreateUserUseCase)]` — a thin Depends over `app.state.injector`.
 - NO graph-completeness validation: a missing binding fails at runtime on first resolution.
-- Tests: bind mock instances in a `TestModule` (`binder.bind(UserUseCase, to=mock)`), set `app.state.injector = Injector([TestModule()])`; `app.dependency_overrides` for plain guards.
+- Tests: bind mock instances in a `TestModule` (`binder.bind(CreateUserUseCase, to=mock)`), set `app.state.injector = Injector([TestModule()])`; `app.dependency_overrides` for plain guards.
 
 ### Session, Transactions & Repository Pattern
 - Engine + `async_sessionmaker` are singleton `@provider` methods on `AppModule`; the engine is disposed in `lifespan` shutdown.
@@ -87,7 +87,7 @@ missing binding fails at runtime on first resolution (accepted trade-off).
 ### Testing
 - Domain: pure entity unit tests in `tests/domain/` (no mocks).
 - Use case tests: `AsyncMock(spec=UserRepository)` for the repository port; `FakeTransactionContext` asserting commit-on-success / no-commit-on-failure.
-- Route tests: minimal `FastAPI()` + `app.state.injector = Injector([TestModule()])` binding mock instances (`AsyncMock(spec=UserUseCase)`), plus `app.dependency_overrides` for `get_current_user` — never import `src/main.py`.
+- Route tests: minimal `FastAPI()` + `app.state.injector = Injector([TestModule()])` binding mock instances (`AsyncMock(spec=CreateUserUseCase)`), plus `app.dependency_overrides` for `get_current_user` — never import `src/main.py`.
 - DI machinery tests live in `tests/infrastructure/di/`.
 - `asyncio_mode = "auto"` is configured (no `@pytest.mark.asyncio`).
 

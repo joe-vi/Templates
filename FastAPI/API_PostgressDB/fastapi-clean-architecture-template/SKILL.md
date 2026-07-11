@@ -28,7 +28,7 @@ For auditing an existing project use `/fastapi-clean-architecture-review`. To ac
 
 - **No module docstrings or top-of-file comments.** The contract is documented once, on the Protocol port (Google-style docstrings); implementations explicitly subclass their port and inherit the docs. Implementation classes get a short mechanism-note class docstring only; no `__init__` docstrings.
 - **Rich domain**: entities enforce invariants in `__post_init__` (raise `ValueError`) and expose behaviour (`activate()`, `is_active`) — never anemic field bags.
-- **Use cases are plain concrete classes** (`<Entity>UseCase`) — no separate interface; they carry their own method docstrings.
+- **Use cases are plain concrete classes, one per operation** with a single `execute` method (`Create<Entity>UseCase`) — no separate interface; each declares only the ports its operation needs and carries its own method docstrings.
 - Line length 140 with `skip-magic-trailing-comma = true`.
 
 ## Workflow
@@ -53,7 +53,7 @@ Parse all flags. Apply defaults for any flag not provided.
 │   │   └── repositories/          # Protocol ports, one per aggregate root
 │   ├── application/
 │   │   ├── services/              # Protocol ports
-│   │   └── use_cases/             # <entity>_use_case.py (concrete class)
+│   │   └── use_cases/             # <operation>_use_case.py (one concrete class per operation)
 │   ├── infrastructure/
 │   │   ├── di/                    # request_scope.py, typed_binder.py (injector extensions)
 │   │   ├── auth/
@@ -121,7 +121,7 @@ Ports are `typing.Protocol`s in `src/application/services/`; adapters are mechan
 - `Logger` port / `JsonLogger` adapter — structured logger; request correlation (`request_id`, `user_id`) via context vars in `infrastructure/logging/log_context.py`.
 - `UserContext` port / `RequestUserContext` adapter — request-scoped holder of the caller's identity; `populate()` once by the guard (second call raises), unpopulated reads raise. Inject into use cases needing the caller (auditing, roles/permissions).
 - `jwt_dependency.py` — `get_current_user` decodes the JWT, populates `UserContext`, records the user id in the logging context, returns `TokenClaimsDTO`. Protect routers with `dependencies=[Depends(get_current_user)]`.
-- Auth use case + DTOs + routes under `src/application/use_cases/auth/` and `src/api/routers/auth/`.
+- Auth use cases (one per operation: login, refresh) + DTOs + per-operation route modules under `src/application/use_cases/auth/` and `src/api/routers/auth/`.
 
 #### `oauth2`
 
@@ -166,7 +166,7 @@ For each entity generate a concrete use case class with full contract docstrings
 - Stateless singletons (`PasswordHasher`, `TokenService`, `Logger`, cache): `typed_binder.bind_typed(PasswordHasher).to(BcryptPasswordHasher, scope=singleton)`.
 - Engine, session factory: singleton `@provider` methods; the session: a request-scoped `@provider` method (disposed via `aclose()` by the scope teardown).
 - `bind_typed(<Entity>Repository).to(Sqlalchemy<Entity>Repository, scope=request)` and `bind_typed(TransactionContext).to(SqlAlchemyTransactionContext, scope=request)` — same request session, so repositories and the transaction context share one transaction.
-- `bind_self_typed(<Entity>UseCase, scope=request)` — routes depend on it via `Annotated[<Entity>UseCase, Injected(<Entity>UseCase)]`.
+- One `bind_self_typed(<Operation>UseCase, scope=request)` line per operation — each route depends on its use case via `Annotated[<Operation>UseCase, Injected(<Operation>UseCase)]`.
 - Add `@inject` to every implementation whose `__init__` takes dependencies.
 
 ### Step 10 — Generate `pyproject.toml`
@@ -200,7 +200,7 @@ Only variables for the resolved stack with placeholder values. No real secrets.
 
 - `tests/domain/`: pure entity tests — invariants and behaviour, no mocks.
 - `tests/application/use_cases/`: use case tests with `AsyncMock(spec=<Entity>Repository)` and a fake `TransactionContext`.
-- `tests/api/routers/`: route tests binding `AsyncMock(spec=<Entity>UseCase)` in a `TestModule`.
+- `tests/api/routers/`: one test module per route, binding `AsyncMock(spec=<Operation>UseCase)` instances in a `TestModule`.
 
 ### Step 14 — Validate
 
