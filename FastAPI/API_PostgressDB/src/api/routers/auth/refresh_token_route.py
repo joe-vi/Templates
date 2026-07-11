@@ -1,13 +1,12 @@
 from typing import Annotated
 
-from fastapi import APIRouter, HTTPException, status
+from fastapi import HTTPException, status
 
 from src.api.dependencies.injected import Injected
+from src.api.routers.auth.router import router
 from src.application.use_cases.auth import auth_dto
 from src.application.use_cases.auth.refresh_token_use_case import RefreshTokenUseCase
 from src.domain.enums import operation_results
-
-router = APIRouter()
 
 UseCaseDep = Annotated[RefreshTokenUseCase, Injected(RefreshTokenUseCase)]
 

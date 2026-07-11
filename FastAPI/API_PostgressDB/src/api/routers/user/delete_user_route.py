@@ -1,13 +1,12 @@
 from typing import Annotated
 
-from fastapi import APIRouter, Response, status
+from fastapi import Response, status
 
 from src.api import result_status_maps
 from src.api.dependencies.injected import Injected
+from src.api.routers.user.router import router
 from src.api.schemas import operation_schema
 from src.application.use_cases.user.delete_user_use_case import DeleteUserUseCase
-
-router = APIRouter()
 
 UseCaseDep = Annotated[DeleteUserUseCase, Injected(DeleteUserUseCase)]
 

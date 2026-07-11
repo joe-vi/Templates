@@ -1,12 +1,11 @@
 from typing import Annotated
 
-from fastapi import APIRouter, HTTPException, status
+from fastapi import HTTPException, status
 
 from src.api.dependencies.injected import Injected
+from src.api.routers.user.router import router
 from src.application.use_cases.user import user_dto
 from src.application.use_cases.user.get_user_use_case import GetUserUseCase
-
-router = APIRouter()
 
 UseCaseDep = Annotated[GetUserUseCase, Injected(GetUserUseCase)]
 
