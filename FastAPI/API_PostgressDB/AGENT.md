@@ -27,23 +27,26 @@ src/
 │   ├── use_cases/<entity>/
 │   │   ├── <entity>_dto.py
 │   │   ├── <entity>_converter.py       # module functions, not a class
-│   │   └── <entity>_use_case.py        # concrete class, no separate interface
+│   │   └── <operation>_use_case.py     # one concrete class per operation, single execute(); no separate interface
 │   └── services/<service>.py           # Protocol ports (password_hasher, token_service, logger, transaction_context, user_context)
 ├── infrastructure/
 │   ├── di/{request_scope.py, typed_binder.py}   # injector extensions (framework plumbing, FastAPI-agnostic)
 │   ├── repositories/<entity>/sqlalchemy_<entity>_repository.py   # adapter (mechanism-qualified name)
 │   ├── auth/{bcrypt_password_hasher.py, jwt_token_service.py, request_user_context.py}
-│   ├── logging/{json_logger.py, log_context.py}
+│   ├── logging/json_logger.py
 │   └── database/{base.py, session.py, sqlalchemy_transaction_context.py, models/<entity>_model.py}
 └── api/
+    ├── middleware.py          # request_context: opens the DI request scope + binds the request's correlation id
     ├── dependencies/
     │   ├── injected.py        # Injected() route-side accessor (FastAPI Depends)
-    │   ├── providers.py       # composition root: AppModule (ports -> adapters, scopes)
+    │   ├── providers.py       # composition root: AppModule (cross-cutting binds; calls each domain's register())
+    │   ├── bindings/<domain>.py   # per-domain register(typed_binder): that domain's repository + use-case binds
     │   └── jwt_dependency.py  # get_current_user guard
-    ├── routers/<entity>/<entity>_routes.py   # takes/returns DTOs — no schemas/converters
+    ├── routers/<entity>/<operation>_route.py   # one route module per operation, own APIRouter(), resource-relative paths ("" for collection root, "/{id}" for item) — no schemas/converters
+    │              └── router.py                # imports the operation modules and aggregates them via include_router(op.router, prefix="/<entity>/v1"); /api base + tags + guard on the router; entity+version on the include (per-endpoint); __init__.py stays empty
     ├── schemas/operation_schema.py   # generic result envelopes (inherit DTOBase)
     └── result_status_maps.py  # result enum -> HTTP status + message maps
-└── main.py                    # app, lifespan (engine), request_context middleware (DI scope + log vars), routers
+└── main.py                    # app, lifespan (configure_logging + engine dispose), registers the request_context middleware, routers
 ```
 
 **Rule**: For every new entity, create `src/{layer}/{type}/{entity}/` folders across all layers. Never scatter entity files into flat shared directories.
@@ -68,7 +71,7 @@ The domain layer is the heart of the system and must never be anemic.
 ### Classes
 - **Ports are `typing.Protocol`s with the clean, central name** — `UserRepository`, `PasswordHasher`, `TokenService`, `Logger`, `UserContext`. No `Base` suffix.
 - **Adapters (implementations) are qualified by their mechanism** — `SqlAlchemyUserRepository`, `BcryptPasswordHasher`, `JwtTokenService`, `JsonLogger`, `RequestUserContext`.
-- Use cases are plain concrete classes (`UserUseCase`, `AuthUseCase`) — no separate interface; there is only ever one implementation, and routes/tests depend on the concrete class (mock with `AsyncMock(spec=UserUseCase)`).
+- Use cases are one plain concrete class per operation in its own file, each with a single `execute` method (`CreateUserUseCase`, `GetUserUseCase`, `LoginUseCase`, ...) — no separate interface; there is only ever one implementation, each class declares only the ports its operation needs, and routes/tests depend on the concrete class (mock with `AsyncMock(spec=CreateUserUseCase)`).
 - Entities: singular nouns — `User`, `Order`.
 - Status enums: singular `StrEnum` (`UserRole`, `UserStatus`).
 - Operation result enums: generic and shared — `CreateResult`, `UpdateResult`, `DeleteResult`. Never entity-specific. `LoginResult` is the one permitted auth-specific enum.
@@ -92,15 +95,15 @@ The domain layer is the heart of the system and must never be anemic.
 
 ### Dependency Injection (injector + TypedBinder)
 - The composition root is `AppModule` in `src/api/dependencies/providers.py`. One line binds implementation, port, and scope via the typed facade:
-  `typed_binder.bind_typed(UserRepository).to(SqlAlchemyUserRepository, scope=request)` — and binding an implementation that does not satisfy the port is a **pyrefly error at that line**. Concrete classes with no port — the use cases — use `bind_self_typed(UserUseCase, scope=request)`.
-- **Scopes are explicit**: `singleton` (from `injector`) for process-wide objects (engine, `PasswordHasher`, `TokenService`, `Logger`); `request` (from `src/infrastructure/di/request_scope.py`) for per-request objects (session, repositories, transaction context, use cases). Everything in one request shares the same instances; the request scope's state lives in a `ContextVar`, isolated per request under asyncio.
+  `typed_binder.bind_typed(UserRepository).to(SqlAlchemyUserRepository)` — and binding an implementation that does not satisfy the port is a **pyrefly error at that line**. Concrete classes with no port — the use cases — get one `bind_self_typed(CreateUserUseCase)` line per operation. `AppModule.configure()` declares the **cross-cutting** binds (services, session, transaction context, logger, user context) and delegates each domain's repository + use-case binds to a `register(typed_binder)` function in `src/api/dependencies/bindings/<domain>.py` (still the API layer / composition root, so it may import the adapters; `TypedBinder` keeps the static conformance check — do NOT replace it with plain tuples, which lose it).
+- **Scopes are explicit**, and chosen by *what holds request state*: `singleton` (from `injector`) for process-wide stateless objects (engine, `PasswordHasher`, `TokenService`); `request` (from `src/infrastructure/di/request_scope.py`) for objects that carry per-request state (the `AsyncSession`, `TransactionContext`, the bound `Logger`, and `UserContext`); and **transient** (no scope) for stateless orchestrators that only wire injected deps — the **use cases and repositories**. Transient repositories/use cases still share the one request-scoped `AsyncSession` (they receive it by injection), so the unit-of-work is unchanged; only the session and the request-state holders are scoped.
 - **Every implementation whose `__init__` takes dependencies carries `@inject`** (from `injector`) so the graph auto-wires from type hints. Omitting it fails at resolution with a `TypeError`.
 - Construction that needs logic lives in `@provider` methods on `AppModule` (`provide_settings`, `provide_engine`, `provide_session_factory`, `provide_session`).
 - **Disposal**: on request end the scope disposes its objects in reverse creation order — `aclose()` preferred, an async `close()` is awaited, failures are logged without blocking other teardowns. The session is closed this way. The engine (a singleton) is disposed explicitly in `main.lifespan` shutdown.
-- The request scope is entered per HTTP request by the `request_context` middleware in `main.py`. Resolving a request-scoped binding outside a scope raises a descriptive `RuntimeError`.
-- Routes and guards resolve via `Annotated[UserUseCase, Injected(UserUseCase)]` — a thin `Depends` over `request.app.state.injector`.
+- The request scope is entered per HTTP request by the `request_context` middleware in `src/api/middleware.py` (registered in `main.py`). Resolving a request-scoped binding outside a scope raises a descriptive `RuntimeError`.
+- Routes and guards resolve via `Annotated[CreateUserUseCase, Injected(CreateUserUseCase)]` — a thin `Depends` over `request.app.state.injector`.
 - **No graph-completeness validation**: a forgotten binding is a runtime error on first resolution, not a startup failure. This is an accepted trade-off; the wrong-implementation case is still caught statically by `TypedBinder`.
-- Tests bind mock **instances** in a `TestModule` (`binder.bind(UserUseCase, to=mock_use_case)` — instance-bound, so no request scope is needed) and set `app.state.injector = Injector([TestModule()])`; `app.dependency_overrides` handles plain guards like `get_current_user`.
+- Tests bind mock **instances** in a `TestModule` (`binder.bind(CreateUserUseCase, to=mock_use_case)` — instance-bound, so no request scope is needed) and set `app.state.injector = Injector([TestModule()])`; `app.dependency_overrides` handles plain guards like `get_current_user`.
 
 ### Database session & transactions (unit of work)
 - The engine and `async_sessionmaker` are **singleton `@provider` methods** on `AppModule`; the engine is disposed in `main.lifespan` shutdown.
@@ -109,7 +112,7 @@ The domain layer is the heart of the system and must never be anemic.
   - `IntegrityError` → `UNIQUE_CONSTRAINT_ERROR`
   - `DBAPIError` whose `__cause__` is `asyncpg…DeadlockDetectedError` → `CONCURRENCY_ERROR`; otherwise `FAILURE`
   - any other `Exception` → `FAILURE`
-- **The use case owns the transaction boundary** via the `TransactionContext` port (`src/application/services/transaction_context.py`; adapter `SqlAlchemyTransactionContext` in `src/infrastructure/database/`). Every mutating use-case method wraps its repository calls in `async with self._transaction_context.begin() as transaction:` and calls `await transaction.commit()` only when every operation reported success.
+- **The use case owns the transaction boundary** via the `TransactionContext` port (`src/application/services/transaction_context.py`; adapter `SqlAlchemyTransactionContext` in `src/infrastructure/database/`). Every mutating use case wraps its repository calls in `async with self._transaction_context.begin() as transaction:` inside `execute` and calls `await transaction.commit()` only when every operation reported success.
 - Semantics are **rollback unless committed**: leaving the `begin()` block without commit — by early return on a failure result or by an exception — rolls back everything performed inside it. Committing a partially-failed unit of work is structurally impossible.
 - **Atomic multi-repository operations**: call any number of repositories inside one `begin()` block; they share the request session, so they all succeed or all fail. If any call returns a non-success result, return without committing — every earlier operation rolls back.
 - `flush()` populates `id` and server defaults via RETURNING, so the new entity id is available inside the block before commit. Do not call `session.refresh()` after inserts.
@@ -119,14 +122,15 @@ The domain layer is the heart of the system and must never be anemic.
 - Converters are **module-level functions**, not classes of static methods. `user_converter.to_dto(...)`, `to_entity(...)`, etc.
 
 ### Authentication & current user
-- `get_current_user` (in `src/api/dependencies/jwt_dependency.py`) decodes the Bearer JWT, raises 401 on failure, populates the request-scoped `UserContext`, records the user id in the logging context, and returns a `TokenClaimsDTO`.
+- `get_current_user` (in `src/api/dependencies/jwt_dependency.py`) decodes the Bearer JWT, raises 401 on failure, populates the request-scoped `UserContext`, and returns a `TokenClaimsDTO`. (The bound logger reads `user_id` from that `UserContext`, so the guard does not touch any logging state.)
 - Protect a whole router with `dependencies=[Depends(get_current_user)]` on the `APIRouter`. A route handler that needs the claims directly declares `claims: TokenClaimsDTO = Depends(get_current_user)`.
 - **Request-scoped user context**: the `UserContext` port (`src/application/services/user_context.py`; adapter `RequestUserContext`, bound at `request` scope) holds the caller's identity for the request. Inject it into use cases or services that need the caller — auditing, ownership checks, roles/permissions — instead of threading claims through every signature. `populate()` is called exactly once by the guard (a second call raises `RuntimeError`); reading it unpopulated raises `RuntimeError`, so it is only valid on guarded routes. Read scalar values from it and pass those to repositories — never pass the context object itself to a repository.
-- Request correlation for logs (`request_id`, `user_id`) is carried in context variables in `src/infrastructure/logging/log_context.py` — set by the `request_context` middleware and the guard. Context variables are appropriate here because they carry cross-cutting observability metadata, not control-flow or transactional state.
+- Request correlation for logs is a **bound logger**: `JsonLogger` is request-scoped, and the `request_context` middleware (`src/api/middleware.py`) binds the request's correlation id onto it via `bind_request_id` — minted, or taken from an inbound `X-Request-ID` header, and echoed back as the `X-Request-ID` response header. `bind_request_id` raises on a second call (a request is bound once); log emission never raises when unbound (the field is simply omitted). `user_id` is read from the injected request-scoped `UserContext` (only when populated). No ambient `ContextVar`s. The process-wide handler/formatter/level is configured once at startup by `configure_logging()` (from `main.lifespan`), so per-request loggers never re-add handlers.
 
 ### Routes & responses
 - Routes return the **response model object**; FastAPI serialises it (camelCase, via `response_model`). **Never** return a hand-built `JSONResponse(model.model_dump())` — that bypasses `response_model` and the alias generator.
 - For operations whose status varies by result enum, inject `response: Response`, set `response.status_code = result_status_maps.<OP>_STATUS_MAP[result]`, and return the response model. Use `HTTPException` for read-not-found and auth failures.
+- **URL shape is `/api/<entity>/<version>/<path>`** (e.g. `/api/users/v1`, `/api/users/v1/{id}`, `/api/auth/v1/login`). `/api` is the shared base, on each domain router's own `prefix`. The `/<entity>/<version>` segment (e.g. `/users/v1`) rides on each `router.include_router(op.router, prefix="/<entity>/v1")` call in `router.py` — **the version is per-endpoint**, so one endpoint can move to `/<entity>/v2` (add its operation module and include it with `prefix="/<entity>/v2"`) without touching the others. Operation files use resource-relative paths (`""` for the collection root, `/{id}` for item routes) and never repeat the entity or version. Do **not** collapse the segment onto the router's own `prefix`: FastAPI rejects including a prefix-less operation router that has an empty (`""`) collection-root path (`FastAPIError: Prefix and path cannot be both empty`), so it must ride on the `include_router` prefix.
 
 ---
 
@@ -181,8 +185,8 @@ Never set these in Python code:
 
 1. **Domain**: enums in `src/domain/enums/<entity>_enum.py`; entity dataclass (invariants + behaviour) in `src/domain/entities/<entity>/`; repository **Protocol** in `src/domain/repositories/<entity>/<entity>_repository.py`.
 2. **Infrastructure**: ORM model in `src/infrastructure/database/models/<entity>_model.py` (re-export from `models/__init__.py`); adapter `sqlalchemy_<entity>_repository.py` subclassing the port and taking an `AsyncSession`.
-3. **Application**: `DTOBase` DTOs (with validation), converter **functions**, concrete use case in `src/application/use_cases/<entity>/`. Mutating use cases inject `TransactionContext` and wrap repository calls in a `begin()` block, committing only on success.
-4. **API**: routes accepting and returning the DTOs directly (`Annotated[<Entity>UseCase, Injected(<Entity>UseCase)]`, `response_model=<Entity>DTO`); add one `bind_typed(...).to(...)`/`bind_self_typed(...)` line per new binding to `AppModule.configure()`; include the router in `main.py`. No per-entity schemas or API converters.
+3. **Application**: `DTOBase` DTOs (with validation), converter **functions**, one concrete use case class per operation (single `execute` method) in `src/application/use_cases/<entity>/`. Mutating use cases inject `TransactionContext` and wrap repository calls in a `begin()` block, committing only on success.
+4. **API**: one route module per operation accepting and returning the DTOs directly (`Annotated[<Operation>UseCase, Injected(<Operation>UseCase)]`, `response_model=<Entity>DTO`), each with its own `APIRouter()` and **resource-relative paths** (`""` for the collection root, `/{id}` for item routes — neither the `/<entity>` nor the version is repeated in the operation files); `router.py` (with `prefix="/api"`, tags, and guard) imports every operation module and aggregates them with `router.include_router(op.router, prefix="/<entity>/v1")`, giving URLs `/api/<entity>/v1/...` with the version per-endpoint; add a `src/api/dependencies/bindings/<entity>.py` with a `register(typed_binder)` that binds the repository (transient) and each use case (`bind_self_typed`, transient), and call it from `AppModule.configure()`; include the router from `router.py` in `main.py`. No per-entity schemas or API converters.
 5. **Tests**: domain entity tests (no mocks), use case tests (mock the ports), route tests (bind a mock use case instance in a `TestModule`).
 
 ---
@@ -203,11 +207,11 @@ Tests live in `tests/` and mirror `src/`.
 - Create a minimal `FastAPI()`, include only the router under test. **Never import `src/main.py`.**
 - Bind a mock instance of the use case in a `TestModule`; override plain FastAPI guards with `app.dependency_overrides`:
   ```python
-  mock_use_case = AsyncMock(spec=UserUseCase)
+  mock_use_case = AsyncMock(spec=CreateUserUseCase)
 
   class TestModule(Module):
       def configure(self, binder: Binder) -> None:
-          binder.bind(UserUseCase, to=mock_use_case)  # instance-bound: no scope needed
+          binder.bind(CreateUserUseCase, to=mock_use_case)  # instance-bound: no scope needed
 
   app.state.injector = Injector([TestModule()])
   app.dependency_overrides[get_current_user] = lambda: TokenClaimsDTO(user_id=1, role=UserRole.ADMIN)
@@ -217,9 +221,9 @@ Tests live in `tests/` and mirror `src/`.
 | Layer | File | Test? |
 |-------|------|-------|
 | Domain | `<entity>.py` | Yes — pure unit tests, no mocks |
-| Application | `<entity>_use_case.py` | Yes — mock the repository/service ports |
+| Application | `<operation>_use_case.py` | Yes — one test module per use case, mock the repository/service ports |
 | Application | `<entity>_converter.py` | Yes |
-| API | `<entity>_routes.py` | Yes — bind mock use case instances in a `TestModule` |
+| API | `<operation>_route.py` | Yes — one test module per route, bind mock use case instances in a `TestModule` |
 | Infrastructure | repository adapter | No — needs a live DB (integration only) |
 | Infrastructure | `SqlAlchemyTransactionContext` | Yes — integration test against in-memory SQLite (aiosqlite) proving commit/rollback atomicity |
 | Infrastructure | `di/` (request scope, typed binder) | Yes — unit tests in `tests/infrastructure/di/` |
@@ -229,20 +233,22 @@ Tests live in `tests/` and mirror `src/`.
 ## 10. Documentation & Code Style
 
 - **No module docstrings or top-of-file comments** — file location and names carry that information.
-- **The contract is documented once, on the port**: Protocol classes and their methods carry full Google-style docstrings. Adapters **explicitly subclass the port and inherit them** — never repeat a method docstring in an adapter; IDE hover and `help()` resolve the port docs through the MRO.
+- **The contract is documented once, on the port**: Protocol classes and their methods carry **concise** docstrings. Adapters **explicitly subclass the port and inherit them** — never repeat a method docstring in an adapter; IDE hover and `help()` resolve the port docs through the MRO.
+- **Docstrings are lean**: a one-line summary, then `Args`/`Returns`/`Raises` sections where applicable — nothing else. Never describe *how* the code works or *why* (no implementation details, rationale, or usage examples); the summary says *what* it does.
 - Adapter classes keep a short class docstring stating only mechanism-specific facts (e.g. "backed by PyJWT"). No `__init__` docstrings — constructor parameters are self-describing via type hints.
 - Classes with no port — the use cases — carry their own method docstrings: they are the single source for their contract.
 - Standalone public functions (converters, providers, guards, routes) carry their own docstrings — they have no port to inherit from. Route docstrings become OpenAPI descriptions: describe endpoint behaviour, not injected parameters.
 - Inline comments only for constraints the code cannot express (e.g. why `flush()` instead of `commit()`).
 - Max line length: **140 characters** (`skip-magic-trailing-comma = true`, so the formatter uses the full width). Run `uv run ruff check src/ tests/ --fix && uv run ruff format src/ tests/` after every change. Run `uv run pyrefly check` to type-check.
-- Always use `uv run`. Modern type annotations (`list[X]`, `X | None`). All DB I/O is async. API prefix: `/api/v1`.
+- Always use `uv run`. Modern type annotations (`list[X]`, `X | None`). All DB I/O is async. URL shape: `/api/<entity>/<version>/<path>` (e.g. `/api/users/v1`) — `/api` base on the domain router, `/<entity>/v1` on each `include_router` call so the version is per-endpoint.
+- **Never introduce a lint/type-check suppression** (`# noqa`, `# type: ignore`, pyrefly ignore comments, or equivalent) **without checking with the user first.** If satisfying a rule would require one, stop and present the design alternatives that avoid it instead of silently suppressing.
 
 ---
 
 ## 11. Anti-Patterns
 
 - Don't leave the domain anemic — invariants and state transitions belong on the entity, not scattered across use cases.
-- Don't wire bindings anywhere except `AppModule.configure()`, and always through `TypedBinder` so conformance is checked.
+- Don't wire bindings outside the composition root — `AppModule.configure()` or the per-domain `register(typed_binder)` functions in `src/api/dependencies/bindings/` that it calls — and always through `TypedBinder` so conformance is checked (never plain `(port, adapter)` tuples, which drop the static check). Binding modules stay in the API layer; never put them in `src/application/` (that would make Application import Infrastructure adapters).
 - Don't omit `@inject` on an implementation whose `__init__` takes dependencies — resolution fails with `TypeError` at runtime.
 - Don't keep session (or other control-flow) state in a module-global `ContextVar`. Inject the request-scoped `AsyncSession`.
 - Don't pass the `AsyncSession` to use cases, or sessions to repository constructors as constants — adapters get the request session via the provider.
@@ -258,6 +264,7 @@ Tests live in `tests/` and mirror `src/`.
 - Don't let Domain import from Infrastructure or API.
 - Don't create entity-specific result enums or wrapper collection DTOs.
 - Don't scatter entity files into flat shared directories.
+- Don't add `# noqa`, `# type: ignore`, or any other lint/type suppression without checking with the user first — propose a design that avoids the violation instead.
 
 ---
 

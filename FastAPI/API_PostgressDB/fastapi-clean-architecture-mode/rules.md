@@ -33,7 +33,7 @@ resolution.
 
 - Ports are `typing.Protocol`s with the clean name — `UserRepository`, `PasswordHasher`, `TokenService`, `Logger`, `UserContext`. No `Base` suffix.
 - Adapters are mechanism-qualified — `SqlAlchemyUserRepository`, `BcryptPasswordHasher`, `JwtTokenService`, `JsonLogger`, `RequestUserContext`.
-- Use cases are plain concrete classes (`UserUseCase`, `AuthUseCase`) — no separate interface; routes and tests depend on the concrete class.
+- Use cases are one plain concrete class per operation in its own file, each with a single `execute` method (`CreateUserUseCase`, `GetUserUseCase`, `LoginUseCase`, ...) — no separate interface; each declares only the ports its operation needs, and routes and tests depend on the concrete class.
 - DTOs: Pydantic models inheriting `DTOBase` (frozen, camelCase aliases on the wire), `DTO` suffix; validation lives on the DTOs; return `list[UserDTO]` directly, never a wrapper DTO.
 - No per-entity API schemas or API converters: routes accept/return DTOs directly; only the generic operation envelopes remain in `api/schemas/` (also `DTOBase`).
 - Converters: module-level functions, never classes of static methods.
@@ -44,7 +44,7 @@ resolution.
 ## Documentation (single source, IDE hover)
 
 - No module docstrings or top-of-file comments anywhere.
-- The contract is documented once, on the port: Protocol classes/methods carry full Google-style docstrings. Adapters explicitly subclass their port (`class SqlAlchemyUserRepository(UserRepository):`) and inherit them — never repeat method docstrings in adapters; IDE hover resolves the port docs through the MRO.
+- The contract is documented once, on the port: Protocol classes/methods carry **concise** docstrings — a one-line summary plus `Args`/`Returns`/`Raises` only, never implementation details, rationale, or usage examples. Adapters explicitly subclass their port (`class SqlAlchemyUserRepository(UserRepository):`) and inherit them — never repeat method docstrings in adapters; IDE hover resolves the port docs through the MRO.
 - Adapter classes keep a short class docstring for mechanism-specific notes only; no `__init__` docstrings.
 - Classes with no port — the use cases — carry their own method docstrings: they are the single source.
 - Standalone public functions (converters, providers, guards, routes) keep their own docstrings; route docstrings become OpenAPI descriptions.
@@ -57,10 +57,10 @@ resolution.
 
 ## Dependency injection (injector + TypedBinder)
 
-- Wire everything in `AppModule.configure()` via `TypedBinder` — one line per binding: `typed_binder.bind_typed(UserRepository).to(SqlAlchemyUserRepository, scope=request)`, concrete classes (use cases) use `bind_self_typed(UserUseCase, scope=request)`. A wrong implementation is a pyrefly error.
-- Explicit scopes: `singleton` (engine, stateless services), `request` (session, repositories, transaction context, use cases). Request-scope state lives in a ContextVar; entered per request by the middleware in `main.py`; disposes objects on exit (LIFO, `aclose()` preferred, async `close()` awaited).
+- Wire via `TypedBinder` — one line per binding: `typed_binder.bind_typed(UserRepository).to(SqlAlchemyUserRepository)`, concrete classes (use cases) get one `bind_self_typed(CreateUserUseCase)` line per operation. A wrong implementation is a pyrefly error (never plain tuples — they drop the check). `AppModule.configure()` holds the cross-cutting binds and calls each domain's `register(typed_binder)` in `src/api/dependencies/bindings/<domain>.py` (API layer, never `src/application/`).
+- Explicit scopes: `singleton` (engine, stateless services), `request` (session, transaction context, logger, user context), **transient** (no scope) for stateless orchestrators — use cases and repositories, which still share the one request-scoped session by injection. Request-scope state lives in a ContextVar; entered per request by the `request_context` middleware in `src/api/middleware.py`; disposes objects on exit (LIFO, `aclose()` preferred, async `close()` awaited).
 - `@inject` required on every implementation whose `__init__` takes dependencies. Construction logic lives in `@provider` methods on `AppModule`.
-- Routes/guards: `Annotated[UserUseCase, Injected(UserUseCase)]` — a thin Depends over `app.state.injector`.
+- Routes/guards: `Annotated[CreateUserUseCase, Injected(CreateUserUseCase)]` — a thin Depends over `app.state.injector`.
 - No graph-completeness validation: a missing binding fails at runtime on first resolution.
 - Tests: bind mock instances in a `TestModule`, set `app.state.injector = Injector([TestModule()])`; `app.dependency_overrides` for plain guards.
 
@@ -88,12 +88,14 @@ resolution.
 1. Domain: enum → aggregate root (invariants + behaviour) → repository **Protocol** port.
 2. Infrastructure: DB model → `sqlalchemy_<entity>_repository.py` adapter (subclasses the port, takes `AsyncSession`).
 3. Application: DTO → converter functions → concrete use case (inject `TransactionContext` for mutations; commit only on success).
-4. API: routes depending on the use case (return models); add bindings in `dependencies/providers.py`; include router in `main.py`.
+4. API: routes depending on the use case (return models); add the domain's `register()` in `dependencies/bindings/<entity>.py` (repository + use cases, transient) called from `providers.py`; include router in `main.py`.
 5. Tests: entity tests (no mocks), use case tests (mock ports), route tests (bind a mock use case instance in a `TestModule`).
 
 ## Code style
 
 Max line length: 140 characters (`skip-magic-trailing-comma = true`).
+
+Never add `# noqa`, `# type: ignore`, or any other lint/type suppression without checking with the user first — propose a design that avoids the violation instead.
 
 ## After every change
 

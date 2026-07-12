@@ -1,27 +1,24 @@
-import uuid
-from collections.abc import AsyncGenerator, Awaitable, Callable
+from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, Request, Response
+from fastapi import FastAPI
 from injector import Injector
 from sqlalchemy.ext.asyncio import AsyncEngine
 
 from src.api.dependencies.providers import AppModule
-from src.api.routers.auth import auth_routes
-from src.api.routers.user import user_routes
-from src.infrastructure.di.request_scope import async_request_scope
-from src.infrastructure.logging import log_context
+from src.api.middleware import request_context
+from src.api.routers.auth.router import router as auth_router
+from src.api.routers.user.router import router as user_router
+from src.config.settings import Settings
+from src.infrastructure.logging.json_logger import configure_logging
 
 injector = Injector([AppModule()])
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
-    """Manage the application startup and shutdown lifecycle.
-
-    On shutdown, disposes the database engine (singletons are not covered by
-    the request-scope teardown).
-    """
+    """Manage the application startup and shutdown lifecycle."""
+    configure_logging(app.state.injector.get(Settings))
     yield
     engine = app.state.injector.get(AsyncEngine)
     await engine.dispose()
@@ -34,30 +31,10 @@ app = FastAPI(
     lifespan=lifespan,
 )
 app.state.injector = injector
+app.middleware("http")(request_context)
 
-
-@app.middleware("http")
-async def request_context(request: Request, call_next: Callable[[Request], Awaitable[Response]]) -> Response:
-    """Open the DI request scope and the log-correlation context.
-
-    Every request-scoped dependency resolved while handling this request is
-    cached for the request and disposed when it ends. request_id is set here;
-    user_id is cleared so a value can never leak between requests handled in
-    the same task, then populated by the JWT guard once the caller is
-    authenticated.
-    """
-    request_id_token = log_context.request_id_var.set(str(uuid.uuid4()))
-    user_id_token = log_context.user_id_var.set(None)
-    try:
-        async with async_request_scope():
-            return await call_next(request)
-    finally:
-        log_context.user_id_var.reset(user_id_token)
-        log_context.request_id_var.reset(request_id_token)
-
-
-app.include_router(auth_routes.router)
-app.include_router(user_routes.router)
+app.include_router(auth_router)
+app.include_router(user_router)
 
 
 @app.get("/")

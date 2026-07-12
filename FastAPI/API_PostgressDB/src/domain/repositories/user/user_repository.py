@@ -5,18 +5,7 @@ from src.domain.enums import operation_results, user_enum
 
 
 class UserRepository(Protocol):
-    """Persistence port for the ``User`` aggregate.
-
-    One repository per aggregate root. Adapters subclass this protocol
-    explicitly, so the documented contract below is inherited — the method
-    docstrings here are the single source of documentation for every
-    implementation, and IDEs surface them on hover at both the call site and
-    inside the adapter.
-
-    Mutation methods never raise for expected database failures; they map them
-    to the shared operation result enums. They also never commit — the
-    transaction boundary belongs to the use case via ``TransactionContext``.
-    """
+    """Persistence port for the ``User`` aggregate."""
 
     async def create(self, user: User) -> tuple[operation_results.CreateResult, int | None]:
         """Persist a new user aggregate.
@@ -62,9 +51,6 @@ class UserRepository(Protocol):
 
     async def update_role(self, user_id: int, role: user_enum.UserRole) -> operation_results.UpdateResult:
         """Assign a new role to the user with the given id.
-
-        A targeted single-column update: it does not load the aggregate and
-        reports ``NOT_FOUND`` when no row matched.
 
         Args:
             user_id: The unique identifier of the user to update.

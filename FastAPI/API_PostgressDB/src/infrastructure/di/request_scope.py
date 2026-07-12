@@ -16,16 +16,7 @@ _request_cache: contextvars.ContextVar[dict[type, Any]] = contextvars.ContextVar
 
 
 class RequestScope(Scope):
-    """One instance per key per active request context.
-
-    The per-request cache is not stored on this object. injector keeps a
-    single Scope instance for the injector's whole life, so storing state
-    here would make it behave like a singleton shared by every request.
-    State lives in a ContextVar instead, giving correct per-request isolation
-    under both threads and asyncio tasks. ``request_scope()`` /
-    ``async_request_scope()`` open a per-request cache and dispose every
-    request-scoped object on exit.
-    """
+    """One instance per key per active request context."""
 
     def get[T](self, key: type[T], provider: Provider[T]) -> Provider[T]:
         try:
@@ -74,13 +65,7 @@ async def _dispose_async(instance: Any) -> None:
 
 @contextmanager
 def request_scope() -> Generator[None]:
-    """Enter a per-request scope for synchronous (WSGI) code.
-
-    On exit, every request-scoped object is disposed independently, in
-    reverse creation order (dependents before their dependencies): a failure
-    in one object's ``close()`` is logged and does not prevent the others
-    from being disposed, and the scope is always reset.
-    """
+    """Enter a per-request scope for synchronous (WSGI) code."""
     cache: dict[type, Any] = {}
     token = _request_cache.set(cache)
     try:
@@ -98,14 +83,7 @@ def request_scope() -> Generator[None]:
 
 @asynccontextmanager
 async def async_request_scope() -> AsyncGenerator[None]:
-    """Enter a per-request scope for asynchronous (ASGI) code.
-
-    Disposes request-scoped objects on exit, preferring an async ``aclose()``
-    and falling back to ``close()`` (awaited when it returns an awaitable).
-    Objects are disposed independently, in reverse creation order: a failure
-    in one is logged and does not prevent the others from being disposed,
-    and the scope is always reset.
-    """
+    """Enter a per-request scope for asynchronous (ASGI) code."""
     cache: dict[type, Any] = {}
     token = _request_cache.set(cache)
     try:

@@ -6,11 +6,7 @@ _ALREADY_POPULATED = "UserContext.populate() was called more than once in the sa
 
 
 class RequestUserContext(UserContext):
-    """``UserContext`` adapter: a mutable request-scoped identity holder.
-
-    Bound at request scope, so every request starts with a fresh, empty
-    instance and every component resolved in the same request shares it.
-    """
+    """``UserContext`` adapter: a mutable request-scoped identity holder."""
 
     def __init__(self) -> None:
         self._user_id: int | None = None

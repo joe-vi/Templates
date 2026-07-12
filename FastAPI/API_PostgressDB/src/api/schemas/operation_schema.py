@@ -5,11 +5,7 @@ from src.domain.enums import operation_results
 
 
 class CreateOperationResponse(DTOBase):
-    """Standard API response for any create operation.
-
-    Reusable across all entities — return from any POST endpoint.
-    id carries the newly created entity id on success, None otherwise.
-    """
+    """Standard API response for any create operation."""
 
     result: operation_results.CreateResult
     message: str = Field(description="Human-readable description of the operation outcome")
@@ -17,20 +13,14 @@ class CreateOperationResponse(DTOBase):
 
 
 class UpdateOperationResponse(DTOBase):
-    """Standard API response for any update operation.
-
-    Reusable across all entities — return from any PUT/PATCH endpoint.
-    """
+    """Standard API response for any update operation."""
 
     result: operation_results.UpdateResult
     message: str = Field(description="Human-readable description of the operation outcome")
 
 
 class DeleteOperationResponse(DTOBase):
-    """Standard API response for any delete operation.
-
-    Reusable across all entities — return from any DELETE endpoint.
-    """
+    """Standard API response for any delete operation."""
 
     result: operation_results.DeleteResult
     message: str = Field(description="Human-readable description of the operation outcome")

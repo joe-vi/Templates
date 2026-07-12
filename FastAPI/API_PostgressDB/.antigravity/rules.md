@@ -33,7 +33,7 @@ missing binding fails at runtime on first resolution (accepted trade-off).
 ### Naming
 - Ports are `typing.Protocol`s with clean names (`UserRepository`, `PasswordHasher`, `TokenService`, `Logger`, `UserContext`) — NO `Base` suffix.
 - Adapters are mechanism-qualified (`SqlAlchemyUserRepository`, `BcryptPasswordHasher`, `JwtTokenService`, `JsonLogger`, `RequestUserContext`).
-- Use cases are plain concrete classes (`UserUseCase`, `AuthUseCase`) — no separate interface; routes and tests depend on the concrete class (mock with `AsyncMock(spec=UserUseCase)`).
+- Use cases are one plain concrete class per operation in its own file, each with a single `execute` method (`CreateUserUseCase`, `GetUserUseCase`, `LoginUseCase`, ...) — no separate interface; each declares only the ports its operation needs, and routes and tests depend on the concrete class (mock with `AsyncMock(spec=CreateUserUseCase)`).
 - Operation result enums are generic and shared: `CreateResult`, `UpdateResult`, `DeleteResult`.
 - DTOs: Pydantic models inheriting `DTOBase` (`src/application/dto_base.py`; frozen, camelCase aliases on the wire, accepts either case in), `DTO` suffix; validation rules (`EmailStr`, `min_length`, ...) live on the DTOs; return `list[UserDTO]` directly, never a wrapper DTO.
 - NO per-entity API schemas or API converters: routes accept/return DTOs directly (`response_model=UserDTO`); only the generic operation envelopes in `api/schemas/operation_schema.py` remain (also inherit `DTOBase`).
@@ -42,18 +42,18 @@ missing binding fails at runtime on first resolution (accepted trade-off).
 
 ### Documentation (single source, IDE hover)
 - NO module docstrings or top-of-file comments anywhere.
-- The contract is documented ONCE, on the port: Protocol classes/methods carry full Google-style docstrings. Adapters explicitly subclass their port (`class SqlAlchemyUserRepository(UserRepository):`) and inherit them — never repeat method docstrings in adapters; IDE hover resolves the port docs through the MRO.
+- The contract is documented ONCE, on the port: Protocol classes/methods carry **concise** docstrings — a one-line summary plus `Args`/`Returns`/`Raises` only, never implementation details, rationale, or usage examples. Adapters explicitly subclass their port (`class SqlAlchemyUserRepository(UserRepository):`) and inherit them — never repeat method docstrings in adapters; IDE hover resolves the port docs through the MRO.
 - Adapter classes keep a short class docstring for mechanism-specific notes only; no `__init__` docstrings.
 - Classes with no port — the use cases — carry their own method docstrings: they ARE the single source.
 - Standalone public functions (converters, providers, guards, routes) keep their own docstrings; route docstrings become OpenAPI descriptions.
 
 ### Dependency Injection (injector + TypedBinder)
-- Composition root: `AppModule.configure()` in `src/api/dependencies/providers.py` using the `TypedBinder` facade — one line per binding: `typed_binder.bind_typed(UserRepository).to(SqlAlchemyUserRepository, scope=request)`. A wrong implementation for a port is a pyrefly error at that line. Concrete classes (use cases): `bind_self_typed(UserUseCase, scope=request)`.
-- Scopes: `singleton` (engine, stateless services) and `request` (session, repositories, transaction context, use cases). Request-scope state lives in a ContextVar; the scope is entered per request by the middleware in `main.py` and disposes its objects on exit (LIFO; `aclose()` preferred, async `close()` awaited).
+- Composition root: `AppModule.configure()` in `src/api/dependencies/providers.py` using the `TypedBinder` facade — one line per binding: `typed_binder.bind_typed(UserRepository).to(SqlAlchemyUserRepository)`. A wrong implementation for a port is a pyrefly error at that line. Concrete classes (use cases): one `bind_self_typed(CreateUserUseCase)` line per operation. `AppModule.configure()` holds the cross-cutting binds and delegates each domain's repository + use-case binds to a `register(typed_binder)` function in `src/api/dependencies/bindings/<domain>.py` (API layer, so it may import the adapters; keep `TypedBinder` — never plain tuples, which lose the static check).
+- Scopes chosen by what holds request state: `singleton` (engine, stateless services), `request` (session, transaction context, logger, user context), and **transient** (no scope) for stateless orchestrators — use cases and repositories. Transient repos/use cases still share the one request-scoped session (injected), so the unit-of-work is unchanged. The scope is entered per request by the `request_context` middleware (`src/api/middleware.py`) and disposes its objects on exit (LIFO; `aclose()` preferred, async `close()` awaited).
 - `@inject` REQUIRED on every implementation whose `__init__` takes dependencies (injector auto-wires from type hints; omitting it is a runtime `TypeError`). Construction logic lives in `@provider` methods on `AppModule`.
-- Routes/guards resolve via `Annotated[UserUseCase, Injected(UserUseCase)]` — a thin Depends over `app.state.injector`.
+- Routes/guards resolve via `Annotated[CreateUserUseCase, Injected(CreateUserUseCase)]` — a thin Depends over `app.state.injector`.
 - NO graph-completeness validation: a missing binding fails at runtime on first resolution.
-- Tests: bind mock instances in a `TestModule` (`binder.bind(UserUseCase, to=mock)`), set `app.state.injector = Injector([TestModule()])`; `app.dependency_overrides` for plain guards.
+- Tests: bind mock instances in a `TestModule` (`binder.bind(CreateUserUseCase, to=mock)`), set `app.state.injector = Injector([TestModule()])`; `app.dependency_overrides` for plain guards.
 
 ### Session, Transactions & Repository Pattern
 - Engine + `async_sessionmaker` are singleton `@provider` methods on `AppModule`; the engine is disposed in `lifespan` shutdown.
@@ -66,11 +66,12 @@ missing binding fails at runtime on first resolution (accepted trade-off).
 ### Routes & Responses
 - Routes return the response MODEL; FastAPI serialises it (camelCase). Never return `JSONResponse(model.model_dump())`.
 - For result-dependent status, inject `response: Response`, set `response.status_code = result_status_maps.<OP>_STATUS_MAP[result]`, return the model. Use `HTTPException` for not-found / auth failures.
+- URL shape is `/api/<entity>/<version>/<path>` (e.g. `/api/users/v1`, `/api/auth/v1/login`). `/api` is the base on the domain router's `prefix`; the `/<entity>/v1` segment rides on each `router.include_router(op.router, prefix="/<entity>/v1")` call, so the version is per-endpoint (bump one endpoint to `/<entity>/v2` without touching others). Operation files use resource-relative paths (`""` for the collection root, `/{id}` for item routes) and never repeat the entity or version. Do NOT collapse the segment onto the router's own `prefix` — FastAPI rejects including a prefix-less router that has an empty collection-root path.
 
 ### Auth
-- `get_current_user` decodes the Bearer JWT, raises 401, populates the request-scoped `UserContext`, records the user id in the logging context, returns `TokenClaimsDTO`. Protect routers with `dependencies=[Depends(get_current_user)]`.
+- `get_current_user` decodes the Bearer JWT, raises 401, populates the request-scoped `UserContext`, returns `TokenClaimsDTO`. Protect routers with `dependencies=[Depends(get_current_user)]`. (The bound logger reads `user_id` from `UserContext`; the guard touches no logging state.)
 - `UserContext` port (adapter `RequestUserContext`, `request` scope): inject into use cases/services needing the caller's identity (auditing, roles/permissions). `populate()` once by the guard — a second call raises; unpopulated reads raise. Pass scalar values to repositories, never the context object.
-- Log correlation (`request_id`, `user_id`) lives in context vars in `src/infrastructure/logging/log_context.py`.
+- Logging is a **bound logger**: `JsonLogger` is request-scoped; the `request_context` middleware (`src/api/middleware.py`) mints (or accepts an inbound `X-Request-ID`) and calls `bind_request_id` once (raises on a second call), echoing it back as the `X-Request-ID` response header, and `user_id` is read from the injected `UserContext`. `configure_logging()` sets up the process-wide handler once at startup (from `main.lifespan`).
 
 ### Database
 - All constraints MUST have an explicit `name` (`uq_`, `fk_`, `ck_`, `ix_` prefix).
@@ -82,18 +83,19 @@ missing binding fails at runtime on first resolution (accepted trade-off).
 
 ### Code Style
 - Max line length: 140 characters (`skip-magic-trailing-comma = true` — the formatter uses the full width). Run `uv run ruff check src/ tests/ --fix && uv run ruff format src/ tests/` after every change. Run `uv run pyrefly check` to type-check.
-- Always use `uv run`. API prefix: `/api/v1`.
+- Always use `uv run`. URL shape: `/api/<entity>/<version>/<path>` (e.g. `/api/users/v1`) — `/api` base on the domain router, `/<entity>/v1` on each `include_router` call so the version is per-endpoint.
+- **Never introduce a lint/type-check suppression** (`# noqa`, `# type: ignore`, pyrefly ignore comments, or equivalent) **without checking with the user first.** If satisfying a rule would require one, stop and present the design alternatives that avoid it instead of silently suppressing.
 
 ### Testing
 - Domain: pure entity unit tests in `tests/domain/` (no mocks).
 - Use case tests: `AsyncMock(spec=UserRepository)` for the repository port; `FakeTransactionContext` asserting commit-on-success / no-commit-on-failure.
-- Route tests: minimal `FastAPI()` + `app.state.injector = Injector([TestModule()])` binding mock instances (`AsyncMock(spec=UserUseCase)`), plus `app.dependency_overrides` for `get_current_user` — never import `src/main.py`.
+- Route tests: minimal `FastAPI()` + `app.state.injector = Injector([TestModule()])` binding mock instances (`AsyncMock(spec=CreateUserUseCase)`), plus `app.dependency_overrides` for `get_current_user` — never import `src/main.py`.
 - DI machinery tests live in `tests/infrastructure/di/`.
 - `asyncio_mode = "auto"` is configured (no `@pytest.mark.asyncio`).
 
 ### Anti-Patterns (Never)
 - Do not leave the domain anemic — invariants and state transitions belong on the entity.
-- Do not wire bindings outside `AppModule.configure()`; always bind through `TypedBinder`.
+- Do not wire bindings outside the composition root (`AppModule.configure()` or the per-domain `register()` functions in `src/api/dependencies/bindings/` it calls); always bind through `TypedBinder` (never plain tuples). Keep binding modules in the API layer — never in `src/application/`.
 - Do not omit `@inject` on implementations whose `__init__` takes dependencies — resolution fails with `TypeError`.
 - Do not keep session state in a module-global `ContextVar`; inject the request-scoped session.
 - Do not pass sessions to use cases.
@@ -105,3 +107,4 @@ missing binding fails at runtime on first resolution (accepted trade-off).
 - Do not write module docstrings or file header comments.
 - Do not create classes of only static methods; use module functions.
 - Do not bypass use cases — routes never call repositories directly.
+- Do not add `# noqa`, `# type: ignore`, or any other lint/type suppression without checking with the user first — propose a design that avoids the violation instead.

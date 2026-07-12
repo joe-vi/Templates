@@ -1,15 +1,14 @@
 from injector import Binder, Module, provider, singleton
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 
+from src.api.dependencies.bindings import auth as auth_bindings
+from src.api.dependencies.bindings import user as user_bindings
 from src.application.services.logger import Logger
 from src.application.services.password_hasher import PasswordHasher
 from src.application.services.token_service import TokenService
 from src.application.services.transaction_context import TransactionContext
 from src.application.services.user_context import UserContext
-from src.application.use_cases.auth.auth_use_case import AuthUseCase
-from src.application.use_cases.user.user_use_case import UserUseCase
 from src.config.settings import Settings, get_settings
-from src.domain.repositories.user.user_repository import UserRepository
 from src.infrastructure.auth.bcrypt_password_hasher import BcryptPasswordHasher
 from src.infrastructure.auth.jwt_token_service import JwtTokenService
 from src.infrastructure.auth.request_user_context import RequestUserContext
@@ -18,42 +17,27 @@ from src.infrastructure.database.sqlalchemy_transaction_context import SqlAlchem
 from src.infrastructure.di.request_scope import request
 from src.infrastructure.di.typed_binder import TypedBinder
 from src.infrastructure.logging.json_logger import JsonLogger
-from src.infrastructure.repositories.user.sqlalchemy_user_repository import SqlAlchemyUserRepository
 
 
 class AppModule(Module):
-    """Composition root: binds every port to its adapter with an explicit scope.
-
-    ``TypedBinder`` makes each binding a one-liner declaring implementation,
-    port, and scope — and a binding whose implementation does not satisfy its
-    port is a type-checker error at that line. There is no graph-completeness
-    check: a missing binding surfaces as a runtime error on first resolution.
-
-    Scopes:
-        singleton — one instance for the process (engine, stateless services).
-        request   — one instance per HTTP request (session, repositories,
-                    transaction context, use cases). Everything in a request
-                    shares the same ``AsyncSession``, which is what makes a
-                    multi-repository ``TransactionContext.begin()`` block
-                    atomic. The request scope also disposes its objects on
-                    request end (the session is closed via ``aclose()``).
-    """
+    """Composition root: binds every port to its adapter with an explicit scope."""
 
     def configure(self, binder: Binder) -> None:
-        """Declare all port–adapter bindings."""
+        """Declare the cross-cutting bindings and delegate each domain's to its ``register()``."""
         typed_binder = TypedBinder(binder)
 
         # Stateless services — one instance per process.
         typed_binder.bind_typed(PasswordHasher).to(BcryptPasswordHasher, scope=singleton)
         typed_binder.bind_typed(TokenService).to(JwtTokenService, scope=singleton)
-        typed_binder.bind_typed(Logger).to(JsonLogger, scope=singleton)
 
-        # Per-request collaborators — auto-wired from constructor type hints.
+        # Per-request collaborators holding request state.
+        typed_binder.bind_typed(Logger).to(JsonLogger, scope=request)
         typed_binder.bind_typed(UserContext).to(RequestUserContext, scope=request)
-        typed_binder.bind_typed(UserRepository).to(SqlAlchemyUserRepository, scope=request)
         typed_binder.bind_typed(TransactionContext).to(SqlAlchemyTransactionContext, scope=request)
-        typed_binder.bind_self_typed(UserUseCase, scope=request)
-        typed_binder.bind_self_typed(AuthUseCase, scope=request)
+
+        # Per-domain repositories and use cases (transient).
+        user_bindings.register(typed_binder)
+        auth_bindings.register(typed_binder)
 
     @singleton
     @provider

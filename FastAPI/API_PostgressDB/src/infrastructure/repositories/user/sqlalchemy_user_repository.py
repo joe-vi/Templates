@@ -25,13 +25,7 @@ def _to_entity(model: user_model.UserModel) -> User:
 
 
 class SqlAlchemyUserRepository(UserRepository):
-    """``UserRepository`` adapter backed by SQLAlchemy and PostgreSQL.
-
-    Receives the request-scoped ``AsyncSession`` by constructor injection,
-    shared with every other adapter in the request. Mutations flush so
-    database errors surface here and are mapped to result enums; the
-    transaction boundary is owned by the use case via ``TransactionContext``.
-    """
+    """``UserRepository`` adapter backed by SQLAlchemy and PostgreSQL."""
 
     @inject
     def __init__(self, session: AsyncSession) -> None:

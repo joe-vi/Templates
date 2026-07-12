@@ -4,13 +4,7 @@ from typing import Any
 
 
 class _Binding[P]:
-    """Returned by ``TypedBinder.bind_typed``; records the binding when
-    ``to`` (a single implementation) or ``to_many`` (a collection) is called.
-
-    The type variable P is fixed by the interface passed to ``bind_typed``,
-    so both methods require implementations of type[P] and a mismatch is a
-    type-checker error.
-    """
+    """Records a binding: ``to`` for one implementation, ``to_many`` for a collection."""
 
     def __init__(self, binder: Any, interface: type[P]) -> None:
         self._binder = binder
@@ -28,27 +22,7 @@ class _Binding[P]:
 
 
 class TypedBinder:
-    """Statically-typed facade over an injector Binder.
-
-        typed_binder = TypedBinder(binder)
-        typed_binder.bind_typed(UserRepository).to(SqlAlchemyUserRepository, scope=request)
-        typed_binder.bind_self_typed(StandaloneService, scope=request)
-
-    Passing an implementation that does not satisfy its port is a
-    type-checker error at the call site (dev time and CI). There is no
-    runtime conformance check, and no graph-completeness check: a missing
-    binding surfaces as a runtime error on first resolution.
-
-    ``bind_typed`` returns a small builder whose ``to``/``to_many`` methods
-    record the binding. The type variable P is solved solely from the
-    interface passed to ``bind_typed``, so ``to``/``to_many`` require an
-    implementation of type[P]. A single flat method bind_typed(interface,
-    impl) would not work: the checker would infer P as a common supertype of
-    both arguments and report no error.
-
-    Any other Binder method (bind_scope, install, and so on) passes straight
-    through.
-    """
+    """Statically-typed facade over an injector Binder."""
 
     def __init__(self, binder: Any) -> None:
         self._binder = binder

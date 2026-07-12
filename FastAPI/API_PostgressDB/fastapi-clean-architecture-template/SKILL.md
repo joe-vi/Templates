@@ -26,9 +26,9 @@ For auditing an existing project use `/fastapi-clean-architecture-review`. To ac
 
 ## Cross-cutting rules (apply to every generated file)
 
-- **No module docstrings or top-of-file comments.** The contract is documented once, on the Protocol port (Google-style docstrings); implementations explicitly subclass their port and inherit the docs. Implementation classes get a short mechanism-note class docstring only; no `__init__` docstrings.
+- **No module docstrings or top-of-file comments.** The contract is documented once, on the Protocol port with **concise** docstrings — a one-line summary plus `Args`/`Returns`/`Raises` only, never implementation details, rationale, or usage examples; implementations explicitly subclass their port and inherit the docs. Implementation classes get a short mechanism-note class docstring only; no `__init__` docstrings.
 - **Rich domain**: entities enforce invariants in `__post_init__` (raise `ValueError`) and expose behaviour (`activate()`, `is_active`) — never anemic field bags.
-- **Use cases are plain concrete classes** (`<Entity>UseCase`) — no separate interface; they carry their own method docstrings.
+- **Use cases are plain concrete classes, one per operation** with a single `execute` method (`Create<Entity>UseCase`) — no separate interface; each declares only the ports its operation needs and carries its own method docstrings.
 - Line length 140 with `skip-magic-trailing-comma = true`.
 
 ## Workflow
@@ -53,7 +53,7 @@ Parse all flags. Apply defaults for any flag not provided.
 │   │   └── repositories/          # Protocol ports, one per aggregate root
 │   ├── application/
 │   │   ├── services/              # Protocol ports
-│   │   └── use_cases/             # <entity>_use_case.py (concrete class)
+│   │   └── use_cases/             # <operation>_use_case.py (one concrete class per operation)
 │   ├── infrastructure/
 │   │   ├── di/                    # request_scope.py, typed_binder.py (injector extensions)
 │   │   ├── auth/
@@ -118,10 +118,10 @@ Ports are `typing.Protocol`s in `src/application/services/`; adapters are mechan
 
 - `PasswordHasher` port / `BcryptPasswordHasher` adapter — bcrypt via passlib.
 - `TokenService` port / `JwtTokenService` adapter — PyJWT; issues access + refresh JWTs from settings.
-- `Logger` port / `JsonLogger` adapter — structured logger; request correlation (`request_id`, `user_id`) via context vars in `infrastructure/logging/log_context.py`.
+- `Logger` port / `JsonLogger` adapter — request-scoped bound logger; the `request_context` middleware (`src/api/middleware.py`) mints (or accepts an inbound `X-Request-ID`) and calls `bind_request_id` once (raises on a second call), echoing it back as the `X-Request-ID` response header, and `user_id` is read from the request-scoped `UserContext`. Log emission never raises when the id is unbound (the field is simply omitted). `configure_logging()` sets up the process-wide handler once at startup.
 - `UserContext` port / `RequestUserContext` adapter — request-scoped holder of the caller's identity; `populate()` once by the guard (second call raises), unpopulated reads raise. Inject into use cases needing the caller (auditing, roles/permissions).
-- `jwt_dependency.py` — `get_current_user` decodes the JWT, populates `UserContext`, records the user id in the logging context, returns `TokenClaimsDTO`. Protect routers with `dependencies=[Depends(get_current_user)]`.
-- Auth use case + DTOs + routes under `src/application/use_cases/auth/` and `src/api/routers/auth/`.
+- `jwt_dependency.py` — `get_current_user` decodes the JWT, populates `UserContext`, returns `TokenClaimsDTO`. Protect routers with `dependencies=[Depends(get_current_user)]`.
+- Auth use cases (one per operation: login, refresh) + DTOs + per-operation route modules under `src/application/use_cases/auth/` and `src/api/routers/auth/`.
 
 #### `oauth2`
 
@@ -153,20 +153,20 @@ Ports are `typing.Protocol`s in `src/application/services/`; adapters are mechan
 
 - `injector = Injector([AppModule()])` at module level; `app.state.injector = injector`.
 - `lifespan`: dispose the engine on shutdown (`await app.state.injector.get(AsyncEngine).dispose()`).
-- `FastAPI(lifespan=lifespan)`; a `request_context` middleware that enters `async_request_scope()` and scopes the `request_id`/`user_id` context vars per request.
+- `FastAPI(lifespan=lifespan)` (lifespan calls `configure_logging(settings)` at startup and disposes the engine at shutdown); register the `request_context` middleware (from `src/api/middleware.py`), which enters `async_request_scope()` per request, binds the `X-Request-ID` on the `Logger`, and echoes it back as the response header.
 - `app.include_router(...)` for each router.
 
-Copy `request_scope.py` and `typed_binder.py` verbatim from `FastAPI/API_PostgressDB/src/infrastructure/di/` into the new project's `src/infrastructure/di/`, and `injected.py` from `FastAPI/API_PostgressDB/src/api/dependencies/`.
+Copy `request_scope.py` and `typed_binder.py` verbatim from `FastAPI/API_PostgressDB/src/infrastructure/di/` into the new project's `src/infrastructure/di/`, `injected.py` from `FastAPI/API_PostgressDB/src/api/dependencies/`, and `middleware.py` from `FastAPI/API_PostgressDB/src/api/`.
 
 ### Step 9 — Generate the use cases and composition root
 
-For each entity generate a concrete use case class with full contract docstrings on its methods (no port — it is the single source).
+For each entity generate a concrete use case class with concise contract docstrings on its methods (no port — it is the single source).
 
 `AppModule` in `src/api/dependencies/providers.py` is the composition root — one declarative line per binding via `TypedBinder`, constructors auto-wired via `@inject`:
-- Stateless singletons (`PasswordHasher`, `TokenService`, `Logger`, cache): `typed_binder.bind_typed(PasswordHasher).to(BcryptPasswordHasher, scope=singleton)`.
+- Stateless singletons (`PasswordHasher`, `TokenService`, cache): `typed_binder.bind_typed(PasswordHasher).to(BcryptPasswordHasher, scope=singleton)`. The bound `Logger` is request-scoped (`bind_typed(Logger).to(JsonLogger, scope=request)`).
 - Engine, session factory: singleton `@provider` methods; the session: a request-scoped `@provider` method (disposed via `aclose()` by the scope teardown).
-- `bind_typed(<Entity>Repository).to(Sqlalchemy<Entity>Repository, scope=request)` and `bind_typed(TransactionContext).to(SqlAlchemyTransactionContext, scope=request)` — same request session, so repositories and the transaction context share one transaction.
-- `bind_self_typed(<Entity>UseCase, scope=request)` — routes depend on it via `Annotated[<Entity>UseCase, Injected(<Entity>UseCase)]`.
+- `bind_typed(TransactionContext).to(SqlAlchemyTransactionContext, scope=request)` (cross-cutting, in `AppModule`). Repositories are **transient** (`bind_typed(<Entity>Repository).to(Sqlalchemy<Entity>Repository)`) but still receive the one request-scoped session, so they and the transaction context share one transaction.
+- Per-domain binds live in `src/api/dependencies/bindings/<domain>.py` as `register(typed_binder)`, called from `AppModule.configure()`: the repository (transient) and one `bind_self_typed(<Operation>UseCase)` per operation (transient). Each route depends on its use case via `Annotated[<Operation>UseCase, Injected(<Operation>UseCase)]`.
 - Add `@inject` to every implementation whose `__init__` takes dependencies.
 
 ### Step 10 — Generate `pyproject.toml`
@@ -200,7 +200,7 @@ Only variables for the resolved stack with placeholder values. No real secrets.
 
 - `tests/domain/`: pure entity tests — invariants and behaviour, no mocks.
 - `tests/application/use_cases/`: use case tests with `AsyncMock(spec=<Entity>Repository)` and a fake `TransactionContext`.
-- `tests/api/routers/`: route tests binding `AsyncMock(spec=<Entity>UseCase)` in a `TestModule`.
+- `tests/api/routers/`: one test module per route, binding `AsyncMock(spec=<Operation>UseCase)` instances in a `TestModule`.
 
 ### Step 14 — Validate
 

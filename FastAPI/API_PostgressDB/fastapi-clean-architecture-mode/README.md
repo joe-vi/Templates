@@ -36,8 +36,8 @@ Domain has zero external dependencies. Every other layer may only import from th
 
 **Abstraction boundaries**
 - Use cases are plain concrete classes depending on `typing.Protocol` ports, never concrete adapters; adapters explicitly subclass their port and inherit its docstrings (contracts documented once, IDE hover everywhere)
-- `AppModule.configure()` in `src/api/dependencies/providers.py` is the only place that wires adapters to ports (the composition root)
-- One line binds implementation, port, and scope via `TypedBinder`: `bind_typed(Port).to(Impl, scope=request)`; a mismatched implementation is a pyrefly error at that line; constructors are auto-wired via `@inject`
+- `AppModule.configure()` in `src/api/dependencies/providers.py` (cross-cutting binds) and the per-domain `register(typed_binder)` functions it calls in `src/api/dependencies/bindings/<domain>.py` are the only places that wire adapters to ports (the composition root, all API layer)
+- One line binds implementation and port via `TypedBinder`: `bind_typed(Port).to(Impl)`; a mismatched implementation is a pyrefly error at that line; constructors are auto-wired via `@inject`. Use cases and repositories are transient; session, transaction context, logger, and user context are request-scoped
 
 **Repository pattern & unit of work**
 - One CRUD operation per method — orchestration belongs in use cases, not repositories
@@ -47,11 +47,11 @@ Domain has zero external dependencies. Every other layer may only import from th
 
 **Dependency injection (injector + TypedBinder)**
 - `AppModule` declares every binding with an explicit scope (`singleton` / `request`); implementations with constructor dependencies carry `@inject`
-- Routes and guards resolve via `Annotated[UserUseCase, Injected(UserUseCase)]`
+- Routes and guards resolve via `Annotated[CreateUserUseCase, Injected(CreateUserUseCase)]`
 - The request scope disposes its objects on request end (LIFO, `aclose()` preferred); tests bind mock instances in a `TestModule` on `app.state.injector`
 
 **Naming & documentation discipline**
-- Ports are `Protocol`s with clean names (`UserRepository`); adapters are mechanism-qualified (`SqlAlchemyUserRepository`); use cases are plain concrete classes (`UserUseCase`)
+- Ports are `Protocol`s with clean names (`UserRepository`); adapters are mechanism-qualified (`SqlAlchemyUserRepository`); use cases are one plain concrete class per operation with a single `execute` method (`CreateUserUseCase`)
 - No module docstrings or top-of-file comments; contract docstrings live on the port only
 - DTOs: frozen Pydantic models inheriting `DTOBase` (camelCase on the wire), `DTO` suffix; `list[UserDTO]` returned directly, no wrapper DTOs
 - Converters are module functions (entity ↔ DTO only); DTOs inherit `DTOBase` and double as the API request/response bodies — no per-entity schemas

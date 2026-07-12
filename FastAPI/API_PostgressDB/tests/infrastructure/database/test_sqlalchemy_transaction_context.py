@@ -74,12 +74,7 @@ class TestRollback:
         assert await _count_users(session_factory) == 0
 
     async def test_failed_operation_rolls_back_earlier_success(self, session_factory: async_sessionmaker[AsyncSession]):
-        """The user-facing guarantee: one failure rolls back the whole unit.
-
-        Models a use case orchestrating two repository calls: the first
-        succeeds, the second hits a unique-constraint violation, the use
-        case returns without committing — and the first insert must be gone.
-        """
+        """One failure rolls back the whole unit of work."""
         async with session_factory() as session:
             repository = SqlAlchemyUserRepository(session)
             transaction_context = SqlAlchemyTransactionContext(session)
