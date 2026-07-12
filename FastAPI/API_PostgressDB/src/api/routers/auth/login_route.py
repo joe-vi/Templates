@@ -13,7 +13,7 @@ UseCaseDep = Annotated[LoginUseCase, Injected(LoginUseCase)]
 
 
 @router.post(
-    "/auth/login",
+    "/login",
     response_model=auth_dto.TokenDTO,
     responses={
         status.HTTP_200_OK: {"description": "Authentication successful"},

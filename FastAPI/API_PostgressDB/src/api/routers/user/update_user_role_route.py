@@ -15,7 +15,7 @@ UseCaseDep = Annotated[UpdateUserRoleUseCase, Injected(UpdateUserRoleUseCase)]
 
 
 @router.patch(
-    "/users/{user_id}/role",
+    "/{user_id}/role",
     response_model=operation_schema.UpdateOperationResponse,
     responses={
         status.HTTP_200_OK: {"description": "User role updated successfully"},

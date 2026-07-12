@@ -12,7 +12,7 @@ UseCaseDep = Annotated[GetUserUseCase, Injected(GetUserUseCase)]
 
 
 @router.get(
-    "/users/{user_id}",
+    "/{user_id}",
     response_model=user_dto.UserDTO,
     responses={
         status.HTTP_401_UNAUTHORIZED: {"description": "Missing or invalid JWT token"},

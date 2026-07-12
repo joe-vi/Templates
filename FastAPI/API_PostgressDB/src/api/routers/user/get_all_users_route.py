@@ -12,9 +12,7 @@ UseCaseDep = Annotated[GetAllUsersUseCase, Injected(GetAllUsersUseCase)]
 
 
 @router.get(
-    "/users",
-    response_model=list[user_dto.UserDTO],
-    responses={status.HTTP_401_UNAUTHORIZED: {"description": "Missing or invalid JWT token"}},
+    "", response_model=list[user_dto.UserDTO], responses={status.HTTP_401_UNAUTHORIZED: {"description": "Missing or invalid JWT token"}}
 )
 async def get_all_users(use_case: UseCaseDep) -> list[user_dto.UserDTO]:
     """Get all users."""

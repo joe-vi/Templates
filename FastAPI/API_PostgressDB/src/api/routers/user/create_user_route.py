@@ -14,7 +14,7 @@ UseCaseDep = Annotated[CreateUserUseCase, Injected(CreateUserUseCase)]
 
 
 @router.post(
-    "/users",
+    "",
     response_model=operation_schema.CreateOperationResponse,
     status_code=status.HTTP_201_CREATED,
     responses={

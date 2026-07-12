@@ -13,7 +13,7 @@ UseCaseDep = Annotated[RefreshTokenUseCase, Injected(RefreshTokenUseCase)]
 
 
 @router.post(
-    "/auth/refresh",
+    "/refresh",
     response_model=auth_dto.TokenDTO,
     responses={
         status.HTTP_200_OK: {"description": "Token refreshed successfully"},

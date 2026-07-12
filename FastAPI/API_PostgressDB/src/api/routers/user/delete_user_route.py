@@ -13,7 +13,7 @@ UseCaseDep = Annotated[DeleteUserUseCase, Injected(DeleteUserUseCase)]
 
 
 @router.delete(
-    "/users/{user_id}",
+    "/{user_id}",
     response_model=operation_schema.DeleteOperationResponse,
     responses={
         status.HTTP_200_OK: {"description": "User deleted successfully"},
