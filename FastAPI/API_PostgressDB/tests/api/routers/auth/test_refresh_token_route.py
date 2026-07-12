@@ -12,7 +12,7 @@ class TestRefreshTokenRoute:
     ):
         mock_refresh_token_use_case.execute.return_value = (operation_results.LoginResult.SUCCESS, make_token_dto)
 
-        response = await client.post("/api/v1/auth/refresh", json={"refreshToken": "refresh.jwt"})
+        response = await client.post("/api/auth/v1/refresh", json={"refreshToken": "refresh.jwt"})
 
         assert response.status_code == 200
         assert response.json()["accessToken"] == "access.jwt"
@@ -22,18 +22,18 @@ class TestRefreshTokenRoute:
     ):
         mock_refresh_token_use_case.execute.return_value = (operation_results.LoginResult.SUCCESS, make_token_dto)
 
-        response = await client.post("/api/v1/auth/refresh", json={"refresh_token": "refresh.jwt"})
+        response = await client.post("/api/auth/v1/refresh", json={"refresh_token": "refresh.jwt"})
 
         assert response.status_code == 200
 
     async def test_returns_401_on_invalid_refresh_token(self, client: AsyncClient, mock_refresh_token_use_case: AsyncMock):
         mock_refresh_token_use_case.execute.return_value = (operation_results.LoginResult.INVALID_CREDENTIALS, None)
 
-        response = await client.post("/api/v1/auth/refresh", json={"refreshToken": "garbage"})
+        response = await client.post("/api/auth/v1/refresh", json={"refreshToken": "garbage"})
 
         assert response.status_code == 401
 
     async def test_returns_422_when_refresh_token_is_missing(self, client: AsyncClient, mock_refresh_token_use_case: AsyncMock):
-        response = await client.post("/api/v1/auth/refresh", json={})
+        response = await client.post("/api/auth/v1/refresh", json={})
 
         assert response.status_code == 422

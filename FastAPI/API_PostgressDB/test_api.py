@@ -98,7 +98,7 @@ def run_tests(base: str) -> None:
         # ----------------------------------------------------------------
         _section("2. Auth — login")
 
-        r = client.post("/api/v1/auth/login", json={"username": "admin", "password": "AdminPass123"})
+        r = client.post("/api/auth/v1/login", json={"username": "admin", "password": "AdminPass123"})
         if _check("POST /auth/login  (valid credentials)", r, 200):
             body = r.json()
             access_token: str = body["accessToken"]
@@ -110,31 +110,31 @@ def run_tests(base: str) -> None:
 
         _check(
             "POST /auth/login  (wrong password)  →  401",
-            client.post("/api/v1/auth/login", json={"username": "admin", "password": "WRONG"}),
+            client.post("/api/auth/v1/login", json={"username": "admin", "password": "WRONG"}),
             401,
         )
         _check(
             "POST /auth/login  (non-existent user)  →  401",
-            client.post("/api/v1/auth/login", json={"username": "nobody", "password": "pass"}),
+            client.post("/api/auth/v1/login", json={"username": "nobody", "password": "pass"}),
             401,
         )
-        _check("POST /auth/login  (missing fields)  →  422", client.post("/api/v1/auth/login", json={}), 422)
+        _check("POST /auth/login  (missing fields)  →  422", client.post("/api/auth/v1/login", json={}), 422)
 
         # ----------------------------------------------------------------
         # 3. Auth — token refresh
         # ----------------------------------------------------------------
         _section("3. Auth — token refresh")
 
-        r = client.post("/api/v1/auth/refresh", json={"refresh_token": refresh_token})
+        r = client.post("/api/auth/v1/refresh", json={"refresh_token": refresh_token})
         if _check("POST /auth/refresh  (valid refresh token)", r, 200):
             access_token = r.json()["accessToken"]  # keep the newest token
 
         _check(
             "POST /auth/refresh  (invalid token)  →  401",
-            client.post("/api/v1/auth/refresh", json={"refresh_token": "not.a.valid.token"}),
+            client.post("/api/auth/v1/refresh", json={"refresh_token": "not.a.valid.token"}),
             401,
         )
-        _check("POST /auth/refresh  (missing field)  →  422", client.post("/api/v1/auth/refresh", json={}), 422)
+        _check("POST /auth/refresh  (missing field)  →  422", client.post("/api/auth/v1/refresh", json={}), 422)
 
         # ----------------------------------------------------------------
         # 4. Users — authentication enforcement
@@ -142,8 +142,8 @@ def run_tests(base: str) -> None:
         _section("4. User routes — auth enforcement")
         auth = {"Authorization": f"Bearer {access_token}"}
 
-        _check("GET /users  (no auth header)  →  401", client.get("/api/v1/users"), 401)
-        _check("GET /users  (invalid token)  →  401", client.get("/api/v1/users", headers={"Authorization": "Bearer garbage"}), 401)
+        _check("GET /users  (no auth header)  →  401", client.get("/api/users/v1"), 401)
+        _check("GET /users  (invalid token)  →  401", client.get("/api/users/v1", headers={"Authorization": "Bearer garbage"}), 401)
 
         # ----------------------------------------------------------------
         # 5. Users — create
@@ -151,7 +151,7 @@ def run_tests(base: str) -> None:
         _section("5. Users — create")
 
         r = client.post(
-            "/api/v1/users",
+            "/api/users/v1",
             json={"email": "testscript@example.com", "username": "testscript", "password": "TestPass123", "role": "user"},
             headers=auth,
         )
@@ -163,7 +163,7 @@ def run_tests(base: str) -> None:
         _check(
             "POST /users  (duplicate email/username)  →  409",
             client.post(
-                "/api/v1/users",
+                "/api/users/v1",
                 json={"email": "testscript@example.com", "username": "testscript", "password": "TestPass123", "role": "user"},
                 headers=auth,
             ),
@@ -171,17 +171,17 @@ def run_tests(base: str) -> None:
         )
         _check(
             "POST /users  (invalid email format)  →  422",
-            client.post("/api/v1/users", json={"email": "not-an-email", "username": "someone", "password": "TestPass123"}, headers=auth),
+            client.post("/api/users/v1", json={"email": "not-an-email", "username": "someone", "password": "TestPass123"}, headers=auth),
             422,
         )
         _check(
             "POST /users  (password too short)  →  422",
-            client.post("/api/v1/users", json={"email": "short@example.com", "username": "shortpw", "password": "abc"}, headers=auth),
+            client.post("/api/users/v1", json={"email": "short@example.com", "username": "shortpw", "password": "abc"}, headers=auth),
             422,
         )
         _check(
             "POST /users  (missing username)  →  422",
-            client.post("/api/v1/users", json={"email": "nouser@example.com", "password": "TestPass123"}, headers=auth),
+            client.post("/api/users/v1", json={"email": "nouser@example.com", "password": "TestPass123"}, headers=auth),
             422,
         )
 
@@ -190,16 +190,16 @@ def run_tests(base: str) -> None:
         # ----------------------------------------------------------------
         _section("6. Users — read")
 
-        _check("GET /users  (authenticated)  →  200", client.get("/api/v1/users", headers=auth), 200)
+        _check("GET /users  (authenticated)  →  200", client.get("/api/users/v1", headers=auth), 200)
 
         if new_user_id != -1:
-            r = client.get(f"/api/v1/users/{new_user_id}", headers=auth)
+            r = client.get(f"/api/users/v1/{new_user_id}", headers=auth)
             if _check(f"GET /users/{new_user_id}  (found)  →  200", r, 200):
                 u = r.json()
                 assert u["username"] == "testscript", f"unexpected username: {u['username']}"
                 assert u["role"] == "user", f"unexpected role: {u['role']}"
 
-        _check("GET /users/999999  (not found)  →  404", client.get("/api/v1/users/999999", headers=auth), 404)
+        _check("GET /users/999999  (not found)  →  404", client.get("/api/users/v1/999999", headers=auth), 404)
 
         # ----------------------------------------------------------------
         # 7. Users — update role
@@ -207,22 +207,22 @@ def run_tests(base: str) -> None:
         _section("7. Users — update role")
 
         if new_user_id != -1:
-            r = client.patch(f"/api/v1/users/{new_user_id}/role", json={"role": "admin"}, headers=auth)
+            r = client.patch(f"/api/users/v1/{new_user_id}/role", json={"role": "admin"}, headers=auth)
             if _check(f"PATCH /users/{new_user_id}/role  (user → admin)  →  200", r, 200):
-                updated = client.get(f"/api/v1/users/{new_user_id}", headers=auth).json()
+                updated = client.get(f"/api/users/v1/{new_user_id}", headers=auth).json()
                 assert updated["role"] == "admin", f"role not updated: {updated['role']}"
 
-            r = client.patch(f"/api/v1/users/{new_user_id}/role", json={"role": "user"}, headers=auth)
+            r = client.patch(f"/api/users/v1/{new_user_id}/role", json={"role": "user"}, headers=auth)
             _check(f"PATCH /users/{new_user_id}/role  (admin → user)  →  200", r, 200)
 
         _check(
             "PATCH /users/999999/role  (not found)  →  404",
-            client.patch("/api/v1/users/999999/role", json={"role": "admin"}, headers=auth),
+            client.patch("/api/users/v1/999999/role", json={"role": "admin"}, headers=auth),
             404,
         )
         _check(
             "PATCH /users/1/role  (invalid role value)  →  422",
-            client.patch("/api/v1/users/1/role", json={"role": "SUPERUSER"}, headers=auth),
+            client.patch("/api/users/v1/1/role", json={"role": "SUPERUSER"}, headers=auth),
             422,
         )
 
@@ -232,10 +232,10 @@ def run_tests(base: str) -> None:
         _section("8. Users — delete")
 
         if new_user_id != -1:
-            _check(f"DELETE /users/{new_user_id}  →  200", client.delete(f"/api/v1/users/{new_user_id}", headers=auth), 200)
-            _check(f"GET /users/{new_user_id}  (after delete)  →  404", client.get(f"/api/v1/users/{new_user_id}", headers=auth), 404)
+            _check(f"DELETE /users/{new_user_id}  →  200", client.delete(f"/api/users/v1/{new_user_id}", headers=auth), 200)
+            _check(f"GET /users/{new_user_id}  (after delete)  →  404", client.get(f"/api/users/v1/{new_user_id}", headers=auth), 404)
 
-        _check("DELETE /users/999999  (not found)  →  404", client.delete("/api/v1/users/999999", headers=auth), 404)
+        _check("DELETE /users/999999  (not found)  →  404", client.delete("/api/users/v1/999999", headers=auth), 404)
 
 
 # ---------------------------------------------------------------------------

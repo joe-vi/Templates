@@ -66,7 +66,7 @@ missing binding fails at runtime on first resolution (accepted trade-off).
 ### Routes & Responses
 - Routes return the response MODEL; FastAPI serialises it (camelCase). Never return `JSONResponse(model.model_dump())`.
 - For result-dependent status, inject `response: Response`, set `response.status_code = result_status_maps.<OP>_STATUS_MAP[result]`, return the model. Use `HTTPException` for not-found / auth failures.
-- The `/<entity>` resource segment is declared ONCE, on the `router.include_router(op.router, prefix="/<entity>")` call in `router.py`; operation files use resource-relative paths (`""` for the collection root, `/{id}` for item routes) and never repeat the segment. Do NOT move it onto the router's own `prefix` — FastAPI rejects including a prefix-less router that has an empty collection-root path.
+- URL shape is `/api/<entity>/<version>/<path>` (e.g. `/api/users/v1`, `/api/auth/v1/login`). `/api` is the base on the domain router's `prefix`; the `/<entity>/v1` segment rides on each `router.include_router(op.router, prefix="/<entity>/v1")` call, so the version is per-endpoint (bump one endpoint to `/<entity>/v2` without touching others). Operation files use resource-relative paths (`""` for the collection root, `/{id}` for item routes) and never repeat the entity or version. Do NOT collapse the segment onto the router's own `prefix` — FastAPI rejects including a prefix-less router that has an empty collection-root path.
 
 ### Auth
 - `get_current_user` decodes the Bearer JWT, raises 401, populates the request-scoped `UserContext`, records the user id in the logging context, returns `TokenClaimsDTO`. Protect routers with `dependencies=[Depends(get_current_user)]`.
@@ -83,7 +83,7 @@ missing binding fails at runtime on first resolution (accepted trade-off).
 
 ### Code Style
 - Max line length: 140 characters (`skip-magic-trailing-comma = true` — the formatter uses the full width). Run `uv run ruff check src/ tests/ --fix && uv run ruff format src/ tests/` after every change. Run `uv run pyrefly check` to type-check.
-- Always use `uv run`. API prefix: `/api/v1`.
+- Always use `uv run`. URL shape: `/api/<entity>/<version>/<path>` (e.g. `/api/users/v1`) — `/api` base on the domain router, `/<entity>/v1` on each `include_router` call so the version is per-endpoint.
 - **Never introduce a lint/type-check suppression** (`# noqa`, `# type: ignore`, pyrefly ignore comments, or equivalent) **without checking with the user first.** If satisfying a rule would require one, stop and present the design alternatives that avoid it instead of silently suppressing.
 
 ### Testing
