@@ -19,7 +19,7 @@ For scaffolding a new project use `/fastapi-clean-architecture-template`. To act
 
 - **No module docstrings and no top-of-file comments** — flag any file that has them.
 - **Flag any `# noqa`, `# type: ignore`, or other lint/type suppression** found in the codebase — these require explicit user sign-off and should not be introduced or left unquestioned; report the underlying violation and suggest a design that avoids it.
-- **The contract is documented once, on the port**: Protocol classes and methods carry full Google-style docstrings; adapters **explicitly subclass their port** and inherit them. Flag duplicated method docstrings on adapters, and flag adapters that do not subclass their port. Classes with no port — the use cases — carry their own method docstrings.
+- **The contract is documented once, on the port**: Protocol classes and methods carry **concise** docstrings — a one-line summary plus `Args`/`Returns`/`Raises` only. Flag any docstring that includes implementation details, rationale, or usage examples. Adapters **explicitly subclass their port** and inherit them. Flag duplicated method docstrings on adapters, and flag adapters that do not subclass their port. Classes with no port — the use cases — carry their own method docstrings.
 - Implementation classes may keep a short class docstring with mechanism-specific notes only; `__init__` methods carry no docstrings.
 - Standalone public functions (converters, providers, guards, routes) carry their own docstrings.
 
@@ -35,7 +35,7 @@ Check:
 - **Import direction**: no imports from `src/application/`, `src/infrastructure/`, or `src/api/`; stdlib only (`dataclasses`, `enum`, `typing`)
 - **DDD richness**: entities are aggregate roots with behaviour — invariants enforced in `__post_init__` (raising `ValueError`) and intention-revealing state transitions (e.g. `activate()`/`deactivate()`, `is_active`). Flag anemic entities (bare field bags) and domain rules implemented in use cases that belong on the entity
 - **Naming**: entity classes are singular nouns; repository ports are `typing.Protocol`s with clean names (`UserRepository`, not `UserRepositoryBase`); one repository port per aggregate root; enums use `StrEnum` with lowercase values and live in `src/domain/enums/`; no entity-specific result enums (e.g. `CreateUserResult` is a violation)
-- **Documentation**: port methods carry Google-style docstrings (the single source); see documentation rules above
+- **Documentation**: port methods carry concise docstrings (the single source); see documentation rules above
 
 ### Phase 2 — Application layer (`src/application/`)
 
@@ -48,7 +48,7 @@ Check:
 - **Converters**: module-level functions, not classes of static methods
 - **Repository pattern**: use cases contain no exception handling for mutations — they forward repository results as-is; no direct session or DB access
 - **Transactions**: mutating use-case methods wrap repository calls in `TransactionContext.begin()` and call `transaction.commit()` only on the all-success path — flag any mutation outside a transaction block and any commit after a failed result
-- **Documentation**: use case methods carry their own Google-style docstrings (no port to inherit from)
+- **Documentation**: use case methods carry their own concise docstrings (no port to inherit from)
 
 ### Phase 3 — Infrastructure layer (`src/infrastructure/`)
 
@@ -78,7 +78,7 @@ Read all files in `src/api/`.
 Check:
 - **Naming**: DTOs inherit `DTOBase` and double as request/response bodies (no per-entity `Request`/`Response` schemas, no API converters); the entity↔DTO converters are module functions
 - **DI**:
-  - Composition root is `AppModule.configure()` in `src/api/dependencies/providers.py` (cross-cutting binds) plus the per-domain `register(typed_binder)` functions it calls in `src/api/dependencies/bindings/<domain>.py` — one `bind_typed(Port).to(Impl)` line per binding via `TypedBinder`; flag raw `binder.bind(...)` calls and `(port, adapter)` tuples for port bindings (both skip conformance checking), any binding module placed under `src/application/` (Application→Infrastructure violation), and any `fastapi-injector` usage. Use cases and repositories are transient (no scope); session, transaction context, logger, user context, and request id are `request`-scoped
+  - Composition root is `AppModule.configure()` in `src/api/dependencies/providers.py` (cross-cutting binds) plus the per-domain `register(typed_binder)` functions it calls in `src/api/dependencies/bindings/<domain>.py` — one `bind_typed(Port).to(Impl)` line per binding via `TypedBinder`; flag raw `binder.bind(...)` calls and `(port, adapter)` tuples for port bindings (both skip conformance checking), any binding module placed under `src/application/` (Application→Infrastructure violation), and any `fastapi-injector` usage. Use cases and repositories are transient (no scope); session, transaction context, logger, and user context are `request`-scoped
   - Every implementation whose `__init__` takes dependencies carries `@inject`; flag missing ones (runtime `TypeError`)
   - URLs follow `/api/<entity>/<version>/<path>` (e.g. `/api/users/v1`). Each route module covers one operation with its own `APIRouter()` and **resource-relative paths** (`""` for the collection root, `/{id}` for item routes — flag any operation file that repeats the `/<entity>` segment or the version in its path); it depends on its use case via `Annotated[CreateUserUseCase, Injected(CreateUserUseCase)]`; the entity's `router.py` carries the `/api` base (tags, guard) and aggregates via `include_router(op.router, prefix="/<entity>/v1")`, keeping the version per-endpoint; `__init__.py` stays empty
   - Guard functions live in `src/api/dependencies/`, not inside route files; `Depends(get_current_user)` declared on the `APIRouter`, not scattered in signatures

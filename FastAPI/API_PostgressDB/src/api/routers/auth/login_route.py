@@ -24,8 +24,6 @@ UseCaseDep = Annotated[LoginUseCase, Injected(LoginUseCase)]
 async def login(login_dto: auth_dto.LoginDTO, use_case: UseCaseDep) -> auth_dto.TokenDTO:
     """Authenticate a user and return a JWT access and refresh token pair.
 
-    The tokens embed the user's id and role as claims.
-
     Raises:
         HTTPException: 401 for invalid credentials, 403 for an inactive
             account, 500 for an unexpected failure.

@@ -5,11 +5,7 @@ from src.domain.enums import operation_results, user_enum
 
 
 class UserRepository(Protocol):
-    """Persistence port for the ``User`` aggregate.
-
-    Mutation methods never raise for expected database failures; they return
-    the shared operation result enums instead, and never commit.
-    """
+    """Persistence port for the ``User`` aggregate."""
 
     async def create(self, user: User) -> tuple[operation_results.CreateResult, int | None]:
         """Persist a new user aggregate.

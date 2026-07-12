@@ -1,15 +1,15 @@
-from collections.abc import AsyncGenerator, Awaitable, Callable
+from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, Request, Response
+from fastapi import FastAPI
 from injector import Injector
 from sqlalchemy.ext.asyncio import AsyncEngine
 
 from src.api.dependencies.providers import AppModule
+from src.api.middleware import request_context
 from src.api.routers.auth.router import router as auth_router
 from src.api.routers.user.router import router as user_router
 from src.config.settings import Settings
-from src.infrastructure.di.request_scope import async_request_scope
 from src.infrastructure.logging.json_logger import configure_logging
 
 injector = Injector([AppModule()])
@@ -31,14 +31,7 @@ app = FastAPI(
     lifespan=lifespan,
 )
 app.state.injector = injector
-
-
-@app.middleware("http")
-async def request_context(request: Request, call_next: Callable[[Request], Awaitable[Response]]) -> Response:
-    """Enter the DI request scope for the duration of the request."""
-    async with async_request_scope():
-        return await call_next(request)
-
+app.middleware("http")(request_context)
 
 app.include_router(auth_router)
 app.include_router(user_router)

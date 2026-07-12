@@ -1,5 +1,3 @@
-import uuid
-
 from injector import Binder, Module, provider, singleton
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 
@@ -19,19 +17,13 @@ from src.infrastructure.database.sqlalchemy_transaction_context import SqlAlchem
 from src.infrastructure.di.request_scope import request
 from src.infrastructure.di.typed_binder import TypedBinder
 from src.infrastructure.logging.json_logger import JsonLogger
-from src.infrastructure.logging.request_id import RequestId
 
 
 class AppModule(Module):
     """Composition root: binds every port to its adapter with an explicit scope."""
 
     def configure(self, binder: Binder) -> None:
-        """Declare the cross-cutting bindings and delegate per-domain ones.
-
-        Cross-cutting collaborators are bound here; each domain's repository
-        and use-case bindings live in ``src/api/dependencies/bindings/<domain>.py``
-        and are registered via its ``register(typed_binder)`` function.
-        """
+        """Declare the cross-cutting bindings and delegate each domain's to its ``register()``."""
         typed_binder = TypedBinder(binder)
 
         # Stateless services — one instance per process.
@@ -63,12 +55,6 @@ class AppModule(Module):
     @provider
     def provide_session_factory(self, engine: AsyncEngine) -> async_sessionmaker[AsyncSession]:
         return create_session_factory(engine)
-
-    @request
-    @provider
-    def provide_request_id(self) -> RequestId:
-        # One correlation id per request; the request-scoped JsonLogger binds it.
-        return RequestId(str(uuid.uuid4()))
 
     @request
     @provider

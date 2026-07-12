@@ -42,14 +42,14 @@ missing binding fails at runtime on first resolution (accepted trade-off).
 
 ### Documentation (single source, IDE hover)
 - NO module docstrings or top-of-file comments anywhere.
-- The contract is documented ONCE, on the port: Protocol classes/methods carry full Google-style docstrings. Adapters explicitly subclass their port (`class SqlAlchemyUserRepository(UserRepository):`) and inherit them — never repeat method docstrings in adapters; IDE hover resolves the port docs through the MRO.
+- The contract is documented ONCE, on the port: Protocol classes/methods carry **concise** docstrings — a one-line summary plus `Args`/`Returns`/`Raises` only, never implementation details, rationale, or usage examples. Adapters explicitly subclass their port (`class SqlAlchemyUserRepository(UserRepository):`) and inherit them — never repeat method docstrings in adapters; IDE hover resolves the port docs through the MRO.
 - Adapter classes keep a short class docstring for mechanism-specific notes only; no `__init__` docstrings.
 - Classes with no port — the use cases — carry their own method docstrings: they ARE the single source.
 - Standalone public functions (converters, providers, guards, routes) keep their own docstrings; route docstrings become OpenAPI descriptions.
 
 ### Dependency Injection (injector + TypedBinder)
 - Composition root: `AppModule.configure()` in `src/api/dependencies/providers.py` using the `TypedBinder` facade — one line per binding: `typed_binder.bind_typed(UserRepository).to(SqlAlchemyUserRepository)`. A wrong implementation for a port is a pyrefly error at that line. Concrete classes (use cases): one `bind_self_typed(CreateUserUseCase)` line per operation. `AppModule.configure()` holds the cross-cutting binds and delegates each domain's repository + use-case binds to a `register(typed_binder)` function in `src/api/dependencies/bindings/<domain>.py` (API layer, so it may import the adapters; keep `TypedBinder` — never plain tuples, which lose the static check).
-- Scopes chosen by what holds request state: `singleton` (engine, stateless services), `request` (session, transaction context, logger, user context, request id), and **transient** (no scope) for stateless orchestrators — use cases and repositories. Transient repos/use cases still share the one request-scoped session (injected), so the unit-of-work is unchanged. The scope is entered per request by the middleware in `main.py` and disposes its objects on exit (LIFO; `aclose()` preferred, async `close()` awaited).
+- Scopes chosen by what holds request state: `singleton` (engine, stateless services), `request` (session, transaction context, logger, user context), and **transient** (no scope) for stateless orchestrators — use cases and repositories. Transient repos/use cases still share the one request-scoped session (injected), so the unit-of-work is unchanged. The scope is entered per request by the `request_context` middleware (`src/api/middleware.py`) and disposes its objects on exit (LIFO; `aclose()` preferred, async `close()` awaited).
 - `@inject` REQUIRED on every implementation whose `__init__` takes dependencies (injector auto-wires from type hints; omitting it is a runtime `TypeError`). Construction logic lives in `@provider` methods on `AppModule`.
 - Routes/guards resolve via `Annotated[CreateUserUseCase, Injected(CreateUserUseCase)]` — a thin Depends over `app.state.injector`.
 - NO graph-completeness validation: a missing binding fails at runtime on first resolution.
@@ -71,7 +71,7 @@ missing binding fails at runtime on first resolution (accepted trade-off).
 ### Auth
 - `get_current_user` decodes the Bearer JWT, raises 401, populates the request-scoped `UserContext`, returns `TokenClaimsDTO`. Protect routers with `dependencies=[Depends(get_current_user)]`. (The bound logger reads `user_id` from `UserContext`; the guard touches no logging state.)
 - `UserContext` port (adapter `RequestUserContext`, `request` scope): inject into use cases/services needing the caller's identity (auditing, roles/permissions). `populate()` once by the guard — a second call raises; unpopulated reads raise. Pass scalar values to repositories, never the context object.
-- Logging is a **bound logger**: `JsonLogger` is request-scoped, binds a per-request `request_id` (from the request-scoped `RequestId` provider in `src/infrastructure/logging/request_id.py`) and reads `user_id` from the injected request-scoped `UserContext` (only when populated) — no ambient ContextVars. `configure_logging()` sets up the process-wide handler once at startup (called from `main.lifespan`).
+- Logging is a **bound logger**: `JsonLogger` is request-scoped; the `request_context` middleware (`src/api/middleware.py`) mints (or accepts an inbound `X-Request-ID`) and calls `bind_request_id` once (raises on a second call), echoing it back as the `X-Request-ID` response header, and `user_id` is read from the injected `UserContext`. `configure_logging()` sets up the process-wide handler once at startup (from `main.lifespan`).
 
 ### Database
 - All constraints MUST have an explicit `name` (`uq_`, `fk_`, `ck_`, `ix_` prefix).

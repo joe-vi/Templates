@@ -33,9 +33,10 @@ src/
 │   ├── di/{request_scope.py, typed_binder.py}   # injector extensions (framework plumbing, FastAPI-agnostic)
 │   ├── repositories/<entity>/sqlalchemy_<entity>_repository.py   # adapter (mechanism-qualified name)
 │   ├── auth/{bcrypt_password_hasher.py, jwt_token_service.py, request_user_context.py}
-│   ├── logging/{json_logger.py, request_id.py}
+│   ├── logging/json_logger.py
 │   └── database/{base.py, session.py, sqlalchemy_transaction_context.py, models/<entity>_model.py}
 └── api/
+    ├── middleware.py          # request_context: opens the DI request scope + binds the request's correlation id
     ├── dependencies/
     │   ├── injected.py        # Injected() route-side accessor (FastAPI Depends)
     │   ├── providers.py       # composition root: AppModule (cross-cutting binds; calls each domain's register())
@@ -45,7 +46,7 @@ src/
     │              └── router.py                # imports the operation modules and aggregates them via include_router(op.router, prefix="/<entity>/v1"); /api base + tags + guard on the router; entity+version on the include (per-endpoint); __init__.py stays empty
     ├── schemas/operation_schema.py   # generic result envelopes (inherit DTOBase)
     └── result_status_maps.py  # result enum -> HTTP status + message maps
-└── main.py                    # app, lifespan (engine), request_context middleware (DI scope + log vars), routers
+└── main.py                    # app, lifespan (configure_logging + engine dispose), registers the request_context middleware, routers
 ```
 
 **Rule**: For every new entity, create `src/{layer}/{type}/{entity}/` folders across all layers. Never scatter entity files into flat shared directories.
@@ -95,11 +96,11 @@ The domain layer is the heart of the system and must never be anemic.
 ### Dependency Injection (injector + TypedBinder)
 - The composition root is `AppModule` in `src/api/dependencies/providers.py`. One line binds implementation, port, and scope via the typed facade:
   `typed_binder.bind_typed(UserRepository).to(SqlAlchemyUserRepository)` — and binding an implementation that does not satisfy the port is a **pyrefly error at that line**. Concrete classes with no port — the use cases — get one `bind_self_typed(CreateUserUseCase)` line per operation. `AppModule.configure()` declares the **cross-cutting** binds (services, session, transaction context, logger, user context) and delegates each domain's repository + use-case binds to a `register(typed_binder)` function in `src/api/dependencies/bindings/<domain>.py` (still the API layer / composition root, so it may import the adapters; `TypedBinder` keeps the static conformance check — do NOT replace it with plain tuples, which lose it).
-- **Scopes are explicit**, and chosen by *what holds request state*: `singleton` (from `injector`) for process-wide stateless objects (engine, `PasswordHasher`, `TokenService`); `request` (from `src/infrastructure/di/request_scope.py`) for objects that carry per-request state (the `AsyncSession`, `TransactionContext`, the bound `Logger`, `UserContext`, and the per-request `RequestId`); and **transient** (no scope) for stateless orchestrators that only wire injected deps — the **use cases and repositories**. Transient repositories/use cases still share the one request-scoped `AsyncSession` (they receive it by injection), so the unit-of-work is unchanged; only the session and the request-state holders are scoped.
+- **Scopes are explicit**, and chosen by *what holds request state*: `singleton` (from `injector`) for process-wide stateless objects (engine, `PasswordHasher`, `TokenService`); `request` (from `src/infrastructure/di/request_scope.py`) for objects that carry per-request state (the `AsyncSession`, `TransactionContext`, the bound `Logger`, and `UserContext`); and **transient** (no scope) for stateless orchestrators that only wire injected deps — the **use cases and repositories**. Transient repositories/use cases still share the one request-scoped `AsyncSession` (they receive it by injection), so the unit-of-work is unchanged; only the session and the request-state holders are scoped.
 - **Every implementation whose `__init__` takes dependencies carries `@inject`** (from `injector`) so the graph auto-wires from type hints. Omitting it fails at resolution with a `TypeError`.
 - Construction that needs logic lives in `@provider` methods on `AppModule` (`provide_settings`, `provide_engine`, `provide_session_factory`, `provide_session`).
 - **Disposal**: on request end the scope disposes its objects in reverse creation order — `aclose()` preferred, an async `close()` is awaited, failures are logged without blocking other teardowns. The session is closed this way. The engine (a singleton) is disposed explicitly in `main.lifespan` shutdown.
-- The request scope is entered per HTTP request by the `request_context` middleware in `main.py`. Resolving a request-scoped binding outside a scope raises a descriptive `RuntimeError`.
+- The request scope is entered per HTTP request by the `request_context` middleware in `src/api/middleware.py` (registered in `main.py`). Resolving a request-scoped binding outside a scope raises a descriptive `RuntimeError`.
 - Routes and guards resolve via `Annotated[CreateUserUseCase, Injected(CreateUserUseCase)]` — a thin `Depends` over `request.app.state.injector`.
 - **No graph-completeness validation**: a forgotten binding is a runtime error on first resolution, not a startup failure. This is an accepted trade-off; the wrong-implementation case is still caught statically by `TypedBinder`.
 - Tests bind mock **instances** in a `TestModule` (`binder.bind(CreateUserUseCase, to=mock_use_case)` — instance-bound, so no request scope is needed) and set `app.state.injector = Injector([TestModule()])`; `app.dependency_overrides` handles plain guards like `get_current_user`.
@@ -124,7 +125,7 @@ The domain layer is the heart of the system and must never be anemic.
 - `get_current_user` (in `src/api/dependencies/jwt_dependency.py`) decodes the Bearer JWT, raises 401 on failure, populates the request-scoped `UserContext`, and returns a `TokenClaimsDTO`. (The bound logger reads `user_id` from that `UserContext`, so the guard does not touch any logging state.)
 - Protect a whole router with `dependencies=[Depends(get_current_user)]` on the `APIRouter`. A route handler that needs the claims directly declares `claims: TokenClaimsDTO = Depends(get_current_user)`.
 - **Request-scoped user context**: the `UserContext` port (`src/application/services/user_context.py`; adapter `RequestUserContext`, bound at `request` scope) holds the caller's identity for the request. Inject it into use cases or services that need the caller — auditing, ownership checks, roles/permissions — instead of threading claims through every signature. `populate()` is called exactly once by the guard (a second call raises `RuntimeError`); reading it unpopulated raises `RuntimeError`, so it is only valid on guarded routes. Read scalar values from it and pass those to repositories — never pass the context object itself to a repository.
-- Request correlation for logs is a **bound logger**: `JsonLogger` is request-scoped and binds a per-request `request_id` (from the request-scoped `RequestId` provider in `src/infrastructure/logging/request_id.py`) and reads `user_id` from the injected request-scoped `UserContext` (only when populated), emitting both on every line — no ambient `ContextVar`s. The process-wide handler/formatter/level is configured once at startup by `configure_logging()` (called from `main.lifespan`), so per-request loggers never re-add handlers.
+- Request correlation for logs is a **bound logger**: `JsonLogger` is request-scoped, and the `request_context` middleware (`src/api/middleware.py`) binds the request's correlation id onto it via `bind_request_id` — minted, or taken from an inbound `X-Request-ID` header, and echoed back as the `X-Request-ID` response header. `bind_request_id` raises on a second call (a request is bound once); log emission never raises when unbound (the field is simply omitted). `user_id` is read from the injected request-scoped `UserContext` (only when populated). No ambient `ContextVar`s. The process-wide handler/formatter/level is configured once at startup by `configure_logging()` (from `main.lifespan`), so per-request loggers never re-add handlers.
 
 ### Routes & responses
 - Routes return the **response model object**; FastAPI serialises it (camelCase, via `response_model`). **Never** return a hand-built `JSONResponse(model.model_dump())` — that bypasses `response_model` and the alias generator.
@@ -232,7 +233,8 @@ Tests live in `tests/` and mirror `src/`.
 ## 10. Documentation & Code Style
 
 - **No module docstrings or top-of-file comments** — file location and names carry that information.
-- **The contract is documented once, on the port**: Protocol classes and their methods carry full Google-style docstrings. Adapters **explicitly subclass the port and inherit them** — never repeat a method docstring in an adapter; IDE hover and `help()` resolve the port docs through the MRO.
+- **The contract is documented once, on the port**: Protocol classes and their methods carry **concise** docstrings. Adapters **explicitly subclass the port and inherit them** — never repeat a method docstring in an adapter; IDE hover and `help()` resolve the port docs through the MRO.
+- **Docstrings are lean**: a one-line summary, then `Args`/`Returns`/`Raises` sections where applicable — nothing else. Never describe *how* the code works or *why* (no implementation details, rationale, or usage examples); the summary says *what* it does.
 - Adapter classes keep a short class docstring stating only mechanism-specific facts (e.g. "backed by PyJWT"). No `__init__` docstrings — constructor parameters are self-describing via type hints.
 - Classes with no port — the use cases — carry their own method docstrings: they are the single source for their contract.
 - Standalone public functions (converters, providers, guards, routes) carry their own docstrings — they have no port to inherit from. Route docstrings become OpenAPI descriptions: describe endpoint behaviour, not injected parameters.

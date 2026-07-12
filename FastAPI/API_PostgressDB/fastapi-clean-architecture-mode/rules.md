@@ -44,7 +44,7 @@ resolution.
 ## Documentation (single source, IDE hover)
 
 - No module docstrings or top-of-file comments anywhere.
-- The contract is documented once, on the port: Protocol classes/methods carry full Google-style docstrings. Adapters explicitly subclass their port (`class SqlAlchemyUserRepository(UserRepository):`) and inherit them — never repeat method docstrings in adapters; IDE hover resolves the port docs through the MRO.
+- The contract is documented once, on the port: Protocol classes/methods carry **concise** docstrings — a one-line summary plus `Args`/`Returns`/`Raises` only, never implementation details, rationale, or usage examples. Adapters explicitly subclass their port (`class SqlAlchemyUserRepository(UserRepository):`) and inherit them — never repeat method docstrings in adapters; IDE hover resolves the port docs through the MRO.
 - Adapter classes keep a short class docstring for mechanism-specific notes only; no `__init__` docstrings.
 - Classes with no port — the use cases — carry their own method docstrings: they are the single source.
 - Standalone public functions (converters, providers, guards, routes) keep their own docstrings; route docstrings become OpenAPI descriptions.
@@ -58,7 +58,7 @@ resolution.
 ## Dependency injection (injector + TypedBinder)
 
 - Wire via `TypedBinder` — one line per binding: `typed_binder.bind_typed(UserRepository).to(SqlAlchemyUserRepository)`, concrete classes (use cases) get one `bind_self_typed(CreateUserUseCase)` line per operation. A wrong implementation is a pyrefly error (never plain tuples — they drop the check). `AppModule.configure()` holds the cross-cutting binds and calls each domain's `register(typed_binder)` in `src/api/dependencies/bindings/<domain>.py` (API layer, never `src/application/`).
-- Explicit scopes: `singleton` (engine, stateless services), `request` (session, repositories, transaction context, use cases). Request-scope state lives in a ContextVar; entered per request by the middleware in `main.py`; disposes objects on exit (LIFO, `aclose()` preferred, async `close()` awaited).
+- Explicit scopes: `singleton` (engine, stateless services), `request` (session, transaction context, logger, user context), **transient** (no scope) for stateless orchestrators — use cases and repositories, which still share the one request-scoped session by injection. Request-scope state lives in a ContextVar; entered per request by the `request_context` middleware in `src/api/middleware.py`; disposes objects on exit (LIFO, `aclose()` preferred, async `close()` awaited).
 - `@inject` required on every implementation whose `__init__` takes dependencies. Construction logic lives in `@provider` methods on `AppModule`.
 - Routes/guards: `Annotated[CreateUserUseCase, Injected(CreateUserUseCase)]` — a thin Depends over `app.state.injector`.
 - No graph-completeness validation: a missing binding fails at runtime on first resolution.

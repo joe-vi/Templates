@@ -37,7 +37,7 @@ Domain has zero external dependencies. Every other layer may only import from th
 **Abstraction boundaries**
 - Use cases are plain concrete classes depending on `typing.Protocol` ports, never concrete adapters; adapters explicitly subclass their port and inherit its docstrings (contracts documented once, IDE hover everywhere)
 - `AppModule.configure()` in `src/api/dependencies/providers.py` (cross-cutting binds) and the per-domain `register(typed_binder)` functions it calls in `src/api/dependencies/bindings/<domain>.py` are the only places that wire adapters to ports (the composition root, all API layer)
-- One line binds implementation and port via `TypedBinder`: `bind_typed(Port).to(Impl)`; a mismatched implementation is a pyrefly error at that line; constructors are auto-wired via `@inject`. Use cases and repositories are transient; session, transaction context, logger, user context, and request id are request-scoped
+- One line binds implementation and port via `TypedBinder`: `bind_typed(Port).to(Impl)`; a mismatched implementation is a pyrefly error at that line; constructors are auto-wired via `@inject`. Use cases and repositories are transient; session, transaction context, logger, and user context are request-scoped
 
 **Repository pattern & unit of work**
 - One CRUD operation per method — orchestration belongs in use cases, not repositories

@@ -4,9 +4,7 @@ from typing import Any
 
 
 class _Binding[P]:
-    """Returned by ``TypedBinder.bind_typed``; records the binding when
-    ``to`` (a single implementation) or ``to_many`` (a collection) is called.
-    """
+    """Records a binding: ``to`` for one implementation, ``to_many`` for a collection."""
 
     def __init__(self, binder: Any, interface: type[P]) -> None:
         self._binder = binder
@@ -24,12 +22,7 @@ class _Binding[P]:
 
 
 class TypedBinder:
-    """Statically-typed facade over an injector Binder.
-
-    typed_binder = TypedBinder(binder)
-    typed_binder.bind_typed(UserRepository).to(SqlAlchemyUserRepository, scope=request)
-    typed_binder.bind_self_typed(StandaloneService, scope=request)
-    """
+    """Statically-typed facade over an injector Binder."""
 
     def __init__(self, binder: Any) -> None:
         self._binder = binder

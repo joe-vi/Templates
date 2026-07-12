@@ -4,6 +4,17 @@ from typing import Protocol
 class Logger(Protocol):
     """Port for structured application logging."""
 
+    def bind_request_id(self, request_id: str) -> None:
+        """Bind the correlation id for the current request.
+
+        Args:
+            request_id: The correlation id to attach to every log entry.
+
+        Raises:
+            RuntimeError: If a request id was already bound.
+        """
+        ...
+
     def info(self, message: str, **extra: object) -> None:
         """Log an informational message.
 

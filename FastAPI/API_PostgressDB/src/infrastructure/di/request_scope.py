@@ -65,10 +65,7 @@ async def _dispose_async(instance: Any) -> None:
 
 @contextmanager
 def request_scope() -> Generator[None]:
-    """Enter a per-request scope for synchronous (WSGI) code.
-
-    Disposes every request-scoped object on exit, in reverse creation order.
-    """
+    """Enter a per-request scope for synchronous (WSGI) code."""
     cache: dict[type, Any] = {}
     token = _request_cache.set(cache)
     try:
@@ -86,10 +83,7 @@ def request_scope() -> Generator[None]:
 
 @asynccontextmanager
 async def async_request_scope() -> AsyncGenerator[None]:
-    """Enter a per-request scope for asynchronous (ASGI) code.
-
-    Disposes every request-scoped object on exit, in reverse creation order.
-    """
+    """Enter a per-request scope for asynchronous (ASGI) code."""
     cache: dict[type, Any] = {}
     token = _request_cache.set(cache)
     try:

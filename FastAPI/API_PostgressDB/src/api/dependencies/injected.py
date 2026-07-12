@@ -6,9 +6,11 @@ from fastapi import Depends, Request
 def Injected[T](interface: type[T]) -> Any:  # noqa: N802 - mirrors Depends()
     """Resolve ``interface`` from the app's injector, per request.
 
-    Usage in a route or FastAPI dependency signature::
+    Args:
+        interface: The type to resolve from the injector.
 
-        use_case: Annotated[CreateUserUseCase, Injected(CreateUserUseCase)]
+    Returns:
+        A FastAPI ``Depends`` that resolves ``interface`` for each request.
     """
 
     async def resolve_dependency(request: Request) -> T:

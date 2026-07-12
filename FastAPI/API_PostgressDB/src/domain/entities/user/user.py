@@ -6,11 +6,7 @@ from src.domain.enums import user_enum
 
 @dataclass
 class User:
-    """Aggregate root representing a user of the system.
-
-    ``id`` and ``created_at`` are database-generated — ``None`` until the
-    entity is persisted.
-    """
+    """Aggregate root representing a user of the system."""
 
     id: int | None
     email: str

@@ -26,7 +26,7 @@ For auditing an existing project use `/fastapi-clean-architecture-review`. To ac
 
 ## Cross-cutting rules (apply to every generated file)
 
-- **No module docstrings or top-of-file comments.** The contract is documented once, on the Protocol port (Google-style docstrings); implementations explicitly subclass their port and inherit the docs. Implementation classes get a short mechanism-note class docstring only; no `__init__` docstrings.
+- **No module docstrings or top-of-file comments.** The contract is documented once, on the Protocol port with **concise** docstrings — a one-line summary plus `Args`/`Returns`/`Raises` only, never implementation details, rationale, or usage examples; implementations explicitly subclass their port and inherit the docs. Implementation classes get a short mechanism-note class docstring only; no `__init__` docstrings.
 - **Rich domain**: entities enforce invariants in `__post_init__` (raise `ValueError`) and expose behaviour (`activate()`, `is_active`) — never anemic field bags.
 - **Use cases are plain concrete classes, one per operation** with a single `execute` method (`Create<Entity>UseCase`) — no separate interface; each declares only the ports its operation needs and carries its own method docstrings.
 - Line length 140 with `skip-magic-trailing-comma = true`.
@@ -118,7 +118,7 @@ Ports are `typing.Protocol`s in `src/application/services/`; adapters are mechan
 
 - `PasswordHasher` port / `BcryptPasswordHasher` adapter — bcrypt via passlib.
 - `TokenService` port / `JwtTokenService` adapter — PyJWT; issues access + refresh JWTs from settings.
-- `Logger` port / `JsonLogger` adapter — request-scoped bound logger; binds a per-request `request_id` (from the `RequestId` provider in `infrastructure/logging/request_id.py`) and reads `user_id` from the request-scoped `UserContext`. `configure_logging()` sets up the process-wide handler once at startup.
+- `Logger` port / `JsonLogger` adapter — request-scoped bound logger; the `request_context` middleware (`src/api/middleware.py`) mints (or accepts an inbound `X-Request-ID`) and calls `bind_request_id` once (raises on a second call), echoing it back as the `X-Request-ID` response header, and `user_id` is read from the request-scoped `UserContext`. Log emission never raises when the id is unbound (the field is simply omitted). `configure_logging()` sets up the process-wide handler once at startup.
 - `UserContext` port / `RequestUserContext` adapter — request-scoped holder of the caller's identity; `populate()` once by the guard (second call raises), unpopulated reads raise. Inject into use cases needing the caller (auditing, roles/permissions).
 - `jwt_dependency.py` — `get_current_user` decodes the JWT, populates `UserContext`, returns `TokenClaimsDTO`. Protect routers with `dependencies=[Depends(get_current_user)]`.
 - Auth use cases (one per operation: login, refresh) + DTOs + per-operation route modules under `src/application/use_cases/auth/` and `src/api/routers/auth/`.
@@ -153,14 +153,14 @@ Ports are `typing.Protocol`s in `src/application/services/`; adapters are mechan
 
 - `injector = Injector([AppModule()])` at module level; `app.state.injector = injector`.
 - `lifespan`: dispose the engine on shutdown (`await app.state.injector.get(AsyncEngine).dispose()`).
-- `FastAPI(lifespan=lifespan)` (lifespan calls `configure_logging(settings)` at startup and disposes the engine at shutdown); a `request_context` middleware that enters `async_request_scope()` per request.
+- `FastAPI(lifespan=lifespan)` (lifespan calls `configure_logging(settings)` at startup and disposes the engine at shutdown); register the `request_context` middleware (from `src/api/middleware.py`), which enters `async_request_scope()` per request, binds the `X-Request-ID` on the `Logger`, and echoes it back as the response header.
 - `app.include_router(...)` for each router.
 
-Copy `request_scope.py` and `typed_binder.py` verbatim from `FastAPI/API_PostgressDB/src/infrastructure/di/` into the new project's `src/infrastructure/di/`, and `injected.py` from `FastAPI/API_PostgressDB/src/api/dependencies/`.
+Copy `request_scope.py` and `typed_binder.py` verbatim from `FastAPI/API_PostgressDB/src/infrastructure/di/` into the new project's `src/infrastructure/di/`, `injected.py` from `FastAPI/API_PostgressDB/src/api/dependencies/`, and `middleware.py` from `FastAPI/API_PostgressDB/src/api/`.
 
 ### Step 9 — Generate the use cases and composition root
 
-For each entity generate a concrete use case class with full contract docstrings on its methods (no port — it is the single source).
+For each entity generate a concrete use case class with concise contract docstrings on its methods (no port — it is the single source).
 
 `AppModule` in `src/api/dependencies/providers.py` is the composition root — one declarative line per binding via `TypedBinder`, constructors auto-wired via `@inject`:
 - Stateless singletons (`PasswordHasher`, `TokenService`, cache): `typed_binder.bind_typed(PasswordHasher).to(BcryptPasswordHasher, scope=singleton)`. The bound `Logger` is request-scoped (`bind_typed(Logger).to(JsonLogger, scope=request)`).
