@@ -57,7 +57,7 @@ resolution.
 
 ## Dependency injection (injector + TypedBinder)
 
-- Wire everything in `AppModule.configure()` via `TypedBinder` — one line per binding: `typed_binder.bind_typed(UserRepository).to(SqlAlchemyUserRepository, scope=request)`, concrete classes (use cases) get one `bind_self_typed(CreateUserUseCase, scope=request)` line per operation. A wrong implementation is a pyrefly error.
+- Wire via `TypedBinder` — one line per binding: `typed_binder.bind_typed(UserRepository).to(SqlAlchemyUserRepository)`, concrete classes (use cases) get one `bind_self_typed(CreateUserUseCase)` line per operation. A wrong implementation is a pyrefly error (never plain tuples — they drop the check). `AppModule.configure()` holds the cross-cutting binds and calls each domain's `register(typed_binder)` in `src/api/dependencies/bindings/<domain>.py` (API layer, never `src/application/`).
 - Explicit scopes: `singleton` (engine, stateless services), `request` (session, repositories, transaction context, use cases). Request-scope state lives in a ContextVar; entered per request by the middleware in `main.py`; disposes objects on exit (LIFO, `aclose()` preferred, async `close()` awaited).
 - `@inject` required on every implementation whose `__init__` takes dependencies. Construction logic lives in `@provider` methods on `AppModule`.
 - Routes/guards: `Annotated[CreateUserUseCase, Injected(CreateUserUseCase)]` — a thin Depends over `app.state.injector`.
@@ -88,7 +88,7 @@ resolution.
 1. Domain: enum → aggregate root (invariants + behaviour) → repository **Protocol** port.
 2. Infrastructure: DB model → `sqlalchemy_<entity>_repository.py` adapter (subclasses the port, takes `AsyncSession`).
 3. Application: DTO → converter functions → concrete use case (inject `TransactionContext` for mutations; commit only on success).
-4. API: routes depending on the use case (return models); add bindings in `dependencies/providers.py`; include router in `main.py`.
+4. API: routes depending on the use case (return models); add the domain's `register()` in `dependencies/bindings/<entity>.py` (repository + use cases, transient) called from `providers.py`; include router in `main.py`.
 5. Tests: entity tests (no mocks), use case tests (mock ports), route tests (bind a mock use case instance in a `TestModule`).
 
 ## Code style

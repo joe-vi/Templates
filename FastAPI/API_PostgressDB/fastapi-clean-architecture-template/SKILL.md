@@ -165,8 +165,8 @@ For each entity generate a concrete use case class with full contract docstrings
 `AppModule` in `src/api/dependencies/providers.py` is the composition root — one declarative line per binding via `TypedBinder`, constructors auto-wired via `@inject`:
 - Stateless singletons (`PasswordHasher`, `TokenService`, cache): `typed_binder.bind_typed(PasswordHasher).to(BcryptPasswordHasher, scope=singleton)`. The bound `Logger` is request-scoped (`bind_typed(Logger).to(JsonLogger, scope=request)`).
 - Engine, session factory: singleton `@provider` methods; the session: a request-scoped `@provider` method (disposed via `aclose()` by the scope teardown).
-- `bind_typed(<Entity>Repository).to(Sqlalchemy<Entity>Repository, scope=request)` and `bind_typed(TransactionContext).to(SqlAlchemyTransactionContext, scope=request)` — same request session, so repositories and the transaction context share one transaction.
-- One `bind_self_typed(<Operation>UseCase, scope=request)` line per operation — each route depends on its use case via `Annotated[<Operation>UseCase, Injected(<Operation>UseCase)]`.
+- `bind_typed(TransactionContext).to(SqlAlchemyTransactionContext, scope=request)` (cross-cutting, in `AppModule`). Repositories are **transient** (`bind_typed(<Entity>Repository).to(Sqlalchemy<Entity>Repository)`) but still receive the one request-scoped session, so they and the transaction context share one transaction.
+- Per-domain binds live in `src/api/dependencies/bindings/<domain>.py` as `register(typed_binder)`, called from `AppModule.configure()`: the repository (transient) and one `bind_self_typed(<Operation>UseCase)` per operation (transient). Each route depends on its use case via `Annotated[<Operation>UseCase, Injected(<Operation>UseCase)]`.
 - Add `@inject` to every implementation whose `__init__` takes dependencies.
 
 ### Step 10 — Generate `pyproject.toml`

@@ -91,7 +91,8 @@ Invoke-WebRequest -Uri "https://github.com/joe-vi/Templates/archive/refs/heads/m
 │   ├── api/                                # Routes, envelopes, composition root
 │   │   ├── dependencies/
 │   │   │   ├── injected.py                 # Injected() route-side accessor
-│   │   │   ├── providers.py                # composition root: AppModule (ports → adapters, scopes)
+│   │   │   ├── providers.py                # composition root: AppModule (cross-cutting binds; calls each domain's register())
+│   │   │   ├── bindings/<domain>.py        # per-domain register(typed_binder): repository + use-case binds
 │   │   │   └── jwt_dependency.py           # JWT guard (get_current_user)
 │   │   ├── routers/                        # One route module per operation (own APIRouter(), resource-relative paths);
 │   │   │   ├── auth/                       # router.py (prefix="/api") aggregates via include_router(op.router, prefix="/<entity>/v1")
@@ -322,10 +323,12 @@ uv run alembic downgrade -1                              # Roll back one step
 2. **Application**: Add DTOs, converter functions, and one concrete use case class per operation (single `execute` method) in `src/application/use_cases/<name>/` — mutating use cases inject `TransactionContext`, wrap the mutation in `begin()`, commit only on success (several repository calls in one block are atomic)
 3. **Infrastructure**: Add the ORM model in `src/infrastructure/database/models/` and a `sqlalchemy_<name>_repository.py` adapter (subclasses the port, takes an `AsyncSession`) in `src/infrastructure/repositories/<name>/`
 4. **API**: Add one route module per operation in `src/api/routers/<name>/`, each with its own `APIRouter()` and resource-relative paths (`""` / `/{id}`), aggregated by `router.py` (`prefix="/api"`, tags, guard) via `include_router(op.router, prefix="/<name>/v1")` — giving `/api/<name>/v1/...` with the version per-endpoint; routes depend on their use case and accept/return the DTOs directly (`response_model=<Entity>DTO`) — no per-entity schemas or converters
-5. **Bindings**: Add one line per binding to `AppModule.configure()` in `src/api/dependencies/providers.py` (constructors auto-wired via `@inject`; a wrong implementation is a pyrefly error):
+5. **Bindings**: Add a `src/api/dependencies/bindings/<name>.py` with a `register(typed_binder)` that binds the domain's repository and use cases (transient), and call it from `AppModule.configure()` (which keeps the cross-cutting binds). Constructors are auto-wired via `@inject`; a wrong implementation is a pyrefly error:
    ```python
-   typed_binder.bind_typed(OrderRepository).to(SqlAlchemyOrderRepository, scope=request)
-   typed_binder.bind_self_typed(CreateOrderUseCase, scope=request)  # one line per operation use case
+   # src/api/dependencies/bindings/order.py
+   def register(typed_binder: TypedBinder) -> None:
+       typed_binder.bind_typed(OrderRepository).to(SqlAlchemyOrderRepository)  # transient
+       typed_binder.bind_self_typed(CreateOrderUseCase)                        # one line per operation use case
    ```
 6. **Main**: Include the new router in `src/main.py`
 7. **Migration**: Generate and apply an Alembic migration for any new DB models

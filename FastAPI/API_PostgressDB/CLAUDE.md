@@ -48,8 +48,8 @@ missing binding fails at runtime on first resolution (accepted trade-off).
 - Standalone public functions (converters, providers, guards, routes) keep their own docstrings; route docstrings become OpenAPI descriptions.
 
 ### Dependency Injection (injector + TypedBinder)
-- Composition root: `AppModule.configure()` in `src/api/dependencies/providers.py` using the `TypedBinder` facade — one line per binding: `typed_binder.bind_typed(UserRepository).to(SqlAlchemyUserRepository, scope=request)`. A wrong implementation for a port is a pyrefly error at that line. Concrete classes (use cases): one `bind_self_typed(CreateUserUseCase, scope=request)` line per operation.
-- Scopes: `singleton` (engine, stateless services) and `request` (session, repositories, transaction context, use cases). Request-scope state lives in a ContextVar; the scope is entered per request by the middleware in `main.py` and disposes its objects on exit (LIFO; `aclose()` preferred, async `close()` awaited).
+- Composition root: `AppModule.configure()` in `src/api/dependencies/providers.py` using the `TypedBinder` facade — one line per binding: `typed_binder.bind_typed(UserRepository).to(SqlAlchemyUserRepository)`. A wrong implementation for a port is a pyrefly error at that line. Concrete classes (use cases): one `bind_self_typed(CreateUserUseCase)` line per operation. `AppModule.configure()` holds the cross-cutting binds and delegates each domain's repository + use-case binds to a `register(typed_binder)` function in `src/api/dependencies/bindings/<domain>.py` (API layer, so it may import the adapters; keep `TypedBinder` — never plain tuples, which lose the static check).
+- Scopes chosen by what holds request state: `singleton` (engine, stateless services), `request` (session, transaction context, logger, user context, request id), and **transient** (no scope) for stateless orchestrators — use cases and repositories. Transient repos/use cases still share the one request-scoped session (injected), so the unit-of-work is unchanged. The scope is entered per request by the middleware in `main.py` and disposes its objects on exit (LIFO; `aclose()` preferred, async `close()` awaited).
 - `@inject` REQUIRED on every implementation whose `__init__` takes dependencies (injector auto-wires from type hints; omitting it is a runtime `TypeError`). Construction logic lives in `@provider` methods on `AppModule`.
 - Routes/guards resolve via `Annotated[CreateUserUseCase, Injected(CreateUserUseCase)]` — a thin Depends over `app.state.injector`.
 - NO graph-completeness validation: a missing binding fails at runtime on first resolution.
@@ -95,7 +95,7 @@ missing binding fails at runtime on first resolution (accepted trade-off).
 
 ### Anti-Patterns (Never)
 - Do not leave the domain anemic — invariants and state transitions belong on the entity.
-- Do not wire bindings outside `AppModule.configure()`; always bind through `TypedBinder`.
+- Do not wire bindings outside the composition root (`AppModule.configure()` or the per-domain `register()` functions in `src/api/dependencies/bindings/` it calls); always bind through `TypedBinder` (never plain tuples). Keep binding modules in the API layer — never in `src/application/`.
 - Do not omit `@inject` on implementations whose `__init__` takes dependencies — resolution fails with `TypeError`.
 - Do not keep session state in a module-global `ContextVar`; inject the request-scoped session.
 - Do not pass sessions to use cases.
