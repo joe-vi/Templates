@@ -41,7 +41,7 @@ src/
     │   ├── providers.py       # composition root: AppModule (ports -> adapters, scopes)
     │   └── jwt_dependency.py  # get_current_user guard
     ├── routers/<entity>/<operation>_route.py   # one route module per operation, takes/returns DTOs — no schemas/converters
-    │              └── router.py                # defines the shared APIRouter (prefix, tags, guard declared once); operation modules import and attach to it; __init__.py stays empty
+    │              └── router.py                # each operation module has its own APIRouter(); router.py imports all of them and aggregates via include_router() (prefix, tags, guard declared once); __init__.py stays empty
     ├── schemas/operation_schema.py   # generic result envelopes (inherit DTOBase)
     └── result_status_maps.py  # result enum -> HTTP status + message maps
 └── main.py                    # app, lifespan (engine), request_context middleware (DI scope + log vars), routers
@@ -183,7 +183,7 @@ Never set these in Python code:
 1. **Domain**: enums in `src/domain/enums/<entity>_enum.py`; entity dataclass (invariants + behaviour) in `src/domain/entities/<entity>/`; repository **Protocol** in `src/domain/repositories/<entity>/<entity>_repository.py`.
 2. **Infrastructure**: ORM model in `src/infrastructure/database/models/<entity>_model.py` (re-export from `models/__init__.py`); adapter `sqlalchemy_<entity>_repository.py` subclassing the port and taking an `AsyncSession`.
 3. **Application**: `DTOBase` DTOs (with validation), converter **functions**, one concrete use case class per operation (single `execute` method) in `src/application/use_cases/<entity>/`. Mutating use cases inject `TransactionContext` and wrap repository calls in a `begin()` block, committing only on success.
-4. **API**: one route module per operation accepting and returning the DTOs directly (`Annotated[<Operation>UseCase, Injected(<Operation>UseCase)]`, `response_model=<Entity>DTO`), each importing and attaching its route to the shared `APIRouter` defined in `router.py` (prefix, tags, guard declared once; `__init__.py` stays empty); add one `bind_typed(...).to(...)` line per port and one `bind_self_typed(...)` line per use case to `AppModule.configure()`; include the router from `router.py` in `main.py`. No per-entity schemas or API converters.
+4. **API**: one route module per operation accepting and returning the DTOs directly (`Annotated[<Operation>UseCase, Injected(<Operation>UseCase)]`, `response_model=<Entity>DTO`), each with its own `APIRouter()`; `router.py` imports every operation module and aggregates them with `router.include_router(...)` (prefix, tags, guard declared once; `__init__.py` stays empty); add one `bind_typed(...).to(...)` line per port and one `bind_self_typed(...)` line per use case to `AppModule.configure()`; include the router from `router.py` in `main.py`. No per-entity schemas or API converters.
 5. **Tests**: domain entity tests (no mocks), use case tests (mock the ports), route tests (bind a mock use case instance in a `TestModule`).
 
 ---
@@ -237,6 +237,7 @@ Tests live in `tests/` and mirror `src/`.
 - Inline comments only for constraints the code cannot express (e.g. why `flush()` instead of `commit()`).
 - Max line length: **140 characters** (`skip-magic-trailing-comma = true`, so the formatter uses the full width). Run `uv run ruff check src/ tests/ --fix && uv run ruff format src/ tests/` after every change. Run `uv run pyrefly check` to type-check.
 - Always use `uv run`. Modern type annotations (`list[X]`, `X | None`). All DB I/O is async. API prefix: `/api/v1`.
+- **Never introduce a lint/type-check suppression** (`# noqa`, `# type: ignore`, pyrefly ignore comments, or equivalent) **without checking with the user first.** If satisfying a rule would require one, stop and present the design alternatives that avoid it instead of silently suppressing.
 
 ---
 
@@ -259,6 +260,7 @@ Tests live in `tests/` and mirror `src/`.
 - Don't let Domain import from Infrastructure or API.
 - Don't create entity-specific result enums or wrapper collection DTOs.
 - Don't scatter entity files into flat shared directories.
+- Don't add `# noqa`, `# type: ignore`, or any other lint/type suppression without checking with the user first — propose a design that avoids the violation instead.
 
 ---
 

@@ -1,14 +1,15 @@
 from typing import Annotated
 
-from fastapi import Body, Response, status
+from fastapi import APIRouter, Body, Response, status
 
 from src.api import result_status_maps
 from src.api.dependencies.injected import Injected
-from src.api.routers.user.router import router
 from src.api.schemas import operation_schema
 from src.application.use_cases.user import user_dto
 from src.application.use_cases.user.update_user_role_use_case import UpdateUserRoleUseCase
 from src.domain.enums import user_enum
+
+router = APIRouter()
 
 UseCaseDep = Annotated[UpdateUserRoleUseCase, Injected(UpdateUserRoleUseCase)]
 

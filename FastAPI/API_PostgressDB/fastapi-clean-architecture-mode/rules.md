@@ -95,6 +95,8 @@ resolution.
 
 Max line length: 140 characters (`skip-magic-trailing-comma = true`).
 
+Never add `# noqa`, `# type: ignore`, or any other lint/type suppression without checking with the user first — propose a design that avoids the violation instead.
+
 ## After every change
 
 Remind the user: `uv run ruff check src/ tests/ --fix && uv run ruff format src/ tests/`

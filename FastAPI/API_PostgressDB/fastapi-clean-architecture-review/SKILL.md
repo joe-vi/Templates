@@ -18,6 +18,7 @@ For scaffolding a new project use `/fastapi-clean-architecture-template`. To act
 ## Documentation rules (applied in every phase)
 
 - **No module docstrings and no top-of-file comments** — flag any file that has them.
+- **Flag any `# noqa`, `# type: ignore`, or other lint/type suppression** found in the codebase — these require explicit user sign-off and should not be introduced or left unquestioned; report the underlying violation and suggest a design that avoids it.
 - **The contract is documented once, on the port**: Protocol classes and methods carry full Google-style docstrings; adapters **explicitly subclass their port** and inherit them. Flag duplicated method docstrings on adapters, and flag adapters that do not subclass their port. Classes with no port — the use cases — carry their own method docstrings.
 - Implementation classes may keep a short class docstring with mechanism-specific notes only; `__init__` methods carry no docstrings.
 - Standalone public functions (converters, providers, guards, routes) carry their own docstrings.
@@ -79,7 +80,7 @@ Check:
 - **DI**:
   - Composition root is `AppModule.configure()` in `src/api/dependencies/providers.py` — one `bind_typed(Port).to(Impl, scope=...)` line per binding via `TypedBinder`; flag raw `binder.bind(...)` calls for port bindings (they skip conformance checking) and any `fastapi-injector` usage
   - Every implementation whose `__init__` takes dependencies carries `@inject`; flag missing ones (runtime `TypeError`)
-  - Each route module covers one operation, depends on its use case via `Annotated[CreateUserUseCase, Injected(CreateUserUseCase)]`, and attaches directly to the shared `APIRouter` defined once in the entity's `router.py` (prefix, tags, guard declared there); `__init__.py` stays empty
+  - Each route module covers one operation with its own `APIRouter()` and depends on its use case via `Annotated[CreateUserUseCase, Injected(CreateUserUseCase)]`; the entity's `router.py` aggregates them via `include_router(...)` (prefix, tags, guard declared once there); `__init__.py` stays empty
   - Guard functions live in `src/api/dependencies/`, not inside route files; `Depends(get_current_user)` declared on the `APIRouter`, not scattered in signatures
 - **Responses**: routes return the response model (FastAPI serialises it to camelCase). Flag any `JSONResponse(model.model_dump())` — it bypasses `response_model` and the alias generator. Dynamic status set via `response.status_code`.
 - **Code style**: lines over 140 chars; `List[X]`, `Optional[X]`, `Dict[K,V]` instead of modern annotations; sync DB calls

@@ -83,6 +83,7 @@ missing binding fails at runtime on first resolution (accepted trade-off).
 ### Code Style
 - Max line length: 140 characters (`skip-magic-trailing-comma = true` — the formatter uses the full width). Run `uv run ruff check src/ tests/ --fix && uv run ruff format src/ tests/` after every change. Run `uv run pyrefly check` to type-check.
 - Always use `uv run`. API prefix: `/api/v1`.
+- **Never introduce a lint/type-check suppression** (`# noqa`, `# type: ignore`, pyrefly ignore comments, or equivalent) **without checking with the user first.** If satisfying a rule would require one, stop and present the design alternatives that avoid it instead of silently suppressing.
 
 ### Testing
 - Domain: pure entity unit tests in `tests/domain/` (no mocks).
@@ -105,3 +106,4 @@ missing binding fails at runtime on first resolution (accepted trade-off).
 - Do not write module docstrings or file header comments.
 - Do not create classes of only static methods; use module functions.
 - Do not bypass use cases — routes never call repositories directly.
+- Do not add `# noqa`, `# type: ignore`, or any other lint/type suppression without checking with the user first — propose a design that avoids the violation instead.
