@@ -5,8 +5,9 @@ from datetime import UTC, datetime
 from injector import inject
 
 from src.application.services.logger import Logger
+from src.application.services.user_context import UserContext
 from src.config.settings import Settings
-from src.infrastructure.logging import log_context
+from src.infrastructure.logging.request_id import RequestId
 
 
 class _JsonFormatter(logging.Formatter):
@@ -29,27 +30,41 @@ class _JsonFormatter(logging.Formatter):
         return json.dumps(log_entry)
 
 
+def configure_logging(settings: Settings) -> None:
+    """Configure the process-wide ``app`` logger once at startup.
+
+    Idempotent: sets the level and attaches a single JSON StreamHandler only
+    if none is present, so it is safe to call more than once.
+
+    Args:
+        settings: Application settings supplying the log level.
+    """
+    logger = logging.getLogger("app")
+    logger.setLevel(settings.log_level.upper())
+    if not logger.handlers:
+        handler = logging.StreamHandler()
+        handler.setFormatter(_JsonFormatter())
+        logger.addHandler(handler)
+
+
 class JsonLogger(Logger):
-    """``Logger`` adapter emitting structured JSON via the stdlib logging module."""
+    """``Logger`` adapter emitting structured JSON via the stdlib logging module.
+
+    Request-scoped: bound to one request's ``request_id`` and the caller's
+    ``UserContext``, so every line it emits carries that correlation. The
+    process-wide handler is configured once at startup by ``configure_logging``.
+    """
 
     @inject
-    def __init__(self, settings: Settings) -> None:
+    def __init__(self, user_context: UserContext, request_id: RequestId) -> None:
         self._logger = logging.getLogger("app")
-        self._logger.setLevel(settings.log_level.upper())
-
-        if not self._logger.handlers:
-            handler = logging.StreamHandler()
-            handler.setFormatter(_JsonFormatter())
-            self._logger.addHandler(handler)
+        self._user_context = user_context
+        self._request_id = request_id
 
     def _base_extra(self) -> dict[str, object]:
-        fields: dict[str, object] = {}
-        request_id = log_context.request_id_var.get()
-        if request_id is not None:
-            fields["request_id"] = request_id
-        user_id = log_context.user_id_var.get()
-        if user_id is not None:
-            fields["user_id"] = user_id
+        fields: dict[str, object] = {"request_id": self._request_id.value}
+        if self._user_context.is_populated:
+            fields["user_id"] = self._user_context.user_id
         return fields
 
     def info(self, message: str, **extra: object) -> None:

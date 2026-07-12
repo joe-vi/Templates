@@ -118,9 +118,9 @@ Ports are `typing.Protocol`s in `src/application/services/`; adapters are mechan
 
 - `PasswordHasher` port / `BcryptPasswordHasher` adapter — bcrypt via passlib.
 - `TokenService` port / `JwtTokenService` adapter — PyJWT; issues access + refresh JWTs from settings.
-- `Logger` port / `JsonLogger` adapter — structured logger; request correlation (`request_id`, `user_id`) via context vars in `infrastructure/logging/log_context.py`.
+- `Logger` port / `JsonLogger` adapter — request-scoped bound logger; binds a per-request `request_id` (from the `RequestId` provider in `infrastructure/logging/request_id.py`) and reads `user_id` from the request-scoped `UserContext`. `configure_logging()` sets up the process-wide handler once at startup.
 - `UserContext` port / `RequestUserContext` adapter — request-scoped holder of the caller's identity; `populate()` once by the guard (second call raises), unpopulated reads raise. Inject into use cases needing the caller (auditing, roles/permissions).
-- `jwt_dependency.py` — `get_current_user` decodes the JWT, populates `UserContext`, records the user id in the logging context, returns `TokenClaimsDTO`. Protect routers with `dependencies=[Depends(get_current_user)]`.
+- `jwt_dependency.py` — `get_current_user` decodes the JWT, populates `UserContext`, returns `TokenClaimsDTO`. Protect routers with `dependencies=[Depends(get_current_user)]`.
 - Auth use cases (one per operation: login, refresh) + DTOs + per-operation route modules under `src/application/use_cases/auth/` and `src/api/routers/auth/`.
 
 #### `oauth2`
@@ -153,7 +153,7 @@ Ports are `typing.Protocol`s in `src/application/services/`; adapters are mechan
 
 - `injector = Injector([AppModule()])` at module level; `app.state.injector = injector`.
 - `lifespan`: dispose the engine on shutdown (`await app.state.injector.get(AsyncEngine).dispose()`).
-- `FastAPI(lifespan=lifespan)`; a `request_context` middleware that enters `async_request_scope()` and scopes the `request_id`/`user_id` context vars per request.
+- `FastAPI(lifespan=lifespan)` (lifespan calls `configure_logging(settings)` at startup and disposes the engine at shutdown); a `request_context` middleware that enters `async_request_scope()` per request.
 - `app.include_router(...)` for each router.
 
 Copy `request_scope.py` and `typed_binder.py` verbatim from `FastAPI/API_PostgressDB/src/infrastructure/di/` into the new project's `src/infrastructure/di/`, and `injected.py` from `FastAPI/API_PostgressDB/src/api/dependencies/`.
@@ -163,7 +163,7 @@ Copy `request_scope.py` and `typed_binder.py` verbatim from `FastAPI/API_Postgre
 For each entity generate a concrete use case class with full contract docstrings on its methods (no port — it is the single source).
 
 `AppModule` in `src/api/dependencies/providers.py` is the composition root — one declarative line per binding via `TypedBinder`, constructors auto-wired via `@inject`:
-- Stateless singletons (`PasswordHasher`, `TokenService`, `Logger`, cache): `typed_binder.bind_typed(PasswordHasher).to(BcryptPasswordHasher, scope=singleton)`.
+- Stateless singletons (`PasswordHasher`, `TokenService`, cache): `typed_binder.bind_typed(PasswordHasher).to(BcryptPasswordHasher, scope=singleton)`. The bound `Logger` is request-scoped (`bind_typed(Logger).to(JsonLogger, scope=request)`).
 - Engine, session factory: singleton `@provider` methods; the session: a request-scoped `@provider` method (disposed via `aclose()` by the scope teardown).
 - `bind_typed(<Entity>Repository).to(Sqlalchemy<Entity>Repository, scope=request)` and `bind_typed(TransactionContext).to(SqlAlchemyTransactionContext, scope=request)` — same request session, so repositories and the transaction context share one transaction.
 - One `bind_self_typed(<Operation>UseCase, scope=request)` line per operation — each route depends on its use case via `Annotated[<Operation>UseCase, Injected(<Operation>UseCase)]`.

@@ -33,7 +33,7 @@ src/
 │   ├── di/{request_scope.py, typed_binder.py}   # injector extensions (framework plumbing, FastAPI-agnostic)
 │   ├── repositories/<entity>/sqlalchemy_<entity>_repository.py   # adapter (mechanism-qualified name)
 │   ├── auth/{bcrypt_password_hasher.py, jwt_token_service.py, request_user_context.py}
-│   ├── logging/{json_logger.py, log_context.py}
+│   ├── logging/{json_logger.py, request_id.py}
 │   └── database/{base.py, session.py, sqlalchemy_transaction_context.py, models/<entity>_model.py}
 └── api/
     ├── dependencies/
@@ -94,7 +94,7 @@ The domain layer is the heart of the system and must never be anemic.
 ### Dependency Injection (injector + TypedBinder)
 - The composition root is `AppModule` in `src/api/dependencies/providers.py`. One line binds implementation, port, and scope via the typed facade:
   `typed_binder.bind_typed(UserRepository).to(SqlAlchemyUserRepository, scope=request)` — and binding an implementation that does not satisfy the port is a **pyrefly error at that line**. Concrete classes with no port — the use cases — get one `bind_self_typed(CreateUserUseCase, scope=request)` line per operation.
-- **Scopes are explicit**: `singleton` (from `injector`) for process-wide objects (engine, `PasswordHasher`, `TokenService`, `Logger`); `request` (from `src/infrastructure/di/request_scope.py`) for per-request objects (session, repositories, transaction context, use cases). Everything in one request shares the same instances; the request scope's state lives in a `ContextVar`, isolated per request under asyncio.
+- **Scopes are explicit**: `singleton` (from `injector`) for process-wide objects (engine, `PasswordHasher`, `TokenService`); `request` (from `src/infrastructure/di/request_scope.py`) for per-request objects (session, repositories, transaction context, use cases, the bound `Logger`, and the per-request `RequestId`). Everything in one request shares the same instances; the request scope's state lives in a `ContextVar`, isolated per request under asyncio.
 - **Every implementation whose `__init__` takes dependencies carries `@inject`** (from `injector`) so the graph auto-wires from type hints. Omitting it fails at resolution with a `TypeError`.
 - Construction that needs logic lives in `@provider` methods on `AppModule` (`provide_settings`, `provide_engine`, `provide_session_factory`, `provide_session`).
 - **Disposal**: on request end the scope disposes its objects in reverse creation order — `aclose()` preferred, an async `close()` is awaited, failures are logged without blocking other teardowns. The session is closed this way. The engine (a singleton) is disposed explicitly in `main.lifespan` shutdown.
@@ -120,10 +120,10 @@ The domain layer is the heart of the system and must never be anemic.
 - Converters are **module-level functions**, not classes of static methods. `user_converter.to_dto(...)`, `to_entity(...)`, etc.
 
 ### Authentication & current user
-- `get_current_user` (in `src/api/dependencies/jwt_dependency.py`) decodes the Bearer JWT, raises 401 on failure, populates the request-scoped `UserContext`, records the user id in the logging context, and returns a `TokenClaimsDTO`.
+- `get_current_user` (in `src/api/dependencies/jwt_dependency.py`) decodes the Bearer JWT, raises 401 on failure, populates the request-scoped `UserContext`, and returns a `TokenClaimsDTO`. (The bound logger reads `user_id` from that `UserContext`, so the guard does not touch any logging state.)
 - Protect a whole router with `dependencies=[Depends(get_current_user)]` on the `APIRouter`. A route handler that needs the claims directly declares `claims: TokenClaimsDTO = Depends(get_current_user)`.
 - **Request-scoped user context**: the `UserContext` port (`src/application/services/user_context.py`; adapter `RequestUserContext`, bound at `request` scope) holds the caller's identity for the request. Inject it into use cases or services that need the caller — auditing, ownership checks, roles/permissions — instead of threading claims through every signature. `populate()` is called exactly once by the guard (a second call raises `RuntimeError`); reading it unpopulated raises `RuntimeError`, so it is only valid on guarded routes. Read scalar values from it and pass those to repositories — never pass the context object itself to a repository.
-- Request correlation for logs (`request_id`, `user_id`) is carried in context variables in `src/infrastructure/logging/log_context.py` — set by the `request_context` middleware and the guard. Context variables are appropriate here because they carry cross-cutting observability metadata, not control-flow or transactional state.
+- Request correlation for logs is a **bound logger**: `JsonLogger` is request-scoped and binds a per-request `request_id` (from the request-scoped `RequestId` provider in `src/infrastructure/logging/request_id.py`) and reads `user_id` from the injected request-scoped `UserContext` (only when populated), emitting both on every line — no ambient `ContextVar`s. The process-wide handler/formatter/level is configured once at startup by `configure_logging()` (called from `main.lifespan`), so per-request loggers never re-add handlers.
 
 ### Routes & responses
 - Routes return the **response model object**; FastAPI serialises it (camelCase, via `response_model`). **Never** return a hand-built `JSONResponse(model.model_dump())` — that bypasses `response_model` and the alias generator.

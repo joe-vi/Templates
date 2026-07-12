@@ -69,9 +69,9 @@ missing binding fails at runtime on first resolution (accepted trade-off).
 - URL shape is `/api/<entity>/<version>/<path>` (e.g. `/api/users/v1`, `/api/auth/v1/login`). `/api` is the base on the domain router's `prefix`; the `/<entity>/v1` segment rides on each `router.include_router(op.router, prefix="/<entity>/v1")` call, so the version is per-endpoint (bump one endpoint to `/<entity>/v2` without touching others). Operation files use resource-relative paths (`""` for the collection root, `/{id}` for item routes) and never repeat the entity or version. Do NOT collapse the segment onto the router's own `prefix` — FastAPI rejects including a prefix-less router that has an empty collection-root path.
 
 ### Auth
-- `get_current_user` decodes the Bearer JWT, raises 401, populates the request-scoped `UserContext`, records the user id in the logging context, returns `TokenClaimsDTO`. Protect routers with `dependencies=[Depends(get_current_user)]`.
+- `get_current_user` decodes the Bearer JWT, raises 401, populates the request-scoped `UserContext`, returns `TokenClaimsDTO`. Protect routers with `dependencies=[Depends(get_current_user)]`. (The bound logger reads `user_id` from `UserContext`; the guard touches no logging state.)
 - `UserContext` port (adapter `RequestUserContext`, `request` scope): inject into use cases/services needing the caller's identity (auditing, roles/permissions). `populate()` once by the guard — a second call raises; unpopulated reads raise. Pass scalar values to repositories, never the context object.
-- Log correlation (`request_id`, `user_id`) lives in context vars in `src/infrastructure/logging/log_context.py`.
+- Logging is a **bound logger**: `JsonLogger` is request-scoped, binds a per-request `request_id` (from the request-scoped `RequestId` provider in `src/infrastructure/logging/request_id.py`) and reads `user_id` from the injected request-scoped `UserContext` (only when populated) — no ambient ContextVars. `configure_logging()` sets up the process-wide handler once at startup (called from `main.lifespan`).
 
 ### Database
 - All constraints MUST have an explicit `name` (`uq_`, `fk_`, `ck_`, `ix_` prefix).

@@ -1,3 +1,5 @@
+import uuid
+
 from injector import Binder, Module, provider, singleton
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 
@@ -23,6 +25,7 @@ from src.infrastructure.database.sqlalchemy_transaction_context import SqlAlchem
 from src.infrastructure.di.request_scope import request
 from src.infrastructure.di.typed_binder import TypedBinder
 from src.infrastructure.logging.json_logger import JsonLogger
+from src.infrastructure.logging.request_id import RequestId
 from src.infrastructure.repositories.user.sqlalchemy_user_repository import SqlAlchemyUserRepository
 
 
@@ -36,9 +39,9 @@ class AppModule(Module):
         # Stateless services — one instance per process.
         typed_binder.bind_typed(PasswordHasher).to(BcryptPasswordHasher, scope=singleton)
         typed_binder.bind_typed(TokenService).to(JwtTokenService, scope=singleton)
-        typed_binder.bind_typed(Logger).to(JsonLogger, scope=singleton)
 
         # Per-request collaborators — auto-wired from constructor type hints.
+        typed_binder.bind_typed(Logger).to(JsonLogger, scope=request)
         typed_binder.bind_typed(UserContext).to(RequestUserContext, scope=request)
         typed_binder.bind_typed(UserRepository).to(SqlAlchemyUserRepository, scope=request)
         typed_binder.bind_typed(TransactionContext).to(SqlAlchemyTransactionContext, scope=request)
@@ -66,6 +69,12 @@ class AppModule(Module):
     @provider
     def provide_session_factory(self, engine: AsyncEngine) -> async_sessionmaker[AsyncSession]:
         return create_session_factory(engine)
+
+    @request
+    @provider
+    def provide_request_id(self) -> RequestId:
+        # One correlation id per request; the request-scoped JsonLogger binds it.
+        return RequestId(str(uuid.uuid4()))
 
     @request
     @provider

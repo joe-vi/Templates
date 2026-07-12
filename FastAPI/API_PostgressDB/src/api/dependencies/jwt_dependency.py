@@ -7,7 +7,6 @@ from src.api.dependencies.injected import Injected
 from src.application.services.token_service import TokenService
 from src.application.services.user_context import UserContext
 from src.application.use_cases.auth import auth_dto
-from src.infrastructure.logging import log_context
 
 _security = HTTPBearer()
 
@@ -38,6 +37,5 @@ async def get_current_user(
         )
 
     user_context.populate(token_claims.user_id, token_claims.role)
-    log_context.user_id_var.set(token_claims.user_id)
 
     return token_claims
