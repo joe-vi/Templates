@@ -7,26 +7,13 @@ class UserContext(Protocol):
     """Port holding the authenticated caller's identity for one request."""
 
     @property
-    def is_populated(self) -> bool:
-        """Whether the context has been populated for this request."""
+    def user_id(self) -> int | None:
+        """The authenticated user's id, or ``None`` on an unauthenticated request."""
         ...
 
     @property
-    def user_id(self) -> int:
-        """The authenticated user's id.
-
-        Raises:
-            RuntimeError: If the context has not been populated.
-        """
-        ...
-
-    @property
-    def role(self) -> user_enum.UserRole:
-        """The authenticated user's role.
-
-        Raises:
-            RuntimeError: If the context has not been populated.
-        """
+    def role(self) -> user_enum.UserRole | None:
+        """The authenticated user's role, or ``None`` on an unauthenticated request."""
         ...
 
     def populate(self, user_id: int, role: user_enum.UserRole) -> None:
