@@ -1,10 +1,10 @@
 from pydantic import Field
 
-from src.application.dto_base import DTOBase
 from src.domain.enums import operation_results
+from src.shared.contract_model import ContractModel
 
 
-class CreateOperationResponse(DTOBase):
+class CreateOperationResponse(ContractModel):
     """Standard API response for any create operation."""
 
     result: operation_results.CreateResult
@@ -12,14 +12,14 @@ class CreateOperationResponse(DTOBase):
     id: int | None = Field(default=None, description="Newly created entity id; None when operation failed")
 
 
-class UpdateOperationResponse(DTOBase):
+class UpdateOperationResponse(ContractModel):
     """Standard API response for any update operation."""
 
     result: operation_results.UpdateResult
     message: str = Field(description="Human-readable description of the operation outcome")
 
 
-class DeleteOperationResponse(DTOBase):
+class DeleteOperationResponse(ContractModel):
     """Standard API response for any delete operation."""
 
     result: operation_results.DeleteResult

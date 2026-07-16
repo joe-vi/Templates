@@ -1,8 +1,8 @@
 from injector import inject
 
-from src.application.services.token_service import TokenService
 from src.application.use_cases.auth import auth_dto
 from src.domain.enums import operation_results
+from src.ports.token_service import TokenService
 
 
 class RefreshTokenUseCase:

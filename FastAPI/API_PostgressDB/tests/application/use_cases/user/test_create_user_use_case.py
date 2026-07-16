@@ -1,10 +1,10 @@
 import pytest
 
-from src.application.services.password_hasher import PasswordHasher
 from src.application.use_cases.user import user_dto as user_dto_module
 from src.application.use_cases.user.create_user_use_case import CreateUserUseCase
 from src.domain.enums import operation_results
 from src.domain.repositories.user.user_repository import UserRepository
+from src.ports.password_hasher import PasswordHasher
 from tests.application.use_cases.user.conftest import FakeTransactionContext
 
 

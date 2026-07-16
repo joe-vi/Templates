@@ -3,8 +3,8 @@ from collections.abc import Awaitable, Callable
 
 from fastapi import Request, Response
 
-from src.application.services.logger import Logger
 from src.infrastructure.di.request_scope import async_request_scope
+from src.ports.logger import Logger
 
 _REQUEST_ID_HEADER = "X-Request-ID"
 

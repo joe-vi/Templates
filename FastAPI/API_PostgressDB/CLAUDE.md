@@ -17,7 +17,8 @@ mismatched implementation is a pyrefly error at that line. No graph-completeness
 missing binding fails at runtime on first resolution (accepted trade-off).
 
 - Domain (`src/domain/`): Entities (aggregate roots with invariants + behaviour), repository ports (Protocols), enums. No external deps.
-- Application (`src/application/`): Use cases (concrete classes), DTOs, converter functions, service ports (Protocols). Imports Domain only.
+- Ports (`src/ports/`): technical service ports (Protocols) — `transaction_context`, `logger`, `password_hasher`, `token_service`, `user_context`. A dependency-free leaf; every layer except Domain may import it.
+- Application (`src/application/`): Use cases (concrete classes), DTOs, converter functions. Imports Domain + Ports.
 - Infrastructure (`src/infrastructure/`): DB models, repository/auth/logging adapters, engine + session, DI machinery (`di/`).
 - API (`src/api/`): Routes, operation envelopes, composition root. Wires adapters to ports in `dependencies/`.
 
@@ -35,8 +36,8 @@ missing binding fails at runtime on first resolution (accepted trade-off).
 - Adapters are mechanism-qualified (`SqlAlchemyUserRepository`, `BcryptPasswordHasher`, `JwtTokenService`, `JsonLogger`, `RequestUserContext`).
 - Use cases are one plain concrete class per operation in its own file, each with a single `execute` method (`CreateUserUseCase`, `GetUserUseCase`, `LoginUseCase`, ...) — no separate interface; each declares only the ports its operation needs, and routes and tests depend on the concrete class (mock with `AsyncMock(spec=CreateUserUseCase)`).
 - Operation result enums are generic and shared: `CreateResult`, `UpdateResult`, `DeleteResult`.
-- DTOs: Pydantic models inheriting `DTOBase` (`src/application/dto_base.py`; frozen, camelCase aliases on the wire, accepts either case in), `DTO` suffix; validation rules (`EmailStr`, `min_length`, ...) live on the DTOs; return `list[UserDTO]` directly, never a wrapper DTO.
-- NO per-entity API schemas or API converters: routes accept/return DTOs directly (`response_model=UserDTO`); only the generic operation envelopes in `api/schemas/operation_schema.py` remain (also inherit `DTOBase`).
+- DTOs: Pydantic models inheriting `DTOBase` (`src/application/dto_base.py`), `DTO` suffix; the frozen + camelCase-on-the-wire + either-case-in config lives on the neutral `ContractModel` base (`src/shared/contract_model.py`) that both `DTOBase` and the API envelopes extend; validation rules (`EmailStr`, `min_length`, ...) live on the DTOs; return `list[UserDTO]` directly, never a wrapper DTO.
+- NO per-entity API schemas or API converters: routes accept/return DTOs directly (`response_model=UserDTO`); only the generic operation envelopes in `api/schemas/operation_schema.py` remain (they inherit the neutral `ContractModel`, not `DTOBase`).
 - Converters are module functions, NOT classes of static methods.
 - Booleans read like questions (`is_active`); no abbreviations (`repository` not `repo`).
 

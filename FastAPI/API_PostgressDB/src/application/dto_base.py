@@ -1,8 +1,5 @@
-from pydantic import BaseModel, ConfigDict
-from pydantic.alias_generators import to_camel
+from src.shared.contract_model import ContractModel
 
 
-class DTOBase(BaseModel):
-    """Base Pydantic model for every DTO and response envelope."""
-
-    model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True, frozen=True)
+class DTOBase(ContractModel):
+    """Base Pydantic model for every application DTO."""

@@ -4,9 +4,9 @@ from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
 from src.api.dependencies.injected import Injected
-from src.application.services.token_service import TokenService
-from src.application.services.user_context import UserContext
 from src.application.use_cases.auth import auth_dto
+from src.ports.token_service import TokenService
+from src.ports.user_context import UserContext
 
 _security = HTTPBearer()
 

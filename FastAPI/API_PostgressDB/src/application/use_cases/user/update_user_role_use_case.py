@@ -1,9 +1,9 @@
 from injector import inject
 
-from src.application.services.transaction_context import TransactionContext
 from src.application.use_cases.user import user_dto
 from src.domain.enums import operation_results
 from src.domain.repositories.user.user_repository import UserRepository
+from src.ports.transaction_context import TransactionContext
 
 
 class UpdateUserRoleUseCase:

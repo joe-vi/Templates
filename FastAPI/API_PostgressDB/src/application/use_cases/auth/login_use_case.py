@@ -1,11 +1,11 @@
 from injector import inject
 
-from src.application.services.logger import Logger
-from src.application.services.password_hasher import PasswordHasher
-from src.application.services.token_service import TokenService
 from src.application.use_cases.auth import auth_dto
 from src.domain.enums import operation_results
 from src.domain.repositories.user.user_repository import UserRepository
+from src.ports.logger import Logger
+from src.ports.password_hasher import PasswordHasher
+from src.ports.token_service import TokenService
 
 
 class LoginUseCase:

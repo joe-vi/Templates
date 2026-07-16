@@ -1,11 +1,11 @@
 import pytest
 from injector import Binder, Injector, Module
 
-from src.application.services.user_context import UserContext
 from src.domain.enums import user_enum
 from src.infrastructure.auth.request_user_context import RequestUserContext
 from src.infrastructure.di.request_scope import request, request_scope
 from src.infrastructure.di.typed_binder import TypedBinder
+from src.ports.user_context import UserContext
 
 
 class TestPopulate:

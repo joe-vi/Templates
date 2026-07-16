@@ -2,13 +2,14 @@
 
 ## 1. Architecture
 
-Dependencies flow **inward only**: API → Infrastructure → Application → Domain. Domain never imports from any other layer.
+Dependencies flow **inward only**: API → Infrastructure → Application → Domain. Domain never imports from any other layer. `src/ports/` and `src/shared/` are dependency-free **leaves**: every layer except Domain may import them.
 
 | Layer | Location | Contains | Depends On |
 |-------|----------|----------|------------|
 | Domain | `src/domain/` | Entities (aggregate roots with behaviour), repository ports (Protocols), enums | Nothing |
-| Application | `src/application/` | Use cases (concrete classes), DTOs, converters, service ports (Protocols) | Domain only |
-| Infrastructure | `src/infrastructure/` | DB models, repository/auth/logging adapters, engine/session, DI machinery | Domain + Application |
+| Ports (leaf) | `src/ports/` | Technical service ports (Protocols): `transaction_context`, `logger`, `password_hasher`, `token_service`, `user_context` | Nothing |
+| Application | `src/application/` | Use cases (concrete classes), DTOs, converters | Domain + Ports |
+| Infrastructure | `src/infrastructure/` | DB models, repository/auth/logging adapters, engine/session, DI machinery | Domain + Ports + Application |
 | API | `src/api/` | Routes (accept/return DTOs), operation envelopes, **composition root** | Application + Infrastructure (only in `dependencies/`) |
 
 The composition root is `AppModule` in `src/api/dependencies/providers.py`, built on the **injector** library with in-house machinery in `src/infrastructure/di/` (`request_scope.py`, `typed_binder.py`): a ContextVar-backed **request scope** with automatic disposal, and the **`TypedBinder`** facade, which makes every binding a one-liner — implementation, port, and scope — where a mismatched implementation is a pyrefly error at that line. The FastAPI-specific accessor `Injected()` lives in `src/api/dependencies/injected.py`. There is no graph-completeness validation: a missing binding surfaces as a runtime error on first resolution (accepted trade-off).
@@ -24,11 +25,12 @@ src/
 │   ├── repositories/<entity>/<entity>_repository.py   # Protocol port (clean name)
 │   └── enums/{<entity>_enum.py, operation_results.py}
 ├── application/
-│   ├── use_cases/<entity>/
-│   │   ├── <entity>_dto.py
-│   │   ├── <entity>_converter.py       # module functions, not a class
-│   │   └── <operation>_use_case.py     # one concrete class per operation, single execute(); no separate interface
-│   └── services/<service>.py           # Protocol ports (password_hasher, token_service, logger, transaction_context, user_context)
+│   └── use_cases/<entity>/
+│       ├── <entity>_dto.py
+│       ├── <entity>_converter.py       # module functions, not a class
+│       └── <operation>_use_case.py     # one concrete class per operation, single execute(); no separate interface
+├── ports/<port>.py                     # technical service ports (Protocols): password_hasher, token_service, logger, transaction_context, user_context
+├── shared/contract_model.py            # neutral wire base: camelCase JSON + frozen; extended by DTOBase and the API envelopes
 ├── infrastructure/
 │   ├── di/{request_scope.py, typed_binder.py}   # injector extensions (framework plumbing, FastAPI-agnostic)
 │   ├── repositories/<entity>/sqlalchemy_<entity>_repository.py   # adapter (mechanism-qualified name)
@@ -44,7 +46,7 @@ src/
     │   └── jwt_dependency.py  # get_current_user guard
     ├── routers/<entity>/<operation>_route.py   # one route module per operation, own APIRouter(), resource-relative paths ("" for collection root, "/{id}" for item) — no schemas/converters
     │              └── router.py                # imports the operation modules and aggregates them via include_router(op.router, prefix="/<entity>/v1"); /api base + tags + guard on the router; entity+version on the include (per-endpoint); __init__.py stays empty
-    ├── schemas/operation_schema.py   # generic result envelopes (inherit DTOBase)
+    ├── schemas/operation_schema.py   # generic result envelopes (inherit ContractModel)
     └── result_status_maps.py  # result enum -> HTTP status + message maps
 └── main.py                    # app, lifespan (configure_logging + engine dispose), registers the request_context middleware, routers
 ```
@@ -76,8 +78,8 @@ The domain layer is the heart of the system and must never be anemic.
 - Status enums: singular `StrEnum` (`UserRole`, `UserStatus`).
 - Operation result enums: generic and shared — `CreateResult`, `UpdateResult`, `DeleteResult`. Never entity-specific. `LoginResult` is the one permitted auth-specific enum.
 - DTOs: Pydantic models inheriting `DTOBase` (frozen; camelCase on the wire, snake_case in code) with `DTO` suffix; they are the API request/response bodies, so field validation (`EmailStr`, `min_length`, ...) lives on them. Return `list[UserDTO]` directly; never a wrapper collection DTO.
-- **No per-entity API schemas**: routes accept and return the application DTOs directly (`response_model=UserDTO`). Only the generic operation envelopes (`CreateOperationResponse`, ...) live in `src/api/schemas/operation_schema.py`, and they inherit `DTOBase` too.
-- `DTOBase` (`src/application/dto_base.py`): the base for every DTO and envelope — serialises to camelCase JSON (drives responses **and** the OpenAPI schema), accepts both camelCase and snake_case on input, and is frozen.
+- **No per-entity API schemas**: routes accept and return the application DTOs directly (`response_model=UserDTO`). Only the generic operation envelopes (`CreateOperationResponse`, ...) live in `src/api/schemas/operation_schema.py`, and they inherit the neutral `ContractModel` — **not** the application's `DTOBase` — so an API-layer schema never roots in the application layer.
+- `ContractModel` (`src/shared/contract_model.py`): the neutral shared-kernel base for anything crossing the API boundary — serialises to camelCase JSON (drives responses **and** the OpenAPI schema), accepts both camelCase and snake_case on input, and is frozen. `DTOBase` (`src/application/dto_base.py`) is the application-DTO marker that extends it; the operation envelopes extend `ContractModel` directly. `src/shared/` imports only pydantic, so both Application and API may depend on it without a layer violation.
 
 ### Variables & Properties
 - Collections: plural; sets: `_set` suffix; dicts: `_map` suffix.
@@ -89,7 +91,7 @@ The domain layer is the heart of the system and must never be anemic.
 ## 4. Core Patterns
 
 ### Ports & Adapters (dependency inversion via Protocol)
-- A **port** is a `typing.Protocol` defining the methods a collaborator must provide. It lives where it is *consumed*: repository ports in `src/domain/`, service ports in `src/application/services/`.
+- A **port** is a `typing.Protocol` defining the methods a collaborator must provide. Repository ports live in `src/domain/`, alongside the model that defines them. Technical service ports live in the dependency-free leaf `src/ports/`: they are consumed by several layers at once (use cases today, a business-logic layer later) and implemented by Infrastructure, so no single layer owns them — and Domain never imports them, which keeps the core model pure.
 - An **adapter explicitly subclasses its port** (`class SqlAlchemyUserRepository(UserRepository):`). This is deliberate: the port's method docstrings are inherited, so the contract is documented **once** and IDEs show it on hover both at call sites and inside the implementation; pyrefly additionally checks every override against the port signature at the class itself. Conformance is still enforced structurally at the binding line by `TypedBinder`.
 - Use cases depend on ports (constructor parameters typed as the Protocol). Providers supply the concrete adapter.
 
@@ -112,7 +114,7 @@ The domain layer is the heart of the system and must never be anemic.
   - `IntegrityError` → `UNIQUE_CONSTRAINT_ERROR`
   - `DBAPIError` whose `__cause__` is `asyncpg…DeadlockDetectedError` → `CONCURRENCY_ERROR`; otherwise `FAILURE`
   - any other `Exception` → `FAILURE`
-- **The use case owns the transaction boundary** via the `TransactionContext` port (`src/application/services/transaction_context.py`; adapter `SqlAlchemyTransactionContext` in `src/infrastructure/database/`). Every mutating use case wraps its repository calls in `async with self._transaction_context.begin() as transaction:` inside `execute` and calls `await transaction.commit()` only when every operation reported success.
+- **The use case owns the transaction boundary** via the `TransactionContext` port (`src/ports/transaction_context.py`; adapter `SqlAlchemyTransactionContext` in `src/infrastructure/database/`). Every mutating use case wraps its repository calls in `async with self._transaction_context.begin() as transaction:` inside `execute` and calls `await transaction.commit()` only when every operation reported success.
 - Semantics are **rollback unless committed**: leaving the `begin()` block without commit — by early return on a failure result or by an exception — rolls back everything performed inside it. Committing a partially-failed unit of work is structurally impossible.
 - **Atomic multi-repository operations**: call any number of repositories inside one `begin()` block; they share the request session, so they all succeed or all fail. If any call returns a non-success result, return without committing — every earlier operation rolls back.
 - `flush()` populates `id` and server defaults via RETURNING, so the new entity id is available inside the block before commit. Do not call `session.refresh()` after inserts.
@@ -124,7 +126,7 @@ The domain layer is the heart of the system and must never be anemic.
 ### Authentication & current user
 - `get_current_user` (in `src/api/dependencies/jwt_dependency.py`) decodes the Bearer JWT, raises 401 on failure, populates the request-scoped `UserContext`, and returns a `TokenClaimsDTO`. (The bound logger reads `user_id` from that `UserContext`, so the guard does not touch any logging state.)
 - Protect a whole router with `dependencies=[Depends(get_current_user)]` on the `APIRouter`. A route handler that needs the claims directly declares `claims: TokenClaimsDTO = Depends(get_current_user)`.
-- **Request-scoped user context**: the `UserContext` port (`src/application/services/user_context.py`; adapter `RequestUserContext`, bound at `request` scope) holds the caller's identity for the request. Inject it into use cases or services that need the caller — auditing, ownership checks, roles/permissions — instead of threading claims through every signature. `populate()` is called exactly once by the guard (a second call raises `RuntimeError`); reading it unpopulated raises `RuntimeError`, so it is only valid on guarded routes. Read scalar values from it and pass those to repositories — never pass the context object itself to a repository.
+- **Request-scoped user context**: the `UserContext` port (`src/ports/user_context.py`; adapter `RequestUserContext`, bound at `request` scope) holds the caller's identity for the request. Inject it into use cases or services that need the caller — auditing, ownership checks, roles/permissions — instead of threading claims through every signature. `populate()` is called exactly once by the guard (a second call raises `RuntimeError`); reading it unpopulated raises `RuntimeError`, so it is only valid on guarded routes. Read scalar values from it and pass those to repositories — never pass the context object itself to a repository.
 - Request correlation for logs is a **bound logger**: `JsonLogger` is request-scoped, and the `request_context` middleware (`src/api/middleware.py`) binds the request's correlation id onto it via `bind_request_id` — minted, or taken from an inbound `X-Request-ID` header, and echoed back as the `X-Request-ID` response header. `bind_request_id` raises on a second call (a request is bound once); log emission never raises when unbound (the field is simply omitted). `user_id` is read from the injected request-scoped `UserContext` (only when populated). No ambient `ContextVar`s. The process-wide handler/formatter/level is configured once at startup by `configure_logging()` (from `main.lifespan`), so per-request loggers never re-add handlers.
 
 ### Routes & responses
@@ -174,7 +176,7 @@ Never set these in Python code:
 
 ## 7. External Services
 
-- Port (`Protocol`) lives in `src/application/services/<service>.py`. Use cases depend only on the port.
+- Port (`Protocol`) lives in `src/ports/<service>.py`. Use cases depend only on the port.
 - Adapter lives in `src/infrastructure/<service>/`, mechanism-qualified name, explicitly subclassing the port.
 - Wire it with one `bind_typed(...).to(..., scope=singleton)` line in `AppModule`. Request-scoped resources are disposed automatically by the scope teardown (`close()`/`aclose()`); singleton resources holding connections must be disposed in `main.lifespan` shutdown (see the database engine).
 - To switch providers: write a new adapter and change one binding line. The use case is untouched.

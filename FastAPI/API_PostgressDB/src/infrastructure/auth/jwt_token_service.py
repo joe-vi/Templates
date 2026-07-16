@@ -4,10 +4,10 @@ import jwt
 from injector import inject
 from jwt.exceptions import InvalidTokenError
 
-from src.application.services.token_service import TokenService
 from src.application.use_cases.auth import auth_dto
 from src.config.settings import Settings
 from src.domain.enums import user_enum
+from src.ports.token_service import TokenService
 
 _ACCESS_TOKEN_TYPE = "access"
 _REFRESH_TOKEN_TYPE = "refresh"

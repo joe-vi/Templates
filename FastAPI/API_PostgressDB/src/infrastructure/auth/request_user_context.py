@@ -1,5 +1,5 @@
-from src.application.services.user_context import UserContext
 from src.domain.enums import user_enum
+from src.ports.user_context import UserContext
 
 _NOT_POPULATED = "UserContext has not been populated — ensure the route is protected by the get_current_user guard"
 _ALREADY_POPULATED = "UserContext.populate() was called more than once in the same request"

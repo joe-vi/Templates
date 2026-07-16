@@ -4,9 +4,9 @@ from datetime import UTC, datetime
 
 from injector import inject
 
-from src.application.services.logger import Logger
-from src.application.services.user_context import UserContext
 from src.config.settings import Settings
+from src.ports.logger import Logger
+from src.ports.user_context import UserContext
 
 _ALREADY_BOUND = "Logger.bind_request_id() was called more than once in the same request"
 
