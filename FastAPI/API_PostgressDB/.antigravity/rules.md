@@ -69,6 +69,14 @@ missing binding fails at runtime on first resolution.
 - For result-dependent status, inject `response: Response`, set `response.status_code = result_status_maps.<OP>_STATUS_MAP[result]`, return the model. Use `HTTPException` for not-found / auth failures.
 - URL shape is `/api/<entity>/<version>/<path>` (e.g. `/api/users/v1`, `/api/auth/v1/login`). `/api` is the base on the domain router's `prefix`; the `/<entity>/v1` segment rides on each `router.include_router(op.router, prefix="/<entity>/v1")` call, so the version is per-endpoint (bump one endpoint to `/<entity>/v2` without touching others). Operation files use resource-relative paths (`""` for the collection root, `/{id}` for item routes) and never repeat the entity or version. Do NOT collapse the segment onto the router's own `prefix` — FastAPI rejects including a prefix-less router that has an empty collection-root path.
 
+### Error Handling
+- Failures are reported in ONE place: the `exception_handler` middleware (`src/api/middleware/exception_handler_middleware.py`), registered first so it is innermost. It catches anything escaping a route, logs it as `request.unhandled_exception` through the request-scoped `Logger` (traceback, `method`, `path`, `request_id`, `user_id`), and returns `500 {"detail": "Internal Server Error"}`. The body stays opaque — detail belongs in the correlated log. Because it sits inside `access_log` and `request_id`, a failed request still gets its `request.completed` entry and `X-Request-ID` header.
+- **Use `try`/`except` ONLY when the `except`/`finally` block does real work the middleware cannot** — work specific to that call site, which either *translates* the failure into the layer's vocabulary or *undoes* something. Legitimate: repositories mapping `IntegrityError`/`DBAPIError` to result enums; `SqlAlchemyTransactionContext.begin` rolling back then re-raising; `JwtTokenService.decode_token` returning `None` on `InvalidTokenError`; the request-scope teardown logging a failed `aclose()` so the rest still run.
+- Never catch merely to report: a block that only logs and re-raises, wraps the exception, or hand-builds a 500 duplicates the middleware — delete it and let the exception propagate. Same for `except: raise` and a `finally` that adds nothing.
+- Never catch to produce an `HTTPException`. Routes raise `HTTPException` for outcomes they *expect* and detect themselves (not-found, auth failure), never as a translation of a caught unexpected exception.
+- Never catch `Exception` to continue with a default unless that default is a real result (a result enum, `None` from a decode) — swallowing an error behind a plausible success hides it from the log and the caller.
+- No `try` needed for rollback in a use case: leaving a `begin()` block by exception already rolls back, and the exception continues to the middleware.
+
 ### Auth
 - `get_current_user` decodes the Bearer JWT, raises 401, populates the request-scoped `UserContext`, returns `TokenClaimsDTO`. Protect routers with `dependencies=[Depends(get_current_user)]`. (The bound logger reads `user_id` from `UserContext`; the guard touches no logging state.)
 - `UserContext` port (adapter `RequestUserContext`, `request` scope): inject into use cases/services needing the caller's identity (auditing, roles/permissions). `populate()` once by the guard — a second call raises; unpopulated reads raise. Pass scalar values to repositories, never the context object.
@@ -106,6 +114,7 @@ missing binding fails at runtime on first resolution.
 - Do not re-implement driver-error classification per repository — import `is_deadlock` from `src/infrastructure/database/errors.py`.
 - Do not call `transaction.commit()` after any failed result in the block.
 - Do not return `JSONResponse(model.model_dump())` from routes.
+- Do not write a `try`/`except` whose block only logs, re-raises, wraps, or hand-builds a 500 — the `exception_handler` middleware does that once for every route. Catch only to translate a failure (to a result enum, to `None`) or to undo work (rollback), never to swallow an error behind a fake success.
 - Do not make ports ABCs or suffix them `Base`; use `Protocol`.
 - Do not duplicate docstrings on adapters — the port is the single documented contract.
 - Do not write module docstrings or file header comments.
