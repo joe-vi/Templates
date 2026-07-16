@@ -4,7 +4,7 @@ from contextlib import asynccontextmanager
 from injector import inject
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.application.services.transaction_context import Transaction, TransactionContext
+from src.ports.transaction_context import Transaction, TransactionContext
 
 
 class SqlAlchemyTransaction(Transaction):

@@ -4,10 +4,9 @@ import jwt
 from injector import inject
 from jwt.exceptions import InvalidTokenError
 
-from src.application.services.token_service import TokenService
-from src.application.use_cases.auth import auth_dto
 from src.config.settings import Settings
 from src.domain.enums import user_enum
+from src.ports.token_service import TokenClaims, TokenService
 
 _ACCESS_TOKEN_TYPE = "access"
 _REFRESH_TOKEN_TYPE = "refresh"
@@ -33,17 +32,17 @@ class JwtTokenService(TokenService):
         payload = {"sub": str(user_id), "role": role, "type": _REFRESH_TOKEN_TYPE, "exp": expire}
         return jwt.encode(payload, self._secret_key, algorithm=self._algorithm)
 
-    def decode_access_token(self, token: str) -> auth_dto.TokenClaimsDTO | None:
+    def decode_access_token(self, token: str) -> TokenClaims | None:
         return self._decode_token(token, _ACCESS_TOKEN_TYPE)
 
-    def decode_refresh_token(self, token: str) -> auth_dto.TokenClaimsDTO | None:
+    def decode_refresh_token(self, token: str) -> TokenClaims | None:
         return self._decode_token(token, _REFRESH_TOKEN_TYPE)
 
-    def _decode_token(self, token: str, expected_type: str) -> auth_dto.TokenClaimsDTO | None:
+    def _decode_token(self, token: str, expected_type: str) -> TokenClaims | None:
         try:
             payload = jwt.decode(token, self._secret_key, algorithms=[self._algorithm])
             if payload.get("type") != expected_type:
                 return None
-            return auth_dto.TokenClaimsDTO(user_id=int(payload["sub"]), role=user_enum.UserRole(payload["role"]))
+            return TokenClaims(user_id=int(payload["sub"]), role=user_enum.UserRole(payload["role"]))
         except (InvalidTokenError, KeyError, ValueError):
             return None

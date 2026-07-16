@@ -4,8 +4,8 @@ from httpx import AsyncClient
 
 
 class TestGetAllUsersRoute:
-    async def test_returns_200_with_list_of_users(self, client: AsyncClient, mock_get_all_users_use_case: AsyncMock, make_user_dto):
-        mock_get_all_users_use_case.execute.return_value = [make_user_dto(1), make_user_dto(2)]
+    async def test_returns_200_with_list_of_users(self, client: AsyncClient, mock_get_all_users_use_case: AsyncMock, make_user_response):
+        mock_get_all_users_use_case.execute.return_value = [make_user_response(1), make_user_response(2)]
 
         response = await client.get("/api/users/v1")
 

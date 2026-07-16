@@ -5,7 +5,7 @@ from fastapi import APIRouter, Response, status
 from src.api import result_status_maps
 from src.api.dependencies.injected import Injected
 from src.api.schemas import operation_schema
-from src.application.use_cases.user import user_dto
+from src.application.use_cases.user import user_contracts
 from src.application.use_cases.user.create_user_use_case import CreateUserUseCase
 
 router = APIRouter()
@@ -25,9 +25,9 @@ UseCaseDep = Annotated[CreateUserUseCase, Injected(CreateUserUseCase)]
     },
 )
 async def create_user(
-    create_user_dto: user_dto.CreateUserDTO, response: Response, use_case: UseCaseDep
+    create_user_request: user_contracts.CreateUserRequest, response: Response, use_case: UseCaseDep
 ) -> operation_schema.CreateOperationResponse:
     """Create a new user."""
-    result, entity_id = await use_case.execute(create_user_dto)
+    result, entity_id = await use_case.execute(create_user_request)
     response.status_code = result_status_maps.CREATE_STATUS_MAP[result]
     return operation_schema.CreateOperationResponse(result=result, message=result_status_maps.CREATE_MESSAGE_MAP[result], id=entity_id)

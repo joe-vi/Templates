@@ -5,7 +5,6 @@ from fastapi import APIRouter, Body, Response, status
 from src.api import result_status_maps
 from src.api.dependencies.injected import Injected
 from src.api.schemas import operation_schema
-from src.application.use_cases.user import user_dto
 from src.application.use_cases.user.update_user_role_use_case import UpdateUserRoleUseCase
 from src.domain.enums import user_enum
 
@@ -32,7 +31,6 @@ async def update_user_role(
     use_case: UseCaseDep,
 ) -> operation_schema.UpdateOperationResponse:
     """Update the role of a user."""
-    update_user_role_dto = user_dto.UpdateUserRoleDTO(user_id=user_id, role=role)
-    result = await use_case.execute(update_user_role_dto)
+    result = await use_case.execute(user_id, role)
     response.status_code = result_status_maps.UPDATE_STATUS_MAP[result]
     return operation_schema.UpdateOperationResponse(result=result, message=result_status_maps.UPDATE_MESSAGE_MAP[result])

@@ -4,11 +4,12 @@ from datetime import UTC, datetime
 
 from injector import inject
 
-from src.application.services.logger import Logger
-from src.application.services.user_context import UserContext
 from src.config.settings import Settings
+from src.ports.logger import Logger
+from src.ports.user_context import UserContext
 
 _ALREADY_BOUND = "Logger.bind_request_id() was called more than once in the same request"
+_UVICORN_LOGGERS = ("uvicorn", "uvicorn.error")
 
 
 class _JsonFormatter(logging.Formatter):
@@ -16,8 +17,9 @@ class _JsonFormatter(logging.Formatter):
 
     def format(self, record: logging.LogRecord) -> str:
         log_entry: dict[str, object] = {
-            "timestamp": datetime.now(UTC).isoformat(),
+            "timestamp": datetime.fromtimestamp(record.created, UTC).isoformat(),
             "level": record.levelname,
+            "logger": record.name,
             "message": record.getMessage(),
         }
 
@@ -32,17 +34,37 @@ class _JsonFormatter(logging.Formatter):
 
 
 def configure_logging(settings: Settings) -> None:
-    """Configure the process-wide ``app`` logger once at startup.
+    """Install the JSON handler on the root logger once at startup.
+
+    Every logger in the process — application, uvicorn, third-party — propagates into the root
+    handler, so the output stream carries a single machine-parseable format. Uvicorn's own access
+    log is silenced in favour of the correlated line emitted by the ``access_log`` middleware.
 
     Args:
-        settings: Application settings supplying the log level.
+        settings: Application settings supplying the application log level.
     """
-    logger = logging.getLogger("app")
-    logger.setLevel(settings.log_level.upper())
-    if not logger.handlers:
-        handler = logging.StreamHandler()
-        handler.setFormatter(_JsonFormatter())
-        logger.addHandler(handler)
+    _install_root_handler()
+    _redirect_uvicorn_to_root()
+    _silence_uvicorn_access_log()
+    logging.getLogger().setLevel(logging.WARNING)
+    logging.getLogger("app").setLevel(settings.log_level.upper())
+
+
+def _install_root_handler() -> None:
+    handler = logging.StreamHandler()
+    handler.setFormatter(_JsonFormatter())
+    logging.getLogger().handlers = [handler]
+
+
+def _redirect_uvicorn_to_root() -> None:
+    for name in _UVICORN_LOGGERS:
+        logger = logging.getLogger(name)
+        logger.handlers = []
+        logger.propagate = True
+
+
+def _silence_uvicorn_access_log() -> None:
+    logging.getLogger("uvicorn.access").disabled = True
 
 
 class JsonLogger(Logger):
@@ -63,8 +85,9 @@ class JsonLogger(Logger):
         fields: dict[str, object] = {}
         if self._request_id is not None:
             fields["request_id"] = self._request_id
-        if self._user_context.is_populated:
-            fields["user_id"] = self._user_context.user_id
+        user_id = self._user_context.user_id
+        if user_id is not None:
+            fields["user_id"] = user_id
         return fields
 
     def info(self, message: str, **extra: object) -> None:

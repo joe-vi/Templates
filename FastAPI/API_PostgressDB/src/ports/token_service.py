@@ -1,6 +1,14 @@
 from typing import Protocol
 
-from src.application.use_cases.auth import auth_dto
+from src.domain.enums import user_enum
+from src.shared.contract_model import ContractModel
+
+
+class TokenClaims(ContractModel):
+    """The decoded claims carried by a validated authentication token."""
+
+    user_id: int
+    role: user_enum.UserRole
 
 
 class TokenService(Protocol):
@@ -30,26 +38,26 @@ class TokenService(Protocol):
         """
         ...
 
-    def decode_access_token(self, token: str) -> auth_dto.TokenClaimsDTO | None:
+    def decode_access_token(self, token: str) -> TokenClaims | None:
         """Decode and validate an access token.
 
         Args:
             token: The access token string to decode.
 
         Returns:
-            A TokenClaimsDTO with the decoded claims, or None if the token is
-            invalid, expired, or not an access token.
+            The decoded TokenClaims, or None if the token is invalid,
+            expired, or not an access token.
         """
         ...
 
-    def decode_refresh_token(self, token: str) -> auth_dto.TokenClaimsDTO | None:
+    def decode_refresh_token(self, token: str) -> TokenClaims | None:
         """Decode and validate a refresh token.
 
         Args:
             token: The refresh token string to decode.
 
         Returns:
-            A TokenClaimsDTO with the decoded claims, or None if the token is
-            invalid, expired, or not a refresh token.
+            The decoded TokenClaims, or None if the token is invalid,
+            expired, or not a refresh token.
         """
         ...

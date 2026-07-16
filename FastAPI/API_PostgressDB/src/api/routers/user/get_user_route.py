@@ -3,7 +3,7 @@ from typing import Annotated
 from fastapi import APIRouter, HTTPException, status
 
 from src.api.dependencies.injected import Injected
-from src.application.use_cases.user import user_dto
+from src.application.use_cases.user import user_contracts
 from src.application.use_cases.user.get_user_use_case import GetUserUseCase
 
 router = APIRouter()
@@ -13,13 +13,13 @@ UseCaseDep = Annotated[GetUserUseCase, Injected(GetUserUseCase)]
 
 @router.get(
     "/{user_id}",
-    response_model=user_dto.UserDTO,
+    response_model=user_contracts.UserResponse,
     responses={
         status.HTTP_401_UNAUTHORIZED: {"description": "Missing or invalid JWT token"},
         status.HTTP_404_NOT_FOUND: {"description": "User not found"},
     },
 )
-async def get_user(user_id: int, use_case: UseCaseDep) -> user_dto.UserDTO:
+async def get_user(user_id: int, use_case: UseCaseDep) -> user_contracts.UserResponse:
     """Get a user by its unique identifier.
 
     Raises:

@@ -18,7 +18,7 @@ Invoke-WebRequest -Uri "https://github.com/joe-vi/Templates/archive/refs/heads/m
 
 ## Features
 
-- **Clean Architecture**: Four-layer separation of concerns — Domain, Application, Infrastructure, API
+- **Clean Architecture**: Four-layer separation of concerns — Domain, Application, Infrastructure, API — with dependencies flowing inward only, plus two dependency-free leaves (`src/ports/`, `src/shared/`) that every layer except Domain may import
 - **Domain-Driven Design**: Rich aggregate roots that enforce their own invariants and expose intention-revealing behaviour (`user.activate()`, `user.is_active`) — never an anemic domain
 - **Async Database**: Asynchronous PostgreSQL operations using SQLAlchemy 2.0+ and asyncpg
 - **JWT Authentication**: Access and refresh token pair with configurable expiry
@@ -48,27 +48,29 @@ Invoke-WebRequest -Uri "https://github.com/joe-vi/Templates/archive/refs/heads/m
 │   │   └── repositories/
 │   │       └── user/
 │   │           └── user_repository.py      # UserRepository Protocol (port)
-│   ├── application/                        # Use cases, DTOs, service ports (imports Domain only)
-│   │   ├── services/                       # Protocol ports
-│   │   │   ├── logger.py                    # Logger
-│   │   │   ├── password_hasher.py           # PasswordHasher
-│   │   │   ├── token_service.py             # TokenService
-│   │   │   ├── transaction_context.py       # TransactionContext (unit of work)
-│   │   │   └── user_context.py              # UserContext (caller identity)
+│   ├── application/                        # Use cases, request/response contracts (imports Domain + Ports)
 │   │   └── use_cases/                      # One concrete use case class per operation, single execute()
 │   │       ├── auth/
-│   │       │   ├── auth_dto.py
+│   │       │   ├── auth_contracts.py       # LoginRequest, RefreshTokenRequest, TokenResponse
 │   │       │   ├── login_use_case.py       # LoginUseCase
 │   │       │   └── refresh_token_use_case.py   # RefreshTokenUseCase
 │   │       └── user/
-│   │           ├── user_converter.py       # Entity ↔ DTO conversion (module functions)
-│   │           ├── user_dto.py
+│   │           ├── user_converter.py       # Entity ↔ contract conversion (module functions)
+│   │           ├── user_contracts.py       # CreateUserRequest, UserResponse
 │   │           ├── create_user_use_case.py # CreateUserUseCase
 │   │           ├── get_user_use_case.py    # GetUserUseCase
 │   │           ├── get_all_users_use_case.py   # GetAllUsersUseCase
 │   │           ├── update_user_role_use_case.py    # UpdateUserRoleUseCase
 │   │           └── delete_user_use_case.py # DeleteUserUseCase
-│   ├── infrastructure/                     # Adapters (imports Domain + Application)
+│   ├── ports/                              # Technical service ports (Protocols) — a leaf; imports Domain enums only
+│   │   ├── logger.py                       # Logger
+│   │   ├── password_hasher.py              # PasswordHasher
+│   │   ├── token_service.py                # TokenService + TokenClaims (the type it returns)
+│   │   ├── transaction_context.py          # TransactionContext (unit of work)
+│   │   └── user_context.py                 # UserContext (caller identity)
+│   ├── shared/                             # Dependency-free leaf; imports only pydantic
+│   │   └── contract_model.py               # ContractModel: camelCase JSON on the wire + frozen; base for contracts and envelopes
+│   ├── infrastructure/                     # Adapters (imports Domain + Ports + Application)
 │   │   ├── di/
 │   │   │   ├── request_scope.py            # RequestScope + disposal context managers
 │   │   │   └── typed_binder.py             # TypedBinder (pyrefly-checked bindings)
@@ -88,7 +90,10 @@ Invoke-WebRequest -Uri "https://github.com/joe-vi/Templates/archive/refs/heads/m
 │   │       └── user/
 │   │           └── sqlalchemy_user_repository.py   # Async CRUD adapter
 │   ├── api/                                # Routes, envelopes, composition root
-│   │   ├── middleware.py                    # request_context: opens DI request scope, binds X-Request-ID
+│   │   ├── middleware/                     # One middleware per module; __init__.py stays empty
+│   │   │   ├── request_scope_middleware.py # request_scope: opens the DI request scope (outermost)
+│   │   │   ├── request_id_middleware.py    # request_id: binds X-Request-ID on the Logger, echoes it back
+│   │   │   └── registration.py             # register(app): adds every middleware in order — outermost last
 │   │   ├── dependencies/
 │   │   │   ├── injected.py                 # Injected() route-side accessor
 │   │   │   ├── providers.py                # composition root: AppModule (cross-cutting binds; calls each domain's register())
@@ -96,7 +101,7 @@ Invoke-WebRequest -Uri "https://github.com/joe-vi/Templates/archive/refs/heads/m
 │   │   │   └── jwt_dependency.py           # JWT guard (get_current_user)
 │   │   ├── routers/                        # One route module per operation (own APIRouter(), resource-relative paths);
 │   │   │   ├── auth/                       # router.py (prefix="/api") aggregates via include_router(op.router, prefix="/<entity>/v1")
-│   │   │   │   ├── login_route.py          # Routes take/return DTOs directly
+│   │   │   │   ├── login_route.py          # Routes take/return the contracts directly
 │   │   │   │   ├── refresh_token_route.py
 │   │   │   │   └── router.py               # aggregated APIRouter; __init__.py stays empty
 │   │   │   └── user/
@@ -109,7 +114,7 @@ Invoke-WebRequest -Uri "https://github.com/joe-vi/Templates/archive/refs/heads/m
 │   │   ├── schemas/
 │   │   │   └── operation_schema.py         # Shared response envelope
 │   │   └── result_status_maps.py           # Operation result → HTTP status + message maps
-│   └── main.py                             # FastAPI app, lifespan (engine), registers request_context middleware, routers
+│   └── main.py                             # FastAPI app, lifespan (engine), calls middleware register(app), routers
 ├── tests/
 │   ├── domain/
 │   │   └── entities/
@@ -162,24 +167,29 @@ Invoke-WebRequest -Uri "https://github.com/joe-vi/Templates/archive/refs/heads/m
 - **Repository Ports**: `typing.Protocol` interfaces with clean names (`UserRepository`) — one per aggregate root
 - **Rule**: No dependencies on any other layer; business rules for one aggregate live on the entity
 
-### 2. Application Layer (`src/application/`)
-- **Use Cases**: One plain concrete class per operation, each with a single `execute` method (`CreateUserUseCase`, `GetUserUseCase`, `LoginUseCase`, ...) — no separate interface; each declares only the ports its operation needs, and routes and tests depend on the class directly
-- **DTOs**: Frozen Pydantic models inheriting `DTOBase` with `DTO` suffix — they double as the API request/response bodies, so validation lives on them
-- **Service Ports**: `PasswordHasher`, `TokenService`, `Logger`, `TransactionContext`, `UserContext` (Protocols)
-- **Converters**: Module-level functions for entity ↔ DTO mapping
-- **Rule**: Imports Domain only
+### 2. Ports & Shared Kernel (`src/ports/`, `src/shared/`)
+- **Service Ports** (`src/ports/`): `PasswordHasher`, `TokenService`, `Logger`, `TransactionContext`, `UserContext` (Protocols) — plus any type a port returns, such as `TokenClaims` beside `TokenService`
+- **Shared Kernel** (`src/shared/`): `ContractModel`, the neutral base for anything crossing the API boundary
+- **Rule**: Both are **leaves** — `ports/` imports only Domain enums, `shared/` imports only pydantic. Every layer except Domain may import them, and neither may import Application
 
-### 3. Infrastructure Layer (`src/infrastructure/`)
+### 3. Application Layer (`src/application/`)
+- **Use Cases**: One plain concrete class per operation, each with a single `execute` method (`CreateUserUseCase`, `GetUserUseCase`, `LoginUseCase`, ...) — no separate interface; each declares only the ports its operation needs, and routes and tests depend on the class directly
+- **Contracts** (`<entity>_contracts.py`): Frozen Pydantic models inheriting `ContractModel`, named for their role — `<Operation>Request` for a request body (`LoginRequest`, `CreateUserRequest`; validation lives here) and `<Entity>Response` for a response body (`UserResponse`, `TokenResponse`). They *are* the HTTP bodies. A type that never crosses the wire is not suffixed and lives beside its producer (`TokenClaims`, in `src/ports/token_service.py`)
+- **Converters**: Module-level functions for entity ↔ contract mapping (`to_response`, `to_response_list`, `to_entity`)
+- **Rule**: Imports Domain + Ports only
+
+### 4. Infrastructure Layer (`src/infrastructure/`)
 - **DI machinery** (`di/`): the ContextVar-backed request scope and the pyrefly-checked `TypedBinder` — framework plumbing, FastAPI-agnostic
 - **Database**: `session.py` builds the engine + `async_sessionmaker`; the session is provided per request (no custom factory wrapper, no shared `ContextVar`)
 - **Repository Adapters**: `SqlAlchemyUserRepository` subclasses the `UserRepository` port and takes an `AsyncSession`; mutations flush and map DB errors to result enums — they never commit; the use case owns the boundary via `SqlAlchemyTransactionContext` (commit on all-success, rollback otherwise)
-- **Auth/Logging Adapters**: `BcryptPasswordHasher`, `JwtTokenService`, `JsonLogger` (request-scoped bound logger — the `request_context` middleware binds a per-request `X-Request-ID` via `bind_request_id`, and it reads `user_id` from `UserContext`), `RequestUserContext` (request-scoped caller identity, populated once by the JWT guard)
+- **Auth/Logging Adapters**: `BcryptPasswordHasher`, `JwtTokenService`, `JsonLogger` (request-scoped bound logger — the `request_id` middleware binds a per-request `X-Request-ID` via `bind_request_id`, and it reads `user_id` from `UserContext`), `RequestUserContext` (request-scoped caller identity, populated once by the JWT guard; reads return `None` when unauthenticated)
+- **Logging output**: `configure_logging()` installs the JSON handler on the **root** logger at startup, so application, uvicorn, and third-party lines share one machine-parseable format, each tagged with its source `logger`. Uvicorn's own access log is disabled in favour of the `access_log` middleware, which emits a `request.completed` entry carrying `method`, `path`, `status_code`, `duration_ms`, and the `request_id`/`user_id` correlation fields
 - **Rule**: Adapters explicitly subclass their ports — the contract (and its docstrings) is defined once on the port and inherited everywhere
 
-### 4. API Layer (`src/api/`)
+### 5. API Layer (`src/api/`)
 - **Routes**: URLs follow `/api/<entity>/<version>/<path>` (e.g. `/api/users/v1`, `/api/auth/v1/login`). One FastAPI route module per operation, each with its own `APIRouter()` and **resource-relative paths** (`""` for the collection root, `/{id}` for item routes — neither the `/users` segment nor the version is repeated per file), depending on its use case via `Annotated[CreateUserUseCase, Injected(CreateUserUseCase)]` and **returning response models** (FastAPI serialises them to camelCase); the entity's `router.py` carries the `/api` base (plus tags and JWT guard) and aggregates the operations with `include_router(op.router, prefix="/users/v1")`, so the version is per-endpoint — bump one endpoint to `/users/v2` without touching the others (`__init__.py` stays empty)
 - **Dependencies**: `providers.py` is the composition root (ports → adapters); `jwt_dependency.py` is the JWT guard
-- **Bodies**: routes accept and return application DTOs directly — `DTOBase` gives camelCase JSON on the wire (and in OpenAPI) with snake_case Python attributes; only the generic operation envelopes live in `api/schemas/`
+- **Bodies**: routes accept and return the application contracts directly — `ContractModel` gives camelCase JSON on the wire (and in OpenAPI) with snake_case Python attributes; only the generic operation envelopes live in `api/schemas/`
 - **Rule**: Wires adapters to ports in `dependencies/`; routes never call repositories directly
 
 ## Installation
@@ -320,9 +330,9 @@ uv run alembic downgrade -1                              # Roll back one step
 ## Adding New Features
 
 1. **Domain**: Add an aggregate root with invariants + behaviour in `src/domain/entities/<name>/` and a repository **Protocol** port in `src/domain/repositories/<name>/<name>_repository.py` (clean name, e.g. `OrderRepository`)
-2. **Application**: Add DTOs, converter functions, and one concrete use case class per operation (single `execute` method) in `src/application/use_cases/<name>/` — mutating use cases inject `TransactionContext`, wrap the mutation in `begin()`, commit only on success (several repository calls in one block are atomic)
+2. **Application**: Add `<name>_contracts.py` (`*Request` / `*Response` models on `ContractModel`), converter functions, and one concrete use case class per operation (single `execute` method) in `src/application/use_cases/<name>/` — mutating use cases inject `TransactionContext`, wrap the mutation in `begin()`, commit only on success (several repository calls in one block are atomic)
 3. **Infrastructure**: Add the ORM model in `src/infrastructure/database/models/` and a `sqlalchemy_<name>_repository.py` adapter (subclasses the port, takes an `AsyncSession`) in `src/infrastructure/repositories/<name>/`
-4. **API**: Add one route module per operation in `src/api/routers/<name>/`, each with its own `APIRouter()` and resource-relative paths (`""` / `/{id}`), aggregated by `router.py` (`prefix="/api"`, tags, guard) via `include_router(op.router, prefix="/<name>/v1")` — giving `/api/<name>/v1/...` with the version per-endpoint; routes depend on their use case and accept/return the DTOs directly (`response_model=<Entity>DTO`) — no per-entity schemas or converters
+4. **API**: Add one route module per operation in `src/api/routers/<name>/`, each with its own `APIRouter()` and resource-relative paths (`""` / `/{id}`), aggregated by `router.py` (`prefix="/api"`, tags, guard) via `include_router(op.router, prefix="/<name>/v1")` — giving `/api/<name>/v1/...` with the version per-endpoint; routes depend on their use case and accept/return the contracts directly (`response_model=<Entity>Response`) — no per-entity schemas or converters
 5. **Bindings**: Add a `src/api/dependencies/bindings/<name>.py` with a `register(typed_binder)` that binds the domain's repository and use cases (transient), and call it from `AppModule.configure()` (which keeps the cross-cutting binds). Constructors are auto-wired via `@inject`; a wrong implementation is a pyrefly error:
    ```python
    # src/api/dependencies/bindings/order.py

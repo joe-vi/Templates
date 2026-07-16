@@ -7,14 +7,14 @@ from httpx import ASGITransport, AsyncClient
 from injector import Binder, Injector, Module
 
 from src.api.routers.auth.router import router as auth_router
-from src.application.use_cases.auth import auth_dto
+from src.application.use_cases.auth import auth_contracts
 from src.application.use_cases.auth.login_use_case import LoginUseCase
 from src.application.use_cases.auth.refresh_token_use_case import RefreshTokenUseCase
 
 
 @pytest.fixture
-def make_token_dto() -> auth_dto.TokenDTO:
-    return auth_dto.TokenDTO(access_token="access.jwt", refresh_token="refresh.jwt")
+def make_token_response() -> auth_contracts.TokenResponse:
+    return auth_contracts.TokenResponse(access_token="access.jwt", refresh_token="refresh.jwt")
 
 
 @pytest.fixture

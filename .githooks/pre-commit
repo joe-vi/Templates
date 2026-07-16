@@ -1,0 +1,46 @@
+#!/usr/bin/env bash
+set -uo pipefail
+
+PROJECT_DIR="FastAPI/API_PostgressDB"
+FIX_COMMAND="uv run ruff check src/ tests/ --fix && uv run ruff format src/ tests/"
+
+repo_root=$(git rev-parse --show-toplevel) || exit 1
+cd "$repo_root" || exit 1
+
+# Nothing staged under the project means nothing for these linters to say.
+if ! git diff --cached --name-only --diff-filter=ACMR -z -- "$PROJECT_DIR" | grep -qz '\.py$'; then
+    exit 0
+fi
+
+if ! command -v uv >/dev/null 2>&1; then
+    echo "pre-commit: uv not found on PATH; cannot run linters." >&2
+    echo "pre-commit: install uv, or commit with --no-verify to skip." >&2
+    exit 1
+fi
+
+cd "$repo_root/$PROJECT_DIR" || exit 1
+
+failed=()
+
+run_check() {
+    local label=$1
+    shift
+    local output
+    if ! output=$("$@" 2>&1); then
+        failed+=("$label")
+        printf '\n--- %s ---\n%s\n' "$label" "$output" >&2
+    fi
+}
+
+run_check "ruff check" uv run ruff check src/ tests/
+run_check "ruff format" uv run ruff format --check src/ tests/
+run_check "pyrefly" uv run pyrefly check
+
+if ((${#failed[@]} > 0)); then
+    printf '\npre-commit: failed: %s\n' "$(IFS=','; echo "${failed[*]}" | sed 's/,/, /g')" >&2
+    printf 'pre-commit: fix with:\n  cd %s\n  %s\n' "$PROJECT_DIR" "$FIX_COMMAND" >&2
+    printf 'pre-commit: commit with --no-verify to skip.\n' >&2
+    exit 1
+fi
+
+exit 0

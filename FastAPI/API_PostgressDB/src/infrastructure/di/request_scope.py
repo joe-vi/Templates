@@ -63,6 +63,22 @@ async def _dispose_async(instance: Any) -> None:
         await close_result
 
 
+def _dispose_all_sync(cache: dict[type, Any]) -> None:
+    for instance in reversed(list(cache.values())):
+        try:
+            _dispose_sync(instance)
+        except Exception:
+            logger.exception("request-scoped teardown failed for %r", instance)
+
+
+async def _dispose_all_async(cache: dict[type, Any]) -> None:
+    for instance in reversed(list(cache.values())):
+        try:
+            await _dispose_async(instance)
+        except Exception:
+            logger.exception("request-scoped teardown failed for %r", instance)
+
+
 @contextmanager
 def request_scope() -> Generator[None]:
     """Enter a per-request scope for synchronous (WSGI) code."""
@@ -72,11 +88,7 @@ def request_scope() -> Generator[None]:
         yield
     finally:
         try:
-            for instance in reversed(list(cache.values())):
-                try:
-                    _dispose_sync(instance)
-                except Exception:
-                    logger.exception("request-scoped teardown failed for %r", instance)
+            _dispose_all_sync(cache)
         finally:
             _request_cache.reset(token)
 
@@ -90,10 +102,6 @@ async def async_request_scope() -> AsyncGenerator[None]:
         yield
     finally:
         try:
-            for instance in reversed(list(cache.values())):
-                try:
-                    await _dispose_async(instance)
-                except Exception:
-                    logger.exception("request-scoped teardown failed for %r", instance)
+            await _dispose_all_async(cache)
         finally:
             _request_cache.reset(token)

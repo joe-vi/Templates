@@ -91,7 +91,7 @@ Check:
 Read `src/main.py` and `src/api/dependencies/`.
 
 Check:
-- **Injector**: `Injector([AppModule()])` at module level, stored on `app.state.injector`; the `request_context` middleware enters `async_request_scope()` per request; `lifespan` disposes the engine on shutdown
+- **Injector**: `Injector([AppModule()])` at module level, stored on `app.state.injector`; the `request_scope` middleware enters `async_request_scope()` per request and is registered last so it wraps the middlewares that resolve request-scoped bindings; `lifespan` disposes the engine on shutdown
 - **Legacy DI**: flag any `fastapi-injector` package usage (`InjectorMiddleware`, `attach_injector`) — this template uses its own `src/infrastructure/di/` machinery plus `injected.py`
 - **Bindings**: every port bound via `TypedBinder` with an explicit scope; the session is a request-scoped `@provider`; singletons holding connections are disposed in `lifespan`
 

@@ -3,11 +3,6 @@ from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 
 from src.api.dependencies.bindings import auth as auth_bindings
 from src.api.dependencies.bindings import user as user_bindings
-from src.application.services.logger import Logger
-from src.application.services.password_hasher import PasswordHasher
-from src.application.services.token_service import TokenService
-from src.application.services.transaction_context import TransactionContext
-from src.application.services.user_context import UserContext
 from src.config.settings import Settings, get_settings
 from src.infrastructure.auth.bcrypt_password_hasher import BcryptPasswordHasher
 from src.infrastructure.auth.jwt_token_service import JwtTokenService
@@ -17,6 +12,11 @@ from src.infrastructure.database.sqlalchemy_transaction_context import SqlAlchem
 from src.infrastructure.di.request_scope import request
 from src.infrastructure.di.typed_binder import TypedBinder
 from src.infrastructure.logging.json_logger import JsonLogger
+from src.ports.logger import Logger
+from src.ports.password_hasher import PasswordHasher
+from src.ports.token_service import TokenService
+from src.ports.transaction_context import TransactionContext
+from src.ports.user_context import UserContext
 
 
 class AppModule(Module):

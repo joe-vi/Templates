@@ -5,10 +5,10 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from src.application.services.password_hasher import PasswordHasher
 from src.domain.entities.user import user as user_module
 from src.domain.enums import user_enum
 from src.domain.repositories.user.user_repository import UserRepository
+from src.ports.password_hasher import PasswordHasher
 
 
 class FakeTransaction:

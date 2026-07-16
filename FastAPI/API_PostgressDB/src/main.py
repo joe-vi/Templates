@@ -6,7 +6,7 @@ from injector import Injector
 from sqlalchemy.ext.asyncio import AsyncEngine
 
 from src.api.dependencies.providers import AppModule
-from src.api.middleware import request_context
+from src.api.middleware import registration as middleware_registration
 from src.api.routers.auth.router import router as auth_router
 from src.api.routers.user.router import router as user_router
 from src.config.settings import Settings
@@ -31,7 +31,7 @@ app = FastAPI(
     lifespan=lifespan,
 )
 app.state.injector = injector
-app.middleware("http")(request_context)
+middleware_registration.register(app)
 
 app.include_router(auth_router)
 app.include_router(user_router)

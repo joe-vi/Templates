@@ -1,11 +1,11 @@
 import pytest
 from injector import Binder, Injector, Module
 
-from src.application.services.user_context import UserContext
 from src.domain.enums import user_enum
 from src.infrastructure.auth.request_user_context import RequestUserContext
 from src.infrastructure.di.request_scope import request, request_scope
 from src.infrastructure.di.typed_binder import TypedBinder
+from src.ports.user_context import UserContext
 
 
 class TestPopulate:
@@ -16,13 +16,6 @@ class TestPopulate:
 
         assert user_context.user_id == 42
         assert user_context.role == user_enum.UserRole.ADMIN
-
-    def test_is_populated_flips_after_populate(self):
-        user_context = RequestUserContext()
-
-        assert user_context.is_populated is False
-        user_context.populate(1, user_enum.UserRole.USER)
-        assert user_context.is_populated is True
 
     def test_second_populate_raises(self):
         user_context = RequestUserContext()
@@ -43,13 +36,11 @@ class TestPopulate:
 
 
 class TestUnpopulatedAccess:
-    def test_user_id_raises_before_populate(self):
-        with pytest.raises(RuntimeError, match="has not been populated"):
-            _ = RequestUserContext().user_id
+    def test_user_id_is_none_before_populate(self):
+        assert RequestUserContext().user_id is None
 
-    def test_role_raises_before_populate(self):
-        with pytest.raises(RuntimeError, match="has not been populated"):
-            _ = RequestUserContext().role
+    def test_role_is_none_before_populate(self):
+        assert RequestUserContext().role is None
 
 
 class _WiringModule(Module):
@@ -78,4 +69,5 @@ class TestRequestScopeBinding:
 
         with request_scope():
             next_request_context = injector.get(UserContext)
-            assert next_request_context.is_populated is False
+            assert next_request_context.user_id is None
+            assert next_request_context.role is None

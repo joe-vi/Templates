@@ -1,10 +1,10 @@
 from injector import inject
 
-from src.application.services.password_hasher import PasswordHasher
-from src.application.services.transaction_context import TransactionContext
-from src.application.use_cases.user import user_converter, user_dto
+from src.application.use_cases.user import user_contracts, user_converter
 from src.domain.enums import operation_results
 from src.domain.repositories.user.user_repository import UserRepository
+from src.ports.password_hasher import PasswordHasher
+from src.ports.transaction_context import TransactionContext
 
 
 class CreateUserUseCase:
@@ -16,18 +16,18 @@ class CreateUserUseCase:
         self._password_hasher = password_hasher
         self._transaction_context = transaction_context
 
-    async def execute(self, create_user_dto: user_dto.CreateUserDTO) -> tuple[operation_results.CreateResult, int | None]:
+    async def execute(self, create_user_request: user_contracts.CreateUserRequest) -> tuple[operation_results.CreateResult, int | None]:
         """Create a new user with a securely hashed password.
 
         Args:
-            create_user_dto: The validated data for the new user.
+            create_user_request: The validated data for the new user.
 
         Returns:
             A tuple of (result, id): the new user id on success, None on any
             failure result.
         """
-        hashed_password = self._password_hasher.hash(create_user_dto.password)
-        user = user_converter.to_entity(create_user_dto, hashed_password)
+        hashed_password = self._password_hasher.hash(create_user_request.password)
+        user = user_converter.to_entity(create_user_request, hashed_password)
 
         async with self._transaction_context.begin() as transaction:
             result, user_id = await self._repository.create(user)

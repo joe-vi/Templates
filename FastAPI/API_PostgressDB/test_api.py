@@ -104,6 +104,7 @@ def run_tests(base: str) -> None:
             access_token: str = body["accessToken"]
             refresh_token: str = body["refreshToken"]
             assert body.get("tokenType") == "bearer", "tokenType must be 'bearer'"
+            assert set(body) == {"accessToken", "refreshToken", "tokenType"}, f"token response keys not camelCase: {sorted(body)}"
         else:
             print(f"\n{RED}Cannot continue without a valid access token.{RESET}")
             return
@@ -125,13 +126,18 @@ def run_tests(base: str) -> None:
         # ----------------------------------------------------------------
         _section("3. Auth — token refresh")
 
-        r = client.post("/api/auth/v1/refresh", json={"refresh_token": refresh_token})
-        if _check("POST /auth/refresh  (valid refresh token)", r, 200):
+        r = client.post("/api/auth/v1/refresh", json={"refreshToken": refresh_token})
+        if _check("POST /auth/refresh  (camelCase refreshToken)", r, 200):
             access_token = r.json()["accessToken"]  # keep the newest token
 
         _check(
+            "POST /auth/refresh  (snake_case refresh_token also accepted)",
+            client.post("/api/auth/v1/refresh", json={"refresh_token": refresh_token}),
+            200,
+        )
+        _check(
             "POST /auth/refresh  (invalid token)  →  401",
-            client.post("/api/auth/v1/refresh", json={"refresh_token": "not.a.valid.token"}),
+            client.post("/api/auth/v1/refresh", json={"refreshToken": "not.a.valid.token"}),
             401,
         )
         _check("POST /auth/refresh  (missing field)  →  422", client.post("/api/auth/v1/refresh", json={}), 422)
@@ -198,6 +204,8 @@ def run_tests(base: str) -> None:
                 u = r.json()
                 assert u["username"] == "testscript", f"unexpected username: {u['username']}"
                 assert u["role"] == "user", f"unexpected role: {u['role']}"
+                expected_keys = {"id", "email", "username", "role", "status", "createdAt"}
+                assert set(u) == expected_keys, f"user response keys not camelCase: {sorted(u)}"
 
         _check("GET /users/999999  (not found)  →  404", client.get("/api/users/v1/999999", headers=auth), 404)
 
