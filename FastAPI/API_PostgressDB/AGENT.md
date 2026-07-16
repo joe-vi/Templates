@@ -7,10 +7,10 @@ Dependencies flow **inward only**: API → Infrastructure → Application → Do
 | Layer | Location | Contains | Depends On |
 |-------|----------|----------|------------|
 | Domain | `src/domain/` | Entities (aggregate roots with behaviour), repository ports (Protocols), enums | Nothing |
-| Ports (leaf) | `src/ports/` | Technical service ports (Protocols): `transaction_context`, `logger`, `password_hasher`, `token_service`, `user_context` | Nothing |
-| Application | `src/application/` | Use cases (concrete classes), DTOs, converters | Domain + Ports |
+| Ports (leaf) | `src/ports/` | Technical service ports (Protocols): `transaction_context`, `logger`, `password_hasher`, `token_service`, `user_context` | Domain (enums only) |
+| Application | `src/application/` | Use cases (concrete classes), request/response contracts, converters | Domain + Ports |
 | Infrastructure | `src/infrastructure/` | DB models, repository/auth/logging adapters, engine/session, DI machinery | Domain + Ports + Application |
-| API | `src/api/` | Routes (accept/return DTOs), operation envelopes, **composition root** | Application + Infrastructure (only in `dependencies/`) |
+| API | `src/api/` | Routes (accept/return the contracts), operation envelopes, **composition root** | Application + Infrastructure (only in `dependencies/`) |
 
 The composition root is `AppModule` in `src/api/dependencies/providers.py`, built on the **injector** library with in-house machinery in `src/infrastructure/di/` (`request_scope.py`, `typed_binder.py`): a ContextVar-backed **request scope** with automatic disposal, and the **`TypedBinder`** facade, which makes every binding a one-liner — implementation, port, and scope — where a mismatched implementation is a pyrefly error at that line. The FastAPI-specific accessor `Injected()` lives in `src/api/dependencies/injected.py`. There is no graph-completeness validation: a missing binding surfaces as a runtime error on first resolution.
 
@@ -26,11 +26,11 @@ src/
 │   └── enums/{<entity>_enum.py, operation_results.py}
 ├── application/
 │   └── use_cases/<entity>/
-│       ├── <entity>_dto.py
+│       ├── <entity>_contracts.py       # *Request / *Response models (ContractModel), validation lives here
 │       ├── <entity>_converter.py       # module functions, not a class
 │       └── <operation>_use_case.py     # one concrete class per operation, single execute(); no separate interface
 ├── ports/<port>.py                     # technical service ports (Protocols): password_hasher, token_service, logger, transaction_context, user_context
-├── shared/contract_model.py            # neutral wire base: camelCase JSON + frozen; extended by DTOBase and the API envelopes
+├── shared/contract_model.py            # neutral wire base: camelCase JSON + frozen; extended by the contracts and the API envelopes
 ├── infrastructure/
 │   ├── di/{request_scope.py, typed_binder.py}   # injector extensions (framework plumbing, FastAPI-agnostic)
 │   ├── repositories/<entity>/sqlalchemy_<entity>_repository.py   # adapter (mechanism-qualified name)
@@ -62,7 +62,7 @@ The domain layer is the heart of the system and must never be anemic.
 - **Entities are aggregate roots with behaviour.** They enforce their own invariants at construction (`__post_init__` raising `ValueError`) and expose intention-revealing state transitions (`User.activate()`, `User.deactivate()`, `User.is_active`) instead of leaving callers to mutate fields. Business rules that concern a single aggregate belong ON the entity; use cases orchestrate, they do not implement domain rules.
 - **One repository port per aggregate root**, defined in the domain layer. Repositories load and persist whole aggregates; a targeted single-column update (e.g. `update_role`) is an acceptable CQRS-style command **only** when no domain rule guards the change — anything guarded by an invariant must go load → entity behaviour → persist.
 - **Ubiquitous language**: names in code match the domain vocabulary (`User`, `UserRole`, `activate`, `login`) — no technical jargon leaking into the domain, no abbreviations.
-- **Domain purity**: the domain layer imports nothing from other layers and no frameworks (stdlib `dataclasses`, `enum`, `typing` only). Validation of *input shape* (email format, lengths) lives on the DTOs at the boundary; validation of *invariants* lives on the entity as the last line of defence.
+- **Domain purity**: the domain layer imports nothing from other layers and no frameworks (stdlib `dataclasses`, `enum`, `typing` only). Validation of *input shape* (email format, lengths) lives on the `*Request` contracts at the boundary; validation of *invariants* lives on the entity as the last line of defence.
 - **Domain tests come first**: entities are tested in complete isolation (`tests/domain/`) — no mocks, no fixtures, no I/O.
 - Value objects (typed wrappers with equality-by-value) are introduced only when a concept carries rules of its own; do not wrap every scalar pre-emptively.
 
@@ -77,9 +77,13 @@ The domain layer is the heart of the system and must never be anemic.
 - Entities: singular nouns — `User`, `Order`.
 - Status enums: singular `StrEnum` (`UserRole`, `UserStatus`).
 - Operation result enums: generic and shared — `CreateResult`, `UpdateResult`, `DeleteResult`. Never entity-specific. `LoginResult` is the one permitted auth-specific enum.
-- DTOs: Pydantic models inheriting `DTOBase` (frozen; camelCase on the wire, snake_case in code) with `DTO` suffix; they are the API request/response bodies, so field validation (`EmailStr`, `min_length`, ...) lives on them. Return `list[UserDTO]` directly; never a wrapper collection DTO.
-- **No per-entity API schemas**: routes accept and return the application DTOs directly (`response_model=UserDTO`). Only the generic operation envelopes (`CreateOperationResponse`, ...) live in `src/api/schemas/operation_schema.py`, and they inherit the neutral `ContractModel` — **not** the application's `DTOBase` — so an API-layer schema never roots in the application layer.
-- `ContractModel` (`src/shared/contract_model.py`): the neutral shared-kernel base for anything crossing the API boundary — serialises to camelCase JSON (drives responses **and** the OpenAPI schema), accepts both camelCase and snake_case on input, and is frozen. `DTOBase` (`src/application/dto_base.py`) is the application-DTO marker that extends it; the operation envelopes extend `ContractModel` directly. `src/shared/` imports only pydantic, so both Application and API may depend on it without a layer violation.
+- **Wire contracts are named for their role, never `DTO`.** Pydantic models inheriting `ContractModel` (frozen; camelCase on the wire, snake_case in code), living in `src/application/use_cases/<entity>/<entity>_contracts.py`:
+  - `<Operation>Request` — the model FastAPI binds as the request body (`LoginRequest`, `RefreshTokenRequest`, `CreateUserRequest`). Field validation (`EmailStr`, `min_length`, ...) lives here.
+  - `<Entity>Response` / `<Concept>Response` — the model a route returns (`UserResponse`, `TokenResponse`). Return `list[UserResponse]` directly; never a wrapper collection model.
+  - **A model only earns the `Request`/`Response` suffix if it really is that body.** A type that never crosses the wire takes a plain domain-ish name (`TokenClaims`) and lives next to whatever produces it — `TokenClaims` sits in `src/ports/token_service.py` beside the port that returns it, which keeps Ports free of any Application import.
+  - **Don't invent a model to carry a use case's arguments.** When a route assembles inputs from a path param plus a body field, pass scalars: `execute(user_id, role)`, not `execute(some_model)`. Use cases already take scalars where the input isn't a body (`GetUserUseCase.execute(user_id)`, `RefreshTokenUseCase.execute(refresh_token)`).
+- **No per-entity API schemas**: routes accept and return the application contracts directly (`response_model=UserResponse`). Only the generic operation envelopes (`CreateOperationResponse`, ...) live in `src/api/schemas/operation_schema.py`.
+- `ContractModel` (`src/shared/contract_model.py`): the single neutral shared-kernel base for anything crossing the API boundary — serialises to camelCase JSON (drives responses **and** the OpenAPI schema), accepts both camelCase and snake_case on input, and is frozen. Both the application contracts and the API operation envelopes extend it directly; there is no intermediate marker base. `src/shared/` imports only pydantic, so Application, Ports, and API may all depend on it without a layer violation.
 
 ### Variables & Properties
 - Collections: plural; sets: `_set` suffix; dicts: `_map` suffix.
@@ -121,11 +125,11 @@ The domain layer is the heart of the system and must never be anemic.
 - Uncommitted work is discarded when the request ends — forgetting to commit fails safe (nothing is silently persisted).
 
 ### Converters
-- Converters are **module-level functions**, not classes of static methods. `user_converter.to_dto(...)`, `to_entity(...)`, etc.
+- Converters are **module-level functions**, not classes of static methods. `user_converter.to_response(...)`, `to_response_list(...)`, `to_entity(...)`, etc. — the name states the direction, matching the contract it produces.
 
 ### Authentication & current user
-- `get_current_user` (in `src/api/dependencies/jwt_dependency.py`) decodes the Bearer JWT, raises 401 on failure, populates the request-scoped `UserContext`, and returns a `TokenClaimsDTO`. (The bound logger reads `user_id` from that `UserContext`, so the guard does not touch any logging state.)
-- Protect a whole router with `dependencies=[Depends(get_current_user)]` on the `APIRouter`. A route handler that needs the claims directly declares `claims: TokenClaimsDTO = Depends(get_current_user)`.
+- `get_current_user` (in `src/api/dependencies/jwt_dependency.py`) decodes the Bearer JWT, raises 401 on failure, populates the request-scoped `UserContext`, and returns `TokenClaims` (from `src/ports/token_service.py`). (The bound logger reads `user_id` from that `UserContext`, so the guard does not touch any logging state.)
+- Protect a whole router with `dependencies=[Depends(get_current_user)]` on the `APIRouter`. A route handler that needs the claims directly declares `claims: TokenClaims = Depends(get_current_user)`.
 - **Request-scoped user context**: the `UserContext` port (`src/ports/user_context.py`; adapter `RequestUserContext`, bound at `request` scope) holds the caller's identity for the request. Inject it into use cases or services that need the caller — auditing, ownership checks, roles/permissions — instead of threading claims through every signature. `populate()` is called exactly once by the guard (a second call raises `RuntimeError`); reading it unpopulated raises `RuntimeError`, so it is only valid on guarded routes. Read scalar values from it and pass those to repositories — never pass the context object itself to a repository.
 - Request correlation for logs is a **bound logger**: `JsonLogger` is request-scoped, and the `request_context` middleware (`src/api/middleware.py`) binds the request's correlation id onto it via `bind_request_id` — minted, or taken from an inbound `X-Request-ID` header, and echoed back as the `X-Request-ID` response header. `bind_request_id` raises on a second call (a request is bound once); log emission never raises when unbound (the field is simply omitted). `user_id` is read from the injected request-scoped `UserContext` (only when populated). No ambient `ContextVar`s. The process-wide handler/formatter/level is configured once at startup by `configure_logging()` (from `main.lifespan`), so per-request loggers never re-add handlers.
 
@@ -187,8 +191,8 @@ Never set these in Python code:
 
 1. **Domain**: enums in `src/domain/enums/<entity>_enum.py`; entity dataclass (invariants + behaviour) in `src/domain/entities/<entity>/`; repository **Protocol** in `src/domain/repositories/<entity>/<entity>_repository.py`.
 2. **Infrastructure**: ORM model in `src/infrastructure/database/models/<entity>_model.py` (re-export from `models/__init__.py`); adapter `sqlalchemy_<entity>_repository.py` subclassing the port and taking an `AsyncSession`.
-3. **Application**: `DTOBase` DTOs (with validation), converter **functions**, one concrete use case class per operation (single `execute` method) in `src/application/use_cases/<entity>/`. Mutating use cases inject `TransactionContext` and wrap repository calls in a `begin()` block, committing only on success.
-4. **API**: one route module per operation accepting and returning the DTOs directly (`Annotated[<Operation>UseCase, Injected(<Operation>UseCase)]`, `response_model=<Entity>DTO`), each with its own `APIRouter()` and **resource-relative paths** (`""` for the collection root, `/{id}` for item routes — neither the `/<entity>` nor the version is repeated in the operation files); `router.py` (with `prefix="/api"`, tags, and guard) imports every operation module and aggregates them with `router.include_router(op.router, prefix="/<entity>/v1")`, giving URLs `/api/<entity>/v1/...` with the version per-endpoint; add a `src/api/dependencies/bindings/<entity>.py` with a `register(typed_binder)` that binds the repository (transient) and each use case (`bind_self_typed`, transient), and call it from `AppModule.configure()`; include the router from `router.py` in `main.py`. No per-entity schemas or API converters.
+3. **Application**: `ContractModel` request/response contracts (with validation) in `<entity>_contracts.py`, converter **functions**, one concrete use case class per operation (single `execute` method) in `src/application/use_cases/<entity>/`. Mutating use cases inject `TransactionContext` and wrap repository calls in a `begin()` block, committing only on success.
+4. **API**: one route module per operation accepting and returning the contracts directly (`Annotated[<Operation>UseCase, Injected(<Operation>UseCase)]`, `response_model=<Entity>Response`), each with its own `APIRouter()` and **resource-relative paths** (`""` for the collection root, `/{id}` for item routes — neither the `/<entity>` nor the version is repeated in the operation files); `router.py` (with `prefix="/api"`, tags, and guard) imports every operation module and aggregates them with `router.include_router(op.router, prefix="/<entity>/v1")`, giving URLs `/api/<entity>/v1/...` with the version per-endpoint; add a `src/api/dependencies/bindings/<entity>.py` with a `register(typed_binder)` that binds the repository (transient) and each use case (`bind_self_typed`, transient), and call it from `AppModule.configure()`; include the router from `router.py` in `main.py`. No per-entity schemas or API converters.
 5. **Tests**: domain entity tests (no mocks), use case tests (mock the ports), route tests (bind a mock use case instance in a `TestModule`).
 
 ---
@@ -216,7 +220,7 @@ Tests live in `tests/` and mirror `src/`.
           binder.bind(CreateUserUseCase, to=mock_use_case)  # instance-bound: no scope needed
 
   app.state.injector = Injector([TestModule()])
-  app.dependency_overrides[get_current_user] = lambda: TokenClaimsDTO(user_id=1, role=UserRole.ADMIN)
+  app.dependency_overrides[get_current_user] = lambda: TokenClaims(user_id=1, role=UserRole.ADMIN)
   ```
 - Use `httpx.AsyncClient` with `ASGITransport`.
 
@@ -264,7 +268,10 @@ Tests live in `tests/` and mirror `src/`.
 - Don't create classes of only `@staticmethod`s — use module functions.
 - Don't bypass use cases — routes never call repositories directly.
 - Don't let Domain import from Infrastructure or API.
-- Don't create entity-specific result enums or wrapper collection DTOs.
+- Don't create entity-specific result enums or wrapper collection responses.
+- Don't name anything `DTO` — a wire model is a `*Request` or a `*Response`; a non-wire type gets a plain name (`TokenClaims`).
+- Don't suffix a model `Request`/`Response` unless it really is that HTTP body; don't invent a model just to group a use case's arguments — pass scalars.
+- Don't let `src/ports/` import from Application — a type a port returns belongs beside the port.
 - Don't scatter entity files into flat shared directories.
 - Don't add `# noqa`, `# type: ignore`, or any other lint/type suppression without checking with the user first — propose a design that avoids the violation instead.
 

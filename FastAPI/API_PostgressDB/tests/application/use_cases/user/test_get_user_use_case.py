@@ -2,7 +2,7 @@ from datetime import datetime
 
 import pytest
 
-from src.application.use_cases.user import user_dto as user_dto_module
+from src.application.use_cases.user import user_contracts
 from src.application.use_cases.user.get_user_use_case import GetUserUseCase
 from src.domain.entities.user import user as user_module
 from src.domain.enums import user_enum
@@ -15,22 +15,22 @@ def use_case(mock_repository: UserRepository) -> GetUserUseCase:
 
 
 class TestGetUser:
-    async def test_returns_dto_when_user_found(self, use_case, mock_repository, make_user):
+    async def test_returns_response_when_user_found(self, use_case, mock_repository, make_user):
         mock_repository.get_by_id.return_value = make_user(user_id=1)
 
-        result_dto = await use_case.execute(1)
+        result = await use_case.execute(1)
 
-        assert result_dto is not None
-        assert isinstance(result_dto, user_dto_module.UserDTO)
-        assert result_dto.id == 1
-        assert result_dto.email == "alice@example.com"
+        assert result is not None
+        assert isinstance(result, user_contracts.UserResponse)
+        assert result.id == 1
+        assert result.email == "alice@example.com"
 
     async def test_returns_none_when_user_not_found(self, use_case, mock_repository):
         mock_repository.get_by_id.return_value = None
 
-        result_dto = await use_case.execute(99)
+        result = await use_case.execute(99)
 
-        assert result_dto is None
+        assert result is None
 
     async def test_calls_repository_with_correct_user_id(self, use_case, mock_repository, make_user):
         mock_repository.get_by_id.return_value = make_user(user_id=5)
@@ -39,7 +39,7 @@ class TestGetUser:
 
         mock_repository.get_by_id.assert_called_once_with(5)
 
-    async def test_maps_all_entity_fields_to_dto(self, use_case, mock_repository):
+    async def test_maps_all_entity_fields_to_response(self, use_case, mock_repository):
         created_at = datetime(2024, 1, 15, 10, 30, 0)
         mock_repository.get_by_id.return_value = user_module.User(
             id=1,
@@ -50,8 +50,8 @@ class TestGetUser:
             created_at=created_at,
         )
 
-        result_dto = await use_case.execute(1)
+        result = await use_case.execute(1)
 
-        assert result_dto.role == user_enum.UserRole.ADMIN
-        assert result_dto.status == user_enum.UserStatus.INACTIVE
-        assert result_dto.created_at == created_at
+        assert result.role == user_enum.UserRole.ADMIN
+        assert result.status == user_enum.UserStatus.INACTIVE
+        assert result.created_at == created_at

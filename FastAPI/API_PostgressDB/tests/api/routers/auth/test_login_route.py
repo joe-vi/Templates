@@ -2,15 +2,15 @@ from unittest.mock import AsyncMock
 
 from httpx import AsyncClient
 
-from src.application.use_cases.auth import auth_dto
+from src.application.use_cases.auth import auth_contracts
 from src.domain.enums import operation_results
 
 
 class TestLoginRoute:
     async def test_returns_200_with_camel_case_token_pair_on_success(
-        self, client: AsyncClient, mock_login_use_case: AsyncMock, make_token_dto: auth_dto.TokenDTO
+        self, client: AsyncClient, mock_login_use_case: AsyncMock, make_token_response: auth_contracts.TokenResponse
     ):
-        mock_login_use_case.execute.return_value = (operation_results.LoginResult.SUCCESS, make_token_dto)
+        mock_login_use_case.execute.return_value = (operation_results.LoginResult.SUCCESS, make_token_response)
 
         response = await client.post("/api/auth/v1/login", json={"username": "alice", "password": "TestPass123"})
 
@@ -48,13 +48,13 @@ class TestLoginRoute:
         assert response.status_code == 422
 
     async def test_passes_credentials_to_use_case(
-        self, client: AsyncClient, mock_login_use_case: AsyncMock, make_token_dto: auth_dto.TokenDTO
+        self, client: AsyncClient, mock_login_use_case: AsyncMock, make_token_response: auth_contracts.TokenResponse
     ):
-        mock_login_use_case.execute.return_value = (operation_results.LoginResult.SUCCESS, make_token_dto)
+        mock_login_use_case.execute.return_value = (operation_results.LoginResult.SUCCESS, make_token_response)
 
         await client.post("/api/auth/v1/login", json={"username": "alice", "password": "TestPass123"})
 
         mock_login_use_case.execute.assert_called_once()
-        login_dto = mock_login_use_case.execute.call_args[0][0]
-        assert login_dto.username == "alice"
-        assert login_dto.password == "TestPass123"
+        login_request = mock_login_use_case.execute.call_args[0][0]
+        assert login_request.username == "alice"
+        assert login_request.password == "TestPass123"

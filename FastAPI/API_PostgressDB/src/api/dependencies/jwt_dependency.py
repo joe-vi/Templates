@@ -4,8 +4,7 @@ from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
 from src.api.dependencies.injected import Injected
-from src.application.use_cases.auth import auth_dto
-from src.ports.token_service import TokenService
+from src.ports.token_service import TokenClaims, TokenService
 from src.ports.user_context import UserContext
 
 _security = HTTPBearer()
@@ -15,7 +14,7 @@ async def get_current_user(
     credentials: Annotated[HTTPAuthorizationCredentials, Depends(_security)],
     token_service: Annotated[TokenService, Injected(TokenService)],
     user_context: Annotated[UserContext, Injected(UserContext)],
-) -> auth_dto.TokenClaimsDTO:
+) -> TokenClaims:
     """Validate the Bearer JWT access token and return its claims.
 
     Args:
@@ -24,7 +23,7 @@ async def get_current_user(
         user_context: The request-scoped identity holder to populate.
 
     Returns:
-        A TokenClaimsDTO containing the authenticated user's id and role.
+        The TokenClaims containing the authenticated user's id and role.
 
     Raises:
         HTTPException: 401 Unauthorized if the token is invalid or expired.

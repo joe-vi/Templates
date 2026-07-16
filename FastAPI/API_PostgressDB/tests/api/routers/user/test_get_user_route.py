@@ -4,8 +4,8 @@ from httpx import AsyncClient
 
 
 class TestGetUserRoute:
-    async def test_returns_200_with_user_data_when_found(self, client: AsyncClient, mock_get_user_use_case: AsyncMock, make_user_dto):
-        mock_get_user_use_case.execute.return_value = make_user_dto(user_id=1)
+    async def test_returns_200_with_user_data_when_found(self, client: AsyncClient, mock_get_user_use_case: AsyncMock, make_user_response):
+        mock_get_user_use_case.execute.return_value = make_user_response(user_id=1)
 
         response = await client.get("/api/users/v1/1")
 
@@ -22,8 +22,8 @@ class TestGetUserRoute:
 
         assert response.status_code == 404
 
-    async def test_calls_use_case_with_correct_user_id(self, client: AsyncClient, mock_get_user_use_case: AsyncMock, make_user_dto):
-        mock_get_user_use_case.execute.return_value = make_user_dto(user_id=5)
+    async def test_calls_use_case_with_correct_user_id(self, client: AsyncClient, mock_get_user_use_case: AsyncMock, make_user_response):
+        mock_get_user_use_case.execute.return_value = make_user_response(user_id=5)
 
         await client.get("/api/users/v1/5")
 

@@ -9,24 +9,24 @@ from injector import Binder, Injector, Module
 
 from src.api.dependencies import jwt_dependency
 from src.api.routers.user.router import router as user_router
-from src.application.use_cases.auth import auth_dto
-from src.application.use_cases.user import user_dto as user_dto_module
+from src.application.use_cases.user import user_contracts
 from src.application.use_cases.user.create_user_use_case import CreateUserUseCase
 from src.application.use_cases.user.delete_user_use_case import DeleteUserUseCase
 from src.application.use_cases.user.get_all_users_use_case import GetAllUsersUseCase
 from src.application.use_cases.user.get_user_use_case import GetUserUseCase
 from src.application.use_cases.user.update_user_role_use_case import UpdateUserRoleUseCase
 from src.domain.enums import user_enum
+from src.ports.token_service import TokenClaims
 
 
-def _mock_current_user() -> auth_dto.TokenClaimsDTO:
-    return auth_dto.TokenClaimsDTO(user_id=1, role=user_enum.UserRole.ADMIN)
+def _mock_current_user() -> TokenClaims:
+    return TokenClaims(user_id=1, role=user_enum.UserRole.ADMIN)
 
 
 @pytest.fixture
-def make_user_dto() -> Callable[..., user_dto_module.UserDTO]:
-    def _make_user_dto(user_id: int = 1) -> user_dto_module.UserDTO:
-        return user_dto_module.UserDTO(
+def make_user_response() -> Callable[..., user_contracts.UserResponse]:
+    def _make_user_response(user_id: int = 1) -> user_contracts.UserResponse:
+        return user_contracts.UserResponse(
             id=user_id,
             email="alice@example.com",
             username="alice",
@@ -35,7 +35,7 @@ def make_user_dto() -> Callable[..., user_dto_module.UserDTO]:
             created_at=datetime(2024, 1, 15, 10, 30, 0),
         )
 
-    return _make_user_dto
+    return _make_user_response
 
 
 @pytest.fixture
