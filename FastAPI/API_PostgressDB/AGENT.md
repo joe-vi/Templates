@@ -39,7 +39,10 @@ src/
 │   └── database/{base.py, session.py, errors.py, sqlalchemy_transaction_context.py, models/<entity>_model.py}
 │                  └── errors.py    # shared driver-error classifiers (is_deadlock) reused by every repository adapter
 └── api/
-    ├── middleware.py          # request_context: opens the DI request scope + binds the request's correlation id
+    ├── middleware/            # one HTTP middleware per module, named <concern>_middleware.py; __init__.py stays empty
+    │   ├── request_scope_middleware.py   # request_scope: opens the DI request scope (outermost)
+    │   ├── request_id_middleware.py      # request_id: binds the correlation id on the Logger, echoes X-Request-ID
+    │   └── registration.py               # register(app): adds every middleware in order — outermost last
     ├── dependencies/
     │   ├── injected.py        # Injected() route-side accessor (FastAPI Depends)
     │   ├── providers.py       # composition root: AppModule (cross-cutting binds; calls each domain's register())
@@ -49,7 +52,7 @@ src/
     │              └── router.py                # imports the operation modules and aggregates them via include_router(op.router, prefix="/<entity>/v1"); /api base + tags + guard on the router; entity+version on the include (per-endpoint); __init__.py stays empty
     ├── schemas/operation_schema.py   # generic result envelopes (inherit ContractModel)
     └── result_status_maps.py  # result enum -> HTTP status + message maps
-└── main.py                    # app, lifespan (configure_logging + engine dispose), registers the request_context middleware, routers
+└── main.py                    # app, lifespan (configure_logging + engine dispose), calls middleware register(app), routers
 ```
 
 **Rule**: For every new entity, create `src/{layer}/{type}/{entity}/` folders across all layers. Never scatter entity files into flat shared directories.
@@ -107,7 +110,7 @@ The domain layer is the heart of the system and must never be anemic.
 - **Every implementation whose `__init__` takes dependencies carries `@inject`** (from `injector`) so the graph auto-wires from type hints. Omitting it fails at resolution with a `TypeError`.
 - Construction that needs logic lives in `@provider` methods on `AppModule` (`provide_settings`, `provide_engine`, `provide_session_factory`, `provide_session`).
 - **Disposal**: on request end the scope disposes its objects in reverse creation order — `aclose()` preferred, an async `close()` is awaited, failures are logged without blocking other teardowns. The session is closed this way. The engine (a singleton) is disposed explicitly in `main.lifespan` shutdown.
-- The request scope is entered per HTTP request by the `request_context` middleware in `src/api/middleware.py` (registered in `main.py`). Resolving a request-scoped binding outside a scope raises a descriptive `RuntimeError`.
+- The request scope is entered per HTTP request by the `request_scope` middleware in `src/api/middleware/request_scope_middleware.py` (registered via `src/api/middleware/registration.py`, called from `main.py`). Resolving a request-scoped binding outside a scope raises a descriptive `RuntimeError`.
 - Routes and guards resolve via `Annotated[CreateUserUseCase, Injected(CreateUserUseCase)]` — a thin `Depends` over `request.app.state.injector`.
 - **No graph-completeness validation**: a forgotten binding is a runtime error on first resolution, not a startup failure. The wrong-implementation case is caught statically by `TypedBinder`.
 - Tests bind mock **instances** in a `TestModule` (`binder.bind(CreateUserUseCase, to=mock_use_case)` — instance-bound, so no request scope is needed) and set `app.state.injector = Injector([TestModule()])`; `app.dependency_overrides` handles plain guards like `get_current_user`.
@@ -133,12 +136,17 @@ The domain layer is the heart of the system and must never be anemic.
 - `get_current_user` (in `src/api/dependencies/jwt_dependency.py`) decodes the Bearer JWT, raises 401 on failure, populates the request-scoped `UserContext`, and returns `TokenClaims` (from `src/ports/token_service.py`). (The bound logger reads `user_id` from that `UserContext`, so the guard does not touch any logging state.)
 - Protect a whole router with `dependencies=[Depends(get_current_user)]` on the `APIRouter`. A route handler that needs the claims directly declares `claims: TokenClaims = Depends(get_current_user)`.
 - **Request-scoped user context**: the `UserContext` port (`src/ports/user_context.py`; adapter `RequestUserContext`, bound at `request` scope) holds the caller's identity for the request. Inject it into use cases or services that need the caller — auditing, ownership checks, roles/permissions — instead of threading claims through every signature. `populate()` is called exactly once by the guard (a second call raises `RuntimeError`); reading it unpopulated raises `RuntimeError`, so it is only valid on guarded routes. Read scalar values from it and pass those to repositories — never pass the context object itself to a repository.
-- Request correlation for logs is a **bound logger**: `JsonLogger` is request-scoped, and the `request_context` middleware (`src/api/middleware.py`) binds the request's correlation id onto it via `bind_request_id` — minted, or taken from an inbound `X-Request-ID` header, and echoed back as the `X-Request-ID` response header. `bind_request_id` raises on a second call (a request is bound once); log emission never raises when unbound (the field is simply omitted). `user_id` is read from the injected request-scoped `UserContext` (only when populated). No ambient `ContextVar`s. The process-wide handler/formatter/level is configured once at startup by `configure_logging()` (from `main.lifespan`), so per-request loggers never re-add handlers.
+- Request correlation for logs is a **bound logger**: `JsonLogger` is request-scoped, and the `request_id` middleware (`src/api/middleware/request_id_middleware.py`) binds the request's correlation id onto it via `bind_request_id` — minted, or taken from an inbound `X-Request-ID` header, and echoed back as the `X-Request-ID` response header. `bind_request_id` raises on a second call (a request is bound once); log emission never raises when unbound (the field is simply omitted). `user_id` is read from the injected request-scoped `UserContext` (only when populated). No ambient `ContextVar`s. The process-wide handler/formatter/level is configured once at startup by `configure_logging()` (from `main.lifespan`), so per-request loggers never re-add handlers.
 
 ### Routes & responses
 - Routes return the **response model object**; FastAPI serialises it (camelCase, via `response_model`). **Never** return a hand-built `JSONResponse(model.model_dump())` — that bypasses `response_model` and the alias generator.
 - For operations whose status varies by result enum, inject `response: Response`, set `response.status_code = result_status_maps.<OP>_STATUS_MAP[result]`, and return the response model. Use `HTTPException` for read-not-found and auth failures.
 - **URL shape is `/api/<entity>/<version>/<path>`** (e.g. `/api/users/v1`, `/api/users/v1/{id}`, `/api/auth/v1/login`). `/api` is the shared base, on each domain router's own `prefix`. The `/<entity>/<version>` segment (e.g. `/users/v1`) rides on each `router.include_router(op.router, prefix="/<entity>/v1")` call in `router.py` — **the version is per-endpoint**, so one endpoint can move to `/<entity>/v2` (add its operation module and include it with `prefix="/<entity>/v2"`) without touching the others. Operation files use resource-relative paths (`""` for the collection root, `/{id}` for item routes) and never repeat the entity or version. Do **not** collapse the segment onto the router's own `prefix`: FastAPI rejects including a prefix-less operation router that has an empty (`""`) collection-root path (`FastAPIError: Prefix and path cannot be both empty`), so it must ride on the `include_router` prefix.
+
+### Middleware
+- **One concern per module**, in `src/api/middleware/<concern>_middleware.py`, exposing a single `async def <concern>(request, call_next)` function named for the concern (`request_scope`, `request_id`). Never bundle two concerns into one middleware — the DI scope and the correlation id are separate modules. `__init__.py` stays empty.
+- **`register(app)` in `src/api/middleware/registration.py` is the only place middlewares are added**, and it owns the ordering. `main.py` calls it once (`middleware_registration.register(app)`) and never calls `app.middleware("http")` itself — the same way `AppModule.configure()` is the only place bindings are declared.
+- **Starlette runs the most recently registered middleware first, so the outermost middleware is registered last.** `register()` therefore reads bottom-up: `request_scope` is added last so it wraps `request_id`, which resolves the request-scoped `Logger` and needs the scope already open. Get this backwards and the first request fails with `RuntimeError: ... resolved outside a request scope`. Any new middleware that resolves a request-scoped binding must be registered **before** `request_scope` in that function.
 
 ---
 

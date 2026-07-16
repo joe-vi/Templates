@@ -90,7 +90,10 @@ Invoke-WebRequest -Uri "https://github.com/joe-vi/Templates/archive/refs/heads/m
 │   │       └── user/
 │   │           └── sqlalchemy_user_repository.py   # Async CRUD adapter
 │   ├── api/                                # Routes, envelopes, composition root
-│   │   ├── middleware.py                    # request_context: opens DI request scope, binds X-Request-ID
+│   │   ├── middleware/                     # One middleware per module; __init__.py stays empty
+│   │   │   ├── request_scope_middleware.py # request_scope: opens the DI request scope (outermost)
+│   │   │   ├── request_id_middleware.py    # request_id: binds X-Request-ID on the Logger, echoes it back
+│   │   │   └── registration.py             # register(app): adds every middleware in order — outermost last
 │   │   ├── dependencies/
 │   │   │   ├── injected.py                 # Injected() route-side accessor
 │   │   │   ├── providers.py                # composition root: AppModule (cross-cutting binds; calls each domain's register())
@@ -111,7 +114,7 @@ Invoke-WebRequest -Uri "https://github.com/joe-vi/Templates/archive/refs/heads/m
 │   │   ├── schemas/
 │   │   │   └── operation_schema.py         # Shared response envelope
 │   │   └── result_status_maps.py           # Operation result → HTTP status + message maps
-│   └── main.py                             # FastAPI app, lifespan (engine), registers request_context middleware, routers
+│   └── main.py                             # FastAPI app, lifespan (engine), calls middleware register(app), routers
 ├── tests/
 │   ├── domain/
 │   │   └── entities/
@@ -179,7 +182,7 @@ Invoke-WebRequest -Uri "https://github.com/joe-vi/Templates/archive/refs/heads/m
 - **DI machinery** (`di/`): the ContextVar-backed request scope and the pyrefly-checked `TypedBinder` — framework plumbing, FastAPI-agnostic
 - **Database**: `session.py` builds the engine + `async_sessionmaker`; the session is provided per request (no custom factory wrapper, no shared `ContextVar`)
 - **Repository Adapters**: `SqlAlchemyUserRepository` subclasses the `UserRepository` port and takes an `AsyncSession`; mutations flush and map DB errors to result enums — they never commit; the use case owns the boundary via `SqlAlchemyTransactionContext` (commit on all-success, rollback otherwise)
-- **Auth/Logging Adapters**: `BcryptPasswordHasher`, `JwtTokenService`, `JsonLogger` (request-scoped bound logger — the `request_context` middleware binds a per-request `X-Request-ID` via `bind_request_id`, and it reads `user_id` from `UserContext`), `RequestUserContext` (request-scoped caller identity, populated once by the JWT guard)
+- **Auth/Logging Adapters**: `BcryptPasswordHasher`, `JwtTokenService`, `JsonLogger` (request-scoped bound logger — the `request_id` middleware binds a per-request `X-Request-ID` via `bind_request_id`, and it reads `user_id` from `UserContext`), `RequestUserContext` (request-scoped caller identity, populated once by the JWT guard)
 - **Rule**: Adapters explicitly subclass their ports — the contract (and its docstrings) is defined once on the port and inherited everywhere
 
 ### 5. API Layer (`src/api/`)

@@ -118,7 +118,7 @@ Ports are `typing.Protocol`s in `src/application/services/`; adapters are mechan
 
 - `PasswordHasher` port / `BcryptPasswordHasher` adapter — bcrypt via passlib.
 - `TokenService` port / `JwtTokenService` adapter — PyJWT; issues access + refresh JWTs from settings.
-- `Logger` port / `JsonLogger` adapter — request-scoped bound logger; the `request_context` middleware (`src/api/middleware.py`) mints (or accepts an inbound `X-Request-ID`) and calls `bind_request_id` once (raises on a second call), echoing it back as the `X-Request-ID` response header, and `user_id` is read from the request-scoped `UserContext`. Log emission never raises when the id is unbound (the field is simply omitted). `configure_logging()` sets up the process-wide handler once at startup.
+- `Logger` port / `JsonLogger` adapter — request-scoped bound logger; the `request_id` middleware (`src/api/middleware/request_id_middleware.py`) mints (or accepts an inbound `X-Request-ID`) and calls `bind_request_id` once (raises on a second call), echoing it back as the `X-Request-ID` response header, and `user_id` is read from the request-scoped `UserContext`. Log emission never raises when the id is unbound (the field is simply omitted). `configure_logging()` sets up the process-wide handler once at startup.
 - `UserContext` port / `RequestUserContext` adapter — request-scoped holder of the caller's identity; `populate()` once by the guard (second call raises), unpopulated reads raise. Inject into use cases needing the caller (auditing, roles/permissions).
 - `jwt_dependency.py` — `get_current_user` decodes the JWT, populates `UserContext`, returns `TokenClaimsDTO`. Protect routers with `dependencies=[Depends(get_current_user)]`.
 - Auth use cases (one per operation: login, refresh) + DTOs + per-operation route modules under `src/application/use_cases/auth/` and `src/api/routers/auth/`.
@@ -153,10 +153,10 @@ Ports are `typing.Protocol`s in `src/application/services/`; adapters are mechan
 
 - `injector = Injector([AppModule()])` at module level; `app.state.injector = injector`.
 - `lifespan`: dispose the engine on shutdown (`await app.state.injector.get(AsyncEngine).dispose()`).
-- `FastAPI(lifespan=lifespan)` (lifespan calls `configure_logging(settings)` at startup and disposes the engine at shutdown); register the `request_context` middleware (from `src/api/middleware.py`), which enters `async_request_scope()` per request, binds the `X-Request-ID` on the `Logger`, and echoes it back as the response header.
+- `FastAPI(lifespan=lifespan)` (lifespan calls `configure_logging(settings)` at startup and disposes the engine at shutdown); add the middlewares with a single `middleware_registration.register(app)` call — `main.py` never calls `app.middleware("http")` itself. `register()` adds `request_id` (binds the `X-Request-ID` on the `Logger` and echoes it back) then `request_scope` (enters `async_request_scope()` per request); Starlette runs the most recently registered middleware first, so `request_scope` goes last to wrap `request_id`.
 - `app.include_router(...)` for each router.
 
-Copy `request_scope.py` and `typed_binder.py` verbatim from `FastAPI/API_PostgressDB/src/infrastructure/di/` into the new project's `src/infrastructure/di/`, `injected.py` from `FastAPI/API_PostgressDB/src/api/dependencies/`, and `middleware.py` from `FastAPI/API_PostgressDB/src/api/`.
+Copy `request_scope.py` and `typed_binder.py` verbatim from `FastAPI/API_PostgressDB/src/infrastructure/di/` into the new project's `src/infrastructure/di/`, `injected.py` from `FastAPI/API_PostgressDB/src/api/dependencies/`, and the whole `middleware/` package from `FastAPI/API_PostgressDB/src/api/`.
 
 ### Step 9 — Generate the use cases and composition root
 
