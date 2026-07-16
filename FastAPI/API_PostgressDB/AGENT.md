@@ -7,7 +7,7 @@ Dependencies flow **inward only**: API → Infrastructure → Application → Do
 | Layer | Location | Contains | Depends On |
 |-------|----------|----------|------------|
 | Domain | `src/domain/` | Entities (aggregate roots with behaviour), repository ports (Protocols), enums | Nothing |
-| Ports (leaf) | `src/ports/` | Technical service ports (Protocols): `transaction_context`, `logger`, `password_hasher`, `token_service`, `user_context` | Domain (enums only) |
+| Ports (leaf) | `src/ports/` | Technical service ports (Protocols): `transaction_context`, `logger`, `password_hasher`, `token_service`, `user_context` | Domain (enums only) + `src/shared/` |
 | Application | `src/application/` | Use cases (concrete classes), request/response contracts, converters | Domain + Ports |
 | Infrastructure | `src/infrastructure/` | DB models, repository/auth/logging adapters, engine/session, DI machinery | Domain + Ports + Application |
 | API | `src/api/` | Routes (accept/return the contracts), operation envelopes, **composition root** | Application + Infrastructure (only in `dependencies/`) |
@@ -112,7 +112,7 @@ The domain layer is the heart of the system and must never be anemic.
 - **Every implementation whose `__init__` takes dependencies carries `@inject`** (from `injector`) so the graph auto-wires from type hints. Omitting it fails at resolution with a `TypeError`.
 - Construction that needs logic lives in `@provider` methods on `AppModule` (`provide_settings`, `provide_engine`, `provide_session_factory`, `provide_session`).
 - **Disposal**: on request end the scope disposes its objects in reverse creation order — `aclose()` preferred, an async `close()` is awaited, failures are logged without blocking other teardowns. The session is closed this way. The engine (a singleton) is disposed explicitly in `main.lifespan` shutdown.
-- The request scope is entered per HTTP request by the `request_scope` middleware in `src/api/middleware/request_scope_middleware.py` (registered via `src/api/middleware/registration.py`, called from `main.py`). Resolving a request-scoped binding outside a scope raises a descriptive `RuntimeError`.
+- The request scope is entered per HTTP request by `RequestScopeMiddleware` in `src/api/middleware/request_scope_middleware.py` (registered via `src/api/middleware/registration.py`, called from `main.py`). Resolving a request-scoped binding outside a scope raises a descriptive `RuntimeError`.
 - Routes and guards resolve via `Annotated[CreateUserUseCase, Injected(CreateUserUseCase)]` — a thin `Depends` over `request.app.state.injector`.
 - **No graph-completeness validation**: a forgotten binding is a runtime error on first resolution, not a startup failure. The wrong-implementation case is caught statically by `TypedBinder`.
 - Tests bind mock **instances** in a `TestModule` (`binder.bind(CreateUserUseCase, to=mock_use_case)` — instance-bound, so no request scope is needed) and set `app.state.injector = Injector([TestModule()])`; `app.dependency_overrides` handles plain guards like `get_current_user`.

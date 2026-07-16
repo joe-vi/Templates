@@ -17,7 +17,7 @@ mismatched implementation is a pyrefly error at that line. No graph-completeness
 missing binding fails at runtime on first resolution.
 
 - Domain (`src/domain/`): Entities (aggregate roots with invariants + behaviour), repository ports (Protocols), enums. No external deps.
-- Ports (`src/ports/`): technical service ports (Protocols) — `transaction_context`, `logger`, `password_hasher`, `token_service`, `user_context` — plus any type a port returns (`TokenClaims`). A leaf importing only Domain enums; every layer except Domain may import it.
+- Ports (`src/ports/`): technical service ports (Protocols) — `transaction_context`, `logger`, `password_hasher`, `token_service`, `user_context` — plus any type a port returns (`TokenClaims`). A leaf importing only Domain enums and `src/shared/`; every layer except Domain may import it.
 - Application (`src/application/`): Use cases (concrete classes), request/response contracts, converter functions. Imports Domain + Ports.
 - Infrastructure (`src/infrastructure/`): DB models, repository/auth/logging adapters, engine + session, DI machinery (`di/`).
 - API (`src/api/`): Routes, operation envelopes, composition root. Wires adapters to ports in `dependencies/`.

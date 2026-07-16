@@ -14,11 +14,7 @@ class _Binding[P]:
         self._binder.bind(self._interface, to=impl, scope=scope)
 
     def to_many(self, impls: list[type[P]], scope: Any = None) -> None:
-        self._binder.multibind(
-            list[self._interface],  # type: ignore[name-defined]
-            to=list(impls),
-            scope=scope,
-        )
+        self._binder.multibind(list[self._interface], to=list(impls), scope=scope)
 
 
 class TypedBinder:

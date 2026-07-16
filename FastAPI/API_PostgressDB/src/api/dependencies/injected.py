@@ -1,19 +1,13 @@
-from typing import Any, cast
+from typing import cast
 
-from fastapi import Depends, Request
+from fastapi import Request, params
 
 
-def Injected[T](interface: type[T]) -> Any:  # noqa: N802 - mirrors Depends()
-    """Resolve ``interface`` from the app's injector, per request.
+class Injected[T](params.Depends):
+    """FastAPI dependency marker that resolves its interface from ``app.state.injector``."""
 
-    Args:
-        interface: The type to resolve from the injector.
+    def __init__(self, interface: type[T]) -> None:
+        async def resolve_dependency(request: Request) -> T:
+            return cast(T, request.app.state.injector.get(interface))
 
-    Returns:
-        A FastAPI ``Depends`` that resolves ``interface`` for each request.
-    """
-
-    async def resolve_dependency(request: Request) -> T:
-        return cast(T, request.app.state.injector.get(interface))
-
-    return Depends(resolve_dependency)
+        super().__init__(dependency=resolve_dependency)
