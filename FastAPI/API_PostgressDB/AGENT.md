@@ -36,7 +36,8 @@ src/
 │   ├── repositories/<entity>/sqlalchemy_<entity>_repository.py   # adapter (mechanism-qualified name)
 │   ├── auth/{bcrypt_password_hasher.py, jwt_token_service.py, request_user_context.py}
 │   ├── logging/json_logger.py
-│   └── database/{base.py, session.py, sqlalchemy_transaction_context.py, models/<entity>_model.py}
+│   └── database/{base.py, session.py, errors.py, sqlalchemy_transaction_context.py, models/<entity>_model.py}
+│                  └── errors.py    # shared driver-error classifiers (is_deadlock) reused by every repository adapter
 └── api/
     ├── middleware.py          # request_context: opens the DI request scope + binds the request's correlation id
     ├── dependencies/
@@ -116,8 +117,9 @@ The domain layer is the heart of the system and must never be anemic.
 - The `AsyncSession` is a **request-scoped `@provider` method**, so every repository adapter **and the transaction context** in one request share the same session, and the request-scope teardown closes it via `aclose()`. Repositories receive the session **by constructor** — transactional behaviour is never decided by ambient state (the scope's `ContextVar` is only the DI instance cache).
 - Repository **adapters receive the `AsyncSession`** by constructor injection. They **never commit or roll back**. Mutations `flush()` (inserts) or `execute()` (update/delete) so DB errors surface in the repository and are mapped to result enums; reads just query.
   - `IntegrityError` → `UNIQUE_CONSTRAINT_ERROR`
-  - `DBAPIError` whose `__cause__` is `asyncpg…DeadlockDetectedError` → `CONCURRENCY_ERROR`; otherwise `FAILURE`
+  - `DBAPIError` for which `is_deadlock(exc)` holds → `CONCURRENCY_ERROR`; otherwise `FAILURE`
   - any other `Exception` → `FAILURE`
+- **Driver-error classification is shared, not per-repository.** *How* a `DBAPIError` is recognised (unwrapping `__cause__` to an `asyncpg` error type) is a fact about the driver, identical for every aggregate, so it lives once in `src/infrastructure/database/errors.py` (`is_deadlock`) and every adapter imports it. Only the *mapping* to a result enum is per-method, because the enum differs (`CreateResult` / `UpdateResult` / `DeleteResult`). Never re-implement the `isinstance(exc.__cause__, ...)` check in an adapter; add the next classifier (e.g. `is_unique_violation`) to that module instead.
 - **The use case owns the transaction boundary** via the `TransactionContext` port (`src/ports/transaction_context.py`; adapter `SqlAlchemyTransactionContext` in `src/infrastructure/database/`). Every mutating use case wraps its repository calls in `async with self._transaction_context.begin() as transaction:` inside `execute` and calls `await transaction.commit()` only when every operation reported success.
 - Semantics are **rollback unless committed**: leaving the `begin()` block without commit — by early return on a failure result or by an exception — rolls back everything performed inside it. Committing a partially-failed unit of work is structurally impossible.
 - **Atomic multi-repository operations**: call any number of repositories inside one `begin()` block; they share the request session, so they all succeed or all fail. If any call returns a non-success result, return without committing — every earlier operation rolls back.
@@ -249,6 +251,16 @@ Tests live in `tests/` and mirror `src/`.
 - Always use `uv run`. Modern type annotations (`list[X]`, `X | None`). All DB I/O is async. URL shape: `/api/<entity>/<version>/<path>` (e.g. `/api/users/v1`) — `/api` base on the domain router, `/<entity>/v1` on each `include_router` call so the version is per-endpoint.
 - **Never introduce a lint/type-check suppression** (`# noqa`, `# type: ignore`, pyrefly ignore comments, or equivalent) **without checking with the user first.** If satisfying a rule would require one, stop and present the design alternatives that avoid it instead of silently suppressing.
 
+### Method Composition (one level of abstraction per method)
+
+A method body states **what** its operation does, as a sequence of named steps; the mechanics of each step live in a helper. When a block inside a method pursues a **sub-goal** — building a value, classifying an error, checking a precondition, assembling a payload, disposing a collection — extract it into a helper named for that sub-goal and call it. The caller then reads as prose and the helper holds the detail.
+
+- **The trigger is a nameable sub-goal, not a line count.** If you could write a comment above a block saying what it accomplishes ("map the DB error to a result", "dispose every cached instance"), that comment is the helper's name and the block is its body: extract it and drop the comment. A short method can still be doing two jobs, and a long one that is genuinely a flat sequence of guards is fine.
+- **A method never mixes levels.** Orchestrating steps *and* inlining the mechanics of one of them is the violation — hoist the mechanics out so every call in the body sits at the same altitude.
+- **Prefer a module-level `_` function when the logic is pure** (no instance state) — `_to_entity`, `_is_deadlock` in the repository adapters. Use a `_`-prefixed method when it needs `self`.
+- **Helpers take no docstrings**; the name is the contract. The public method keeps its docstring (§10's single-source rule is unchanged) and describes the operation, never the helpers.
+- **Do not extract for its own sake.** A helper wrapping a single expression that its variable already names adds a hop without adding meaning. The test is whether the *caller* reads better with the block gone — if not, leave it inline.
+
 ---
 
 ## 11. Anti-Patterns
@@ -266,6 +278,7 @@ Tests live in `tests/` and mirror `src/`.
 - Don't duplicate docstrings on adapters — the port is the single documented contract.
 - Don't write module docstrings or file header comments.
 - Don't create classes of only `@staticmethod`s — use module functions.
+- Don't pack every step of an operation into one method — each nameable sub-goal becomes a helper, so the method reads as named steps at one level of abstraction.
 - Don't bypass use cases — routes never call repositories directly.
 - Don't let Domain import from Infrastructure or API.
 - Don't create entity-specific result enums or wrapper collection responses.

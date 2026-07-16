@@ -1,6 +1,5 @@
 from typing import Any, cast
 
-import asyncpg
 from injector import inject
 from sqlalchemy import CursorResult, delete, select, update
 from sqlalchemy.exc import DBAPIError, IntegrityError
@@ -9,6 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from src.domain.entities.user.user import User
 from src.domain.enums import operation_results, user_enum
 from src.domain.repositories.user.user_repository import UserRepository
+from src.infrastructure.database.errors import is_deadlock
 from src.infrastructure.database.models import user_model
 
 
@@ -44,9 +44,7 @@ class SqlAlchemyUserRepository(UserRepository):
         except IntegrityError:
             return (operation_results.CreateResult.UNIQUE_CONSTRAINT_ERROR, None)
         except DBAPIError as exc:
-            if isinstance(exc.__cause__, asyncpg.exceptions.DeadlockDetectedError):
-                return (operation_results.CreateResult.CONCURRENCY_ERROR, None)
-            return (operation_results.CreateResult.FAILURE, None)
+            return (operation_results.CreateResult.CONCURRENCY_ERROR if is_deadlock(exc) else operation_results.CreateResult.FAILURE, None)
         except Exception:
             return (operation_results.CreateResult.FAILURE, None)
 
@@ -76,9 +74,7 @@ class SqlAlchemyUserRepository(UserRepository):
             )
             return operation_results.UpdateResult.SUCCESS if update_result.rowcount > 0 else operation_results.UpdateResult.NOT_FOUND
         except DBAPIError as exc:
-            if isinstance(exc.__cause__, asyncpg.exceptions.DeadlockDetectedError):
-                return operation_results.UpdateResult.CONCURRENCY_ERROR
-            return operation_results.UpdateResult.FAILURE
+            return operation_results.UpdateResult.CONCURRENCY_ERROR if is_deadlock(exc) else operation_results.UpdateResult.FAILURE
         except Exception:
             return operation_results.UpdateResult.FAILURE
 
@@ -89,8 +85,6 @@ class SqlAlchemyUserRepository(UserRepository):
             )
             return operation_results.DeleteResult.SUCCESS if delete_result.rowcount > 0 else operation_results.DeleteResult.NOT_FOUND
         except DBAPIError as exc:
-            if isinstance(exc.__cause__, asyncpg.exceptions.DeadlockDetectedError):
-                return operation_results.DeleteResult.CONCURRENCY_ERROR
-            return operation_results.DeleteResult.FAILURE
+            return operation_results.DeleteResult.CONCURRENCY_ERROR if is_deadlock(exc) else operation_results.DeleteResult.FAILURE
         except Exception:
             return operation_results.DeleteResult.FAILURE

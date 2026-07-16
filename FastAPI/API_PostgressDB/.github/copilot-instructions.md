@@ -76,6 +76,7 @@ missing binding fails at runtime on first resolution.
 
 ### Database
 - All constraints MUST have an explicit `name` (`uq_`, `fk_`, `ck_`, `ix_` prefix).
+- **Driver-error classification is shared, not per-repository.** How a `DBAPIError` is recognised (unwrapping `__cause__` to an `asyncpg` error type) is identical for every aggregate, so it lives once in `src/infrastructure/database/errors.py` (`is_deadlock`) and every adapter imports it. Only the mapping to a result enum is per-method (the enum differs). Never re-implement the `isinstance(exc.__cause__, ...)` check in an adapter — add the next classifier to that module.
 - `id`, `created_at` are DB-generated — never set in Python; `flush()` RETURNING populates them (no `session.refresh()`).
 - All DB operations are async.
 
@@ -86,6 +87,7 @@ missing binding fails at runtime on first resolution.
 - Max line length: 140 characters (`skip-magic-trailing-comma = true` — the formatter uses the full width). Run `uv run ruff check src/ tests/ --fix && uv run ruff format src/ tests/` after every change. Run `uv run pyrefly check` to type-check.
 - Always use `uv run`. URL shape: `/api/<entity>/<version>/<path>` (e.g. `/api/users/v1`) — `/api` base on the domain router, `/<entity>/v1` on each `include_router` call so the version is per-endpoint.
 - **Never introduce a lint/type-check suppression** (`# noqa`, `# type: ignore`, pyrefly ignore comments, or equivalent) **without checking with the user first.** If satisfying a rule would require one, stop and present the design alternatives that avoid it instead of silently suppressing.
+- **One level of abstraction per method.** A method reads as a sequence of named steps; each nameable sub-goal inside it (building a value, classifying an error, checking a precondition) is extracted into a helper named for that sub-goal — a module-level `_` function when the logic is pure (`_to_entity`, `_is_deadlock`), a `_`-prefixed method when it needs `self`. The trigger is a nameable sub-goal, not a line count: if you could write a comment above a block saying what it accomplishes, that comment is the helper's name. Helpers take no docstrings. Don't extract a single expression its variable already names — the test is whether the caller reads better with the block gone.
 
 ### Testing
 - Domain: pure entity unit tests in `tests/domain/` (no mocks).
@@ -101,11 +103,13 @@ missing binding fails at runtime on first resolution.
 - Do not keep session state in a module-global `ContextVar`; inject the request-scoped session.
 - Do not pass sessions to use cases.
 - Do not commit or roll back inside repositories — the use case owns the boundary via `TransactionContext`.
+- Do not re-implement driver-error classification per repository — import `is_deadlock` from `src/infrastructure/database/errors.py`.
 - Do not call `transaction.commit()` after any failed result in the block.
 - Do not return `JSONResponse(model.model_dump())` from routes.
 - Do not make ports ABCs or suffix them `Base`; use `Protocol`.
 - Do not duplicate docstrings on adapters — the port is the single documented contract.
 - Do not write module docstrings or file header comments.
 - Do not create classes of only static methods; use module functions.
+- Do not pack every step of an operation into one method — extract each nameable sub-goal into a helper.
 - Do not bypass use cases — routes never call repositories directly.
 - Do not add `# noqa`, `# type: ignore`, or any other lint/type suppression without checking with the user first — propose a design that avoids the violation instead.
