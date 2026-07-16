@@ -14,7 +14,7 @@ imports from any other layer. The composition root is `AppModule` in
 `src/infrastructure/di/` (`request_scope.py`, `typed_binder.py`) and the FastAPI accessor
 `src/api/dependencies/injected.py`: one line binds implementation, port, and scope, and a
 mismatched implementation is a pyrefly error at that line. No graph-completeness validation — a
-missing binding fails at runtime on first resolution (accepted trade-off).
+missing binding fails at runtime on first resolution.
 
 - Domain (`src/domain/`): Entities (aggregate roots with invariants + behaviour), repository ports (Protocols), enums. No external deps.
 - Ports (`src/ports/`): technical service ports (Protocols) — `transaction_context`, `logger`, `password_hasher`, `token_service`, `user_context`. A dependency-free leaf; every layer except Domain may import it.
@@ -37,7 +37,7 @@ missing binding fails at runtime on first resolution (accepted trade-off).
 - Use cases are one plain concrete class per operation in its own file, each with a single `execute` method (`CreateUserUseCase`, `GetUserUseCase`, `LoginUseCase`, ...) — no separate interface; each declares only the ports its operation needs, and routes and tests depend on the concrete class (mock with `AsyncMock(spec=CreateUserUseCase)`).
 - Operation result enums are generic and shared: `CreateResult`, `UpdateResult`, `DeleteResult`.
 - DTOs: Pydantic models inheriting `DTOBase` (`src/application/dto_base.py`), `DTO` suffix; the frozen + camelCase-on-the-wire + either-case-in config lives on the neutral `ContractModel` base (`src/shared/contract_model.py`) that both `DTOBase` and the API envelopes extend; validation rules (`EmailStr`, `min_length`, ...) live on the DTOs; return `list[UserDTO]` directly, never a wrapper DTO.
-- NO per-entity API schemas or API converters: routes accept/return DTOs directly (`response_model=UserDTO`); only the generic operation envelopes in `api/schemas/operation_schema.py` remain (they inherit the neutral `ContractModel`, not `DTOBase`).
+- NO per-entity API schemas or API converters: routes accept/return DTOs directly (`response_model=UserDTO`). The only API-layer schemas are the generic operation envelopes in `api/schemas/operation_schema.py` (they inherit the neutral `ContractModel`, not `DTOBase`).
 - Converters are module functions, NOT classes of static methods.
 - Booleans read like questions (`is_active`); no abbreviations (`repository` not `repo`).
 
@@ -49,8 +49,8 @@ missing binding fails at runtime on first resolution (accepted trade-off).
 - Standalone public functions (converters, providers, guards, routes) keep their own docstrings; route docstrings become OpenAPI descriptions.
 
 ### Dependency Injection (injector + TypedBinder)
-- Composition root: `AppModule.configure()` in `src/api/dependencies/providers.py` using the `TypedBinder` facade — one line per binding: `typed_binder.bind_typed(UserRepository).to(SqlAlchemyUserRepository)`. A wrong implementation for a port is a pyrefly error at that line. Concrete classes (use cases): one `bind_self_typed(CreateUserUseCase)` line per operation. `AppModule.configure()` holds the cross-cutting binds and delegates each domain's repository + use-case binds to a `register(typed_binder)` function in `src/api/dependencies/bindings/<domain>.py` (API layer, so it may import the adapters; keep `TypedBinder` — never plain tuples, which lose the static check).
-- Scopes chosen by what holds request state: `singleton` (engine, stateless services), `request` (session, transaction context, logger, user context), and **transient** (no scope) for stateless orchestrators — use cases and repositories. Transient repos/use cases still share the one request-scoped session (injected), so the unit-of-work is unchanged. The scope is entered per request by the `request_context` middleware (`src/api/middleware.py`) and disposes its objects on exit (LIFO; `aclose()` preferred, async `close()` awaited).
+- Composition root: `AppModule.configure()` in `src/api/dependencies/providers.py` using the `TypedBinder` facade — one line per binding: `typed_binder.bind_typed(UserRepository).to(SqlAlchemyUserRepository)`. A wrong implementation for a port is a pyrefly error at that line. Concrete classes (use cases): one `bind_self_typed(CreateUserUseCase)` line per operation. `AppModule.configure()` holds the cross-cutting binds and delegates each domain's repository + use-case binds to a `register(typed_binder)` function in `src/api/dependencies/bindings/<domain>.py` (API layer, so it may import the adapters; bind through `TypedBinder` — never plain tuples, which drop the static check).
+- Scopes chosen by what holds request state: `singleton` (engine, stateless services), `request` (session, transaction context, logger, user context), and **transient** (no scope) for stateless orchestrators — use cases and repositories. Transient repositories and use cases receive the request-scoped session by injection, so one request is one unit of work. The scope is entered per request by the `request_context` middleware (`src/api/middleware.py`) and disposes its objects on exit (LIFO; `aclose()` preferred, async `close()` awaited).
 - `@inject` REQUIRED on every implementation whose `__init__` takes dependencies (injector auto-wires from type hints; omitting it is a runtime `TypeError`). Construction logic lives in `@provider` methods on `AppModule`.
 - Routes/guards resolve via `Annotated[CreateUserUseCase, Injected(CreateUserUseCase)]` — a thin Depends over `app.state.injector`.
 - NO graph-completeness validation: a missing binding fails at runtime on first resolution.
