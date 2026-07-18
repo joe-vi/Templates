@@ -1,5 +1,3 @@
-from typing import Annotated
-
 from fastapi import APIRouter, HTTPException, status
 
 from src.api.dependencies.injected import Injected
@@ -7,8 +5,6 @@ from src.application.use_cases.user import user_contracts
 from src.application.use_cases.user.get_user_use_case import GetUserUseCase
 
 router = APIRouter()
-
-UseCaseDep = Annotated[GetUserUseCase, Injected(GetUserUseCase)]
 
 
 @router.get(
@@ -19,7 +15,7 @@ UseCaseDep = Annotated[GetUserUseCase, Injected(GetUserUseCase)]
         status.HTTP_404_NOT_FOUND: {"description": "User not found"},
     },
 )
-async def get_user(user_id: int, use_case: UseCaseDep) -> user_contracts.UserResponse:
+async def get_user(user_id: int, use_case: Injected[GetUserUseCase]) -> user_contracts.UserResponse:
     """Get a user by its unique identifier.
 
     Raises:

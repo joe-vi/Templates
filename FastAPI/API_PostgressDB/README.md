@@ -95,7 +95,7 @@ Invoke-WebRequest -Uri "https://github.com/joe-vi/Templates/archive/refs/heads/m
 │   │   │   ├── request_id_middleware.py    # request_id: binds X-Request-ID on the Logger, echoes it back
 │   │   │   └── registration.py             # register(app): adds every middleware in order — outermost last
 │   │   ├── dependencies/
-│   │   │   ├── injected.py                 # Injected() route-side accessor
+│   │   │   ├── injected.py                 # Injected[T] route-side accessor
 │   │   │   ├── providers.py                # composition root: AppModule (cross-cutting binds; calls each domain's register())
 │   │   │   ├── bindings/<domain>.py        # per-domain register(typed_binder): repository + use-case binds
 │   │   │   └── jwt_dependency.py           # JWT guard (get_current_user)
@@ -187,7 +187,7 @@ Invoke-WebRequest -Uri "https://github.com/joe-vi/Templates/archive/refs/heads/m
 - **Rule**: Adapters explicitly subclass their ports — the contract (and its docstrings) is defined once on the port and inherited everywhere
 
 ### 5. API Layer (`src/api/`)
-- **Routes**: URLs follow `/api/<entity>/<version>/<path>` (e.g. `/api/users/v1`, `/api/auth/v1/login`). One FastAPI route module per operation, each with its own `APIRouter()` and **resource-relative paths** (`""` for the collection root, `/{id}` for item routes — neither the `/users` segment nor the version is repeated per file), depending on its use case via `Annotated[CreateUserUseCase, Injected(CreateUserUseCase)]` and **returning response models** (FastAPI serialises them to camelCase); the entity's `router.py` carries the `/api` base (plus tags and JWT guard) and aggregates the operations with `include_router(op.router, prefix="/users/v1")`, so the version is per-endpoint — bump one endpoint to `/users/v2` without touching the others (`__init__.py` stays empty)
+- **Routes**: URLs follow `/api/<entity>/<version>/<path>` (e.g. `/api/users/v1`, `/api/auth/v1/login`). One FastAPI route module per operation, each with its own `APIRouter()` and **resource-relative paths** (`""` for the collection root, `/{id}` for item routes — neither the `/users` segment nor the version is repeated per file), depending on its use case via `use_case: Injected[CreateUserUseCase]` and **returning response models** (FastAPI serialises them to camelCase); the entity's `router.py` carries the `/api` base (plus tags and JWT guard) and aggregates the operations with `include_router(op.router, prefix="/users/v1")`, so the version is per-endpoint — bump one endpoint to `/users/v2` without touching the others (`__init__.py` stays empty)
 - **Dependencies**: `providers.py` is the composition root (ports → adapters); `jwt_dependency.py` is the JWT guard
 - **Bodies**: routes accept and return the application contracts directly — `ContractModel` gives camelCase JSON on the wire (and in OpenAPI) with snake_case Python attributes; only the generic operation envelopes live in `api/schemas/`
 - **Rule**: Wires adapters to ports in `dependencies/`; routes never call repositories directly

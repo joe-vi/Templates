@@ -1,5 +1,3 @@
-from typing import Annotated
-
 from fastapi import APIRouter, Response, status
 
 from src.api import result_status_maps
@@ -8,8 +6,6 @@ from src.api.schemas import operation_schema
 from src.application.use_cases.user.delete_user_use_case import DeleteUserUseCase
 
 router = APIRouter()
-
-UseCaseDep = Annotated[DeleteUserUseCase, Injected(DeleteUserUseCase)]
 
 
 @router.delete(
@@ -23,7 +19,7 @@ UseCaseDep = Annotated[DeleteUserUseCase, Injected(DeleteUserUseCase)]
         status.HTTP_500_INTERNAL_SERVER_ERROR: {"description": "Unexpected failure"},
     },
 )
-async def delete_user(user_id: int, response: Response, use_case: UseCaseDep) -> operation_schema.DeleteOperationResponse:
+async def delete_user(user_id: int, response: Response, use_case: Injected[DeleteUserUseCase]) -> operation_schema.DeleteOperationResponse:
     """Delete a user by its unique identifier."""
     result = await use_case.execute(user_id)
     response.status_code = result_status_maps.DELETE_STATUS_MAP[result]

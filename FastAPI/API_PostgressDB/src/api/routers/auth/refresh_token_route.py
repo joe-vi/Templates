@@ -1,5 +1,3 @@
-from typing import Annotated
-
 from fastapi import APIRouter, HTTPException, status
 
 from src.api.dependencies.injected import Injected
@@ -8,8 +6,6 @@ from src.application.use_cases.auth.refresh_token_use_case import RefreshTokenUs
 from src.domain.enums import operation_results
 
 router = APIRouter()
-
-UseCaseDep = Annotated[RefreshTokenUseCase, Injected(RefreshTokenUseCase)]
 
 
 @router.post(
@@ -20,7 +16,9 @@ UseCaseDep = Annotated[RefreshTokenUseCase, Injected(RefreshTokenUseCase)]
         status.HTTP_401_UNAUTHORIZED: {"description": "Invalid or expired refresh token"},
     },
 )
-async def refresh_token(refresh_token_request: auth_contracts.RefreshTokenRequest, use_case: UseCaseDep) -> auth_contracts.TokenResponse:
+async def refresh_token(
+    refresh_token_request: auth_contracts.RefreshTokenRequest, use_case: Injected[RefreshTokenUseCase]
+) -> auth_contracts.TokenResponse:
     """Issue a new access and refresh token pair from a valid refresh token.
 
     Raises:
