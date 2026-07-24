@@ -23,8 +23,8 @@ Invoke-WebRequest -Uri "https://github.com/joe-vi/Templates/archive/refs/heads/m
 - **Async Database**: Asynchronous PostgreSQL operations using SQLAlchemy 2.0+ and asyncpg
 - **JWT Authentication**: Access and refresh token pair with configurable expiry
 - **Dependency Injection**: `injector` with an in-house typed facade — one line binds implementation, port, and scope (`bind_typed(UserRepository).to(SqlAlchemyUserRepository, scope=request)`), constructors auto-wired via `@inject`, and a mismatched implementation is a pyrefly error at the binding line
-- **Request-Scoped Sessions**: A single `AsyncSession` per request (a request-scoped provider, disposed automatically on request end), shared by every adapter in that request
-- **Unit of Work**: Mutating use cases own the transaction boundary via the `TransactionContext` port — commit only on all-success, rollback-unless-committed; operations spanning several repositories inside one `begin()` block are atomic
+- **Connection Factory**: Repositories inject a `ConnectionFactory` — `read()` hands out a fresh short-lived session (connection returned the instant its block exits), `write()` hands out the request write unit of work; there is no shared request-scoped `AsyncSession`
+- **Unit of Work**: The write session is owned by `SqlAlchemyTransactionContext`, created per outermost `begin()` and **auto-committed on a clean exit** (there is no `commit()`) — a single repository write self-commits, so a single-write use case needs no transaction context; a use case opens `begin()` only to make several writes atomic. A DB error mid-unit rolls the whole unit back and every following write in it fails fast
 - **Ports & Adapters**: Collaborators are defined as `typing.Protocol` ports and implemented by mechanism-qualified adapters (`SqlAlchemyUserRepository`, `BcryptPasswordHasher`, `JwtTokenService`, `JsonLogger`) that subclass their port and inherit its docstrings, so every contract is documented exactly once and IDE hover shows it everywhere
 - **Fully Testable API Layer**: Route tests bind an `AsyncMock(spec=CreateUserUseCase)` in a test injector module — no database or adapters involved
 - **Role-Based Access**: User roles (`admin`, `user`) and statuses (`active`, `inactive`) stored as lowercase enums
@@ -81,7 +81,9 @@ Invoke-WebRequest -Uri "https://github.com/joe-vi/Templates/archive/refs/heads/m
 │   │   ├── database/
 │   │   │   ├── base.py                     # SQLAlchemy DeclarativeBase
 │   │   │   ├── session.py                  # create_engine / create_session_factory
-│   │   │   ├── sqlalchemy_transaction_context.py   # Unit-of-work adapter
+│   │   │   ├── connection_factory.py       # ConnectionFactory seam: read() / write()
+│   │   │   ├── sqlalchemy_connection_factory.py    # ConnectionFactory adapter
+│   │   │   ├── sqlalchemy_transaction_context.py   # write unit of work: auto-commit on clean exit, fail-fast
 │   │   │   └── models/
 │   │   │       └── user_model.py           # ORM model for users table
 │   │   ├── logging/
@@ -180,8 +182,8 @@ Invoke-WebRequest -Uri "https://github.com/joe-vi/Templates/archive/refs/heads/m
 
 ### 4. Infrastructure Layer (`src/infrastructure/`)
 - **DI machinery** (`di/`): the ContextVar-backed request scope and the pyrefly-checked `TypedBinder` — framework plumbing, FastAPI-agnostic
-- **Database**: `session.py` builds the engine + `async_sessionmaker`; the session is provided per request (no custom factory wrapper, no shared `ContextVar`)
-- **Repository Adapters**: `SqlAlchemyUserRepository` subclasses the `UserRepository` port and takes an `AsyncSession`; mutations flush and map DB errors to result enums — they never commit; the use case owns the boundary via `SqlAlchemyTransactionContext` (commit on all-success, rollback otherwise)
+- **Database**: `session.py` builds the engine + `async_sessionmaker` (both singletons); repositories obtain sessions through the `ConnectionFactory` (`read()` short-lived, `write()` the request unit of work) — there is no shared request-scoped `AsyncSession` and no shared `ContextVar`
+- **Repository Adapters**: `SqlAlchemyUserRepository` subclasses the `UserRepository` port and injects a `ConnectionFactory` — reads run in `read()`, writes in `write()` (with the `try`/`except` outside the `write()` block); mutations flush and map DB errors to result enums, and they never commit or roll back. `SqlAlchemyTransactionContext` owns the boundary: auto-commit on a clean exit, rollback on exception, fail-fast on a poisoned unit
 - **Auth/Logging Adapters**: `BcryptPasswordHasher`, `JwtTokenService`, `JsonLogger` (request-scoped bound logger — the `request_id` middleware binds a per-request `X-Request-ID` via `bind_request_id`, and it reads `user_id` from `UserContext`), `RequestUserContext` (request-scoped caller identity, populated once by the JWT guard; reads return `None` when unauthenticated)
 - **Logging output**: `configure_logging()` installs the JSON handler on the **root** logger at startup, so application, uvicorn, and third-party lines share one machine-parseable format, each tagged with its source `logger`. Uvicorn's own access log is disabled in favour of the `access_log` middleware, which emits a `request.completed` entry carrying `method`, `path`, `status_code`, `duration_ms`, and the `request_id`/`user_id` correlation fields
 - **Rule**: Adapters explicitly subclass their ports — the contract (and its docstrings) is defined once on the port and inherited everywhere
@@ -330,8 +332,8 @@ uv run alembic downgrade -1                              # Roll back one step
 ## Adding New Features
 
 1. **Domain**: Add an aggregate root with invariants + behaviour in `src/domain/entities/<name>/` and a repository **Protocol** port in `src/domain/repositories/<name>/<name>_repository.py` (clean name, e.g. `OrderRepository`)
-2. **Application**: Add `<name>_contracts.py` (`*Request` / `*Response` models on `ContractModel`), converter functions, and one concrete use case class per operation (single `execute` method) in `src/application/use_cases/<name>/` — mutating use cases inject `TransactionContext`, wrap the mutation in `begin()`, commit only on success (several repository calls in one block are atomic)
-3. **Infrastructure**: Add the ORM model in `src/infrastructure/database/models/` and a `sqlalchemy_<name>_repository.py` adapter (subclasses the port, takes an `AsyncSession`) in `src/infrastructure/repositories/<name>/`
+2. **Application**: Add `<name>_contracts.py` (`*Request` / `*Response` models on `ContractModel`), converter functions, and one concrete use case class per operation (single `execute` method) in `src/application/use_cases/<name>/` — a single-write use case calls the repository directly (its `write()` self-commits); a multi-write use case injects `TransactionContext` and wraps the writes in one `begin()` block for atomicity (auto-commit on clean exit, `rollback()` to abort)
+3. **Infrastructure**: Add the ORM model in `src/infrastructure/database/models/` and a `sqlalchemy_<name>_repository.py` adapter (subclasses the port, injects a `ConnectionFactory`) in `src/infrastructure/repositories/<name>/`
 4. **API**: Add one route module per operation in `src/api/routers/<name>/`, each with its own `APIRouter()` and resource-relative paths (`""` / `/{id}`), aggregated by `router.py` (`prefix="/api"`, tags, guard) via `include_router(op.router, prefix="/<name>/v1")` — giving `/api/<name>/v1/...` with the version per-endpoint; routes depend on their use case and accept/return the contracts directly (`response_model=<Entity>Response`) — no per-entity schemas or converters
 5. **Bindings**: Add a `src/api/dependencies/bindings/<name>.py` with a `register(typed_binder)` that binds the domain's repository and use cases (transient), and call it from `AppModule.configure()` (which keeps the cross-cutting binds). Constructors are auto-wired via `@inject`; a wrong implementation is a pyrefly error:
    ```python

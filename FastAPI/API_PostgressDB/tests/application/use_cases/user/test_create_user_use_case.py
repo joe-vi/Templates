@@ -5,14 +5,11 @@ from src.application.use_cases.user.create_user_use_case import CreateUserUseCas
 from src.domain.enums import operation_results
 from src.domain.repositories.user.user_repository import UserRepository
 from src.ports.password_hasher import PasswordHasher
-from tests.application.use_cases.user.conftest import FakeTransactionContext
 
 
 @pytest.fixture
-def use_case(
-    mock_repository: UserRepository, mock_password_hasher: PasswordHasher, fake_transaction_context: FakeTransactionContext
-) -> CreateUserUseCase:
-    return CreateUserUseCase(repository=mock_repository, password_hasher=mock_password_hasher, transaction_context=fake_transaction_context)
+def use_case(mock_repository: UserRepository, mock_password_hasher: PasswordHasher) -> CreateUserUseCase:
+    return CreateUserUseCase(repository=mock_repository, password_hasher=mock_password_hasher)
 
 
 def _make_create_user_request() -> user_contracts.CreateUserRequest:
@@ -62,23 +59,3 @@ class TestCreateUser:
 
         assert result == operation_results.CreateResult.CONCURRENCY_ERROR
         assert entity_id is None
-
-
-class TestCreateUserTransactionBoundary:
-    """The use case commits only on success and rolls back otherwise."""
-
-    async def test_success_commits_transaction(self, use_case, mock_repository, fake_transaction_context):
-        mock_repository.create.return_value = (operation_results.CreateResult.SUCCESS, 1)
-
-        await use_case.execute(_make_create_user_request())
-
-        assert fake_transaction_context.transaction.is_committed is True
-        assert fake_transaction_context.is_rolled_back is False
-
-    async def test_failure_rolls_back_without_commit(self, use_case, mock_repository, fake_transaction_context):
-        mock_repository.create.return_value = (operation_results.CreateResult.UNIQUE_CONSTRAINT_ERROR, None)
-
-        await use_case.execute(_make_create_user_request())
-
-        assert fake_transaction_context.transaction.is_committed is False
-        assert fake_transaction_context.is_rolled_back is True
