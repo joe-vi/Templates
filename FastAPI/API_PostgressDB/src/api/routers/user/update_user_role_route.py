@@ -10,8 +10,6 @@ from src.domain.enums import user_enum
 
 router = APIRouter()
 
-UseCaseDep = Annotated[UpdateUserRoleUseCase, Injected(UpdateUserRoleUseCase)]
-
 
 @router.patch(
     "/{user_id}/role",
@@ -28,7 +26,7 @@ async def update_user_role(
     user_id: int,
     role: Annotated[user_enum.UserRole, Body(embed=True, description="The new role to assign to the user")],
     response: Response,
-    use_case: UseCaseDep,
+    use_case: Injected[UpdateUserRoleUseCase],
 ) -> operation_schema.UpdateOperationResponse:
     """Update the role of a user."""
     result = await use_case.execute(user_id, role)

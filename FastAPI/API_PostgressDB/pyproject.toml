@@ -29,6 +29,7 @@ dev = [
     "pyrefly>=1.1.0",
     "aiosqlite>=0.20.0",
     "types-passlib>=1.7.7",
+    "pre-commit>=4.0.0",
 ]
 
 [build-system]
@@ -47,6 +48,7 @@ dev = [
     "pyrefly>=1.1.0",
     "aiosqlite>=0.20.0",
     "types-passlib>=1.7.7",
+    "pre-commit>=4.0.0",
 ]
 
 [tool.ruff]

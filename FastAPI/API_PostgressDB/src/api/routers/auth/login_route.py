@@ -1,5 +1,3 @@
-from typing import Annotated
-
 from fastapi import APIRouter, HTTPException, status
 
 from src.api.dependencies.injected import Injected
@@ -8,8 +6,6 @@ from src.application.use_cases.auth.login_use_case import LoginUseCase
 from src.domain.enums import operation_results
 
 router = APIRouter()
-
-UseCaseDep = Annotated[LoginUseCase, Injected(LoginUseCase)]
 
 
 @router.post(
@@ -21,7 +17,7 @@ UseCaseDep = Annotated[LoginUseCase, Injected(LoginUseCase)]
         status.HTTP_403_FORBIDDEN: {"description": "User account is inactive"},
     },
 )
-async def login(login_request: auth_contracts.LoginRequest, use_case: UseCaseDep) -> auth_contracts.TokenResponse:
+async def login(login_request: auth_contracts.LoginRequest, use_case: Injected[LoginUseCase]) -> auth_contracts.TokenResponse:
     """Authenticate a user and return a JWT access and refresh token pair.
 
     Raises:

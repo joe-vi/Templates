@@ -12,8 +12,8 @@ _security = HTTPBearer()
 
 async def get_current_user(
     credentials: Annotated[HTTPAuthorizationCredentials, Depends(_security)],
-    token_service: Annotated[TokenService, Injected(TokenService)],
-    user_context: Annotated[UserContext, Injected(UserContext)],
+    token_service: Injected[TokenService],
+    user_context: Injected[UserContext],
 ) -> TokenClaims:
     """Validate the Bearer JWT access token and return its claims.
 

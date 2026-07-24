@@ -4,17 +4,15 @@ from src.application.use_cases.user import user_contracts, user_converter
 from src.domain.enums import operation_results
 from src.domain.repositories.user.user_repository import UserRepository
 from src.ports.password_hasher import PasswordHasher
-from src.ports.transaction_context import TransactionContext
 
 
 class CreateUserUseCase:
     """Creates a new user."""
 
     @inject
-    def __init__(self, repository: UserRepository, password_hasher: PasswordHasher, transaction_context: TransactionContext) -> None:
+    def __init__(self, repository: UserRepository, password_hasher: PasswordHasher) -> None:
         self._repository = repository
         self._password_hasher = password_hasher
-        self._transaction_context = transaction_context
 
     async def execute(self, create_user_request: user_contracts.CreateUserRequest) -> tuple[operation_results.CreateResult, int | None]:
         """Create a new user with a securely hashed password.
@@ -28,9 +26,4 @@ class CreateUserUseCase:
         """
         hashed_password = self._password_hasher.hash(create_user_request.password)
         user = user_converter.to_entity(create_user_request, hashed_password)
-
-        async with self._transaction_context.begin() as transaction:
-            result, user_id = await self._repository.create(user)
-            if result == operation_results.CreateResult.SUCCESS:
-                await transaction.commit()
-        return (result, user_id)
+        return await self._repository.create(user)

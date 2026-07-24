@@ -7,7 +7,9 @@ from src.config.settings import Settings, get_settings
 from src.infrastructure.auth.bcrypt_password_hasher import BcryptPasswordHasher
 from src.infrastructure.auth.jwt_token_service import JwtTokenService
 from src.infrastructure.auth.request_user_context import RequestUserContext
+from src.infrastructure.database.connection_factory import ConnectionFactory
 from src.infrastructure.database.session import create_engine, create_session_factory
+from src.infrastructure.database.sqlalchemy_connection_factory import SqlAlchemyConnectionFactory
 from src.infrastructure.database.sqlalchemy_transaction_context import SqlAlchemyTransactionContext
 from src.infrastructure.di.request_scope import request
 from src.infrastructure.di.typed_binder import TypedBinder
@@ -33,7 +35,12 @@ class AppModule(Module):
         # Per-request collaborators holding request state.
         typed_binder.bind_typed(Logger).to(JsonLogger, scope=request)
         typed_binder.bind_typed(UserContext).to(RequestUserContext, scope=request)
-        typed_binder.bind_typed(TransactionContext).to(SqlAlchemyTransactionContext, scope=request)
+
+        # Unit of work: the write scope (SqlAlchemyTransactionContext) is request-scoped — one write
+        # session per request — bound to itself and to the TransactionContext port via the two
+        # providers below (both returning the same instance). The ConnectionFactory adapter is
+        # stateless, so it stays transient and shares that one scope.
+        typed_binder.bind_typed(ConnectionFactory).to(SqlAlchemyConnectionFactory)
 
         # Per-domain repositories and use cases (transient).
         user_bindings.register(typed_binder)
@@ -58,8 +65,15 @@ class AppModule(Module):
 
     @request
     @provider
-    def provide_session(self, session_factory: async_sessionmaker[AsyncSession]) -> AsyncSession:
-        # Request-scoped: every repository and the transaction context in one
-        # request receive this same session (a shared unit of work). Disposed
-        # at request end by the scope teardown via AsyncSession.aclose().
-        return session_factory()
+    def provide_transaction_context(self, session_factory: async_sessionmaker[AsyncSession]) -> SqlAlchemyTransactionContext:
+        # Request-scoped write unit of work. Its session is created and closed per outermost
+        # begin(); the instance holds no session between scopes (unit lives in a per-task ContextVar).
+        return SqlAlchemyTransactionContext(session_factory)
+
+    @request
+    @provider
+    def provide_transaction_context_port(self, scope: SqlAlchemyTransactionContext) -> TransactionContext:
+        # The port and the concrete must resolve to the same per-request instance so a use case's
+        # begin() and the repository's ConnectionFactory.write() nest on one write session; returning
+        # the concrete keeps them identical.
+        return scope
